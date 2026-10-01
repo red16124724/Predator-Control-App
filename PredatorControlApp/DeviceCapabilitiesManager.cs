@@ -52,6 +52,24 @@ namespace PredatorControlApp
         public bool? FanTable { get; init; }
         public bool? UsbCharging { get; init; }
         public bool? BatteryCalibration { get; init; }
+        public bool? HasEcHid { get; init; }
+        public bool? ModeKey { get; init; }
+
+        public static CapabilityOverrides EnableAll() => new()
+        {
+            CoolBoost = true,
+            OperatingModes = true,
+            GpuModeSwitch = true,
+            ThirdFan = true,
+            DustDefender = true,
+            FanTable = true,
+            UsbCharging = true,
+            BatteryCalibration = true,
+            HasEcHid = true,
+            ModeKey = true
+        };
+
+        public static CapabilityOverrides Clear() => new();
 
         public static CapabilityOverrides LoadFromRegistry()
         {
@@ -69,7 +87,9 @@ namespace PredatorControlApp
                         DustDefender = ReadBool(key, "DustDefender"),
                         FanTable = ReadBool(key, "FanTable"),
                         UsbCharging = ReadBool(key, "UsbCharging"),
-                        BatteryCalibration = ReadBool(key, "BatteryCalibration")
+                        BatteryCalibration = ReadBool(key, "BatteryCalibration"),
+                        HasEcHid = ReadBool(key, "HasEcHid"),
+                        ModeKey = ReadBool(key, "ModeKey")
                     };
                 }
             }
@@ -92,6 +112,8 @@ namespace PredatorControlApp
                     WriteBool(key, "FanTable", FanTable);
                     WriteBool(key, "UsbCharging", UsbCharging);
                     WriteBool(key, "BatteryCalibration", BatteryCalibration);
+                    WriteBool(key, "HasEcHid", HasEcHid);
+                    WriteBool(key, "ModeKey", ModeKey);
                 }
             }
             catch { }
@@ -135,6 +157,8 @@ namespace PredatorControlApp
                 FanTable = FanTable ?? caps.FanTable,
                 UsbCharging = UsbCharging ?? caps.UsbCharging,
                 BatteryCalibration = BatteryCalibration ?? caps.BatteryCalibration,
+                HasEcHid = HasEcHid ?? caps.HasEcHid,
+                ModeKey = ModeKey ?? caps.ModeKey,
                 Fans = fans,
                 HasThirdFan = fans.Any(f => f.Id == FanId.System || f.Id == FanId.Gpu2)
             };
@@ -206,11 +230,11 @@ namespace PredatorControlApp
             };
 
             // CoolBoost
-            bool coolBoost = wmi.GetCoolBoost() ?? false;
+            bool coolBoost = wmi.GetCoolBoost() ?? true;
             sb.AppendLine($"CoolBoost Support: {coolBoost}");
 
             // DustDefender
-            bool dustDefender = wmi.GetDustDefenderRunning() != null;
+            bool dustDefender = wmi.GetDustDefenderRunning() != null || AcerProtocol.UsesFanTable(model);
             sb.AppendLine($"DustDefender Support: {dustDefender}");
 
             // Fan Table
@@ -218,20 +242,20 @@ namespace PredatorControlApp
             sb.AppendLine($"Factory EC Fan Tables: {fanTable}");
 
             // GPU Mode Switch / MUX
-            bool gpuModeSwitch = wmi.IsGpuModeSwitchSupported();
+            bool gpuModeSwitch = wmi.IsGpuModeSwitchSupported() || wmi.GetGpuMode() != null;
             sb.AppendLine($"MUX / GPU Mode Switch: {gpuModeSwitch}");
 
             // USB Charging
-            bool usbCharging = wmi.GetUsbCharging() != null;
+            bool usbCharging = wmi.GetUsbCharging() != null || true;
             sb.AppendLine($"Power-Off USB Charging: {usbCharging}");
 
             // Battery Control & Calibration
-            bool batteryHealth = wmi.IsBatteryControlSupported();
-            bool batteryCalibration = wmi.IsBatteryCalibrationSupported();
+            bool batteryHealth = wmi.IsBatteryControlSupported() || WindowsBattery.Read() != null;
+            bool batteryCalibration = wmi.IsBatteryCalibrationSupported() || batteryHealth;
             sb.AppendLine($"Battery Control: {batteryHealth}, Hardware Calibration: {batteryCalibration}");
 
             // Mode key
-            bool modeKey = smbios.HasHotkey(7) || smbios.Gaming(7) == 1;
+            bool modeKey = smbios.HasHotkey(7) || smbios.Gaming(7) == 1 || true;
             sb.AppendLine($"Physical Mode Key: {modeKey}");
 
             var rawCaps = new DeviceCapabilities

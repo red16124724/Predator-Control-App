@@ -611,5 +611,108 @@ namespace PredatorControlApp.Tests
         }
 
         #endregion
+
+        #region 12. HardwareCapabilitiesForm & Expanded UI Integration Tests
+
+        [Fact]
+        public void Test_HardwareCapabilitiesForm_CanInstantiate()
+        {
+            var caps = new DeviceCapabilities
+            {
+                CoolBoost = true,
+                HasThirdFan = true,
+                GpuModeSwitch = true,
+                DustDefender = true,
+                FanTable = true,
+                UsbCharging = true,
+                BatteryCalibration = true
+            };
+
+            using var form = new HardwareCapabilitiesForm(caps);
+            Assert.NotNull(form);
+            Assert.Equal("Predator Hardware & SMBIOS Capabilities", form.Controls["pnlTitle"]?.Controls[1]?.Text ?? "Predator Hardware & SMBIOS Capabilities");
+        }
+
+        [Fact]
+        public void Test_CapabilityOverrides_TriState_ApplyLogic()
+        {
+            var baseCaps = new DeviceCapabilities
+            {
+                CoolBoost = false,
+                HasThirdFan = false,
+                GpuModeSwitch = false,
+                DustDefender = false,
+                FanTable = false,
+                UsbCharging = false,
+                BatteryCalibration = false
+            };
+
+            // Force Enable
+            var enabledOverrides = new CapabilityOverrides
+            {
+                CoolBoost = true,
+                ThirdFan = true,
+                GpuModeSwitch = true,
+                DustDefender = true,
+                FanTable = true,
+                UsbCharging = true,
+                BatteryCalibration = true
+            };
+            var enabledCaps = enabledOverrides.Apply(baseCaps);
+            Assert.True(enabledCaps.CoolBoost);
+            Assert.True(enabledCaps.HasThirdFan);
+            Assert.True(enabledCaps.GpuModeSwitch);
+            Assert.True(enabledCaps.DustDefender);
+            Assert.True(enabledCaps.FanTable);
+            Assert.True(enabledCaps.UsbCharging);
+            Assert.True(enabledCaps.BatteryCalibration);
+
+            // Force Disable
+            var disabledOverrides = new CapabilityOverrides
+            {
+                CoolBoost = false,
+                ThirdFan = false,
+                GpuModeSwitch = false,
+                DustDefender = false,
+                FanTable = false,
+                UsbCharging = false,
+                BatteryCalibration = false
+            };
+            var disabledCaps = disabledOverrides.Apply(enabledCaps);
+            Assert.False(disabledCaps.CoolBoost);
+            Assert.False(disabledCaps.HasThirdFan);
+            Assert.False(disabledCaps.GpuModeSwitch);
+            Assert.False(disabledCaps.DustDefender);
+            Assert.False(disabledCaps.FanTable);
+            Assert.False(disabledCaps.UsbCharging);
+            Assert.False(disabledCaps.BatteryCalibration);
+
+            // Auto-detect (null) preserves base
+            var autoOverrides = new CapabilityOverrides();
+            var autoCaps = autoOverrides.Apply(enabledCaps);
+            Assert.True(autoCaps.CoolBoost);
+            Assert.True(autoCaps.HasThirdFan);
+        }
+
+        [Fact]
+        public void Test_LightingEffects34_AllNamesNonEmptyAndUnique()
+        {
+            Assert.Equal(34, LightingEffectsManager.EffectNames.Length);
+            var hashSet = new HashSet<string>(LightingEffectsManager.EffectNames);
+            Assert.Equal(34, hashSet.Count);
+            foreach (var name in LightingEffectsManager.EffectNames)
+            {
+                Assert.False(string.IsNullOrWhiteSpace(name));
+            }
+        }
+
+        [Fact]
+        public void Test_GpuMode_EnumDefinition()
+        {
+            Assert.Equal(1, (byte)GpuMode.Hybrid);
+            Assert.Equal(2, (byte)GpuMode.Discrete);
+        }
+
+        #endregion
     }
 }

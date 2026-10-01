@@ -253,19 +253,32 @@ namespace PredatorControlApp
         private bool _isDustDefenderRunning;
 
         private Label? _lblSysFanRpm;
+        private Label? _lblFanLockStatus;
+        private Label? _lblGpuSleepBadge;
+        private Label? _lblProtocolBadge;
         private HistoryGraphControl? _cpuHistoryGraph;
         private HistoryGraphControl? _gpuHistoryGraph;
+
+        private PredatorButton? _btnLockCpu;
+        private PredatorButton? _btnLockGpu;
+        private PredatorButton? _btnLockSys;
+        private bool _isCpuFanLocked;
+        private bool _isGpuFanLocked;
+        private bool _isSysFanLocked;
 
         private PredatorSwitch? _switchCoolBoost;
         private PredatorButton? _btnDustDefender;
         private PredatorDropDown? _cboFanTable;
-        private PredatorDropDown? _cboGpuMode;
+        private PredatorButton? _btnGpuHybrid;
+        private PredatorButton? _btnGpuDiscrete;
+        private PredatorButton? _activeGpuModeBtn;
         private PredatorSwitch? _switchUsbCharging;
         private PredatorDropDown? _cboUsbFloor;
         private PredatorButton? _btnBatteryCalibration;
         private PredatorDropDown? _cboBacklightTimeout;
         private PredatorDropDown? _cboTheme;
         private PredatorButton? _btnDiagnostics;
+        private PredatorButton? _btnHardwareOverrides;
 
         private static readonly string[] RgbModeNames = LightingEffectsManager.EffectNames;
 
@@ -1208,6 +1221,8 @@ namespace PredatorControlApp
 
             MakeLabel("GPU:", _formW / 2 + S(10), y, FontBody, SubHeaderColor);
             _lblGpuTemp = MakeLabel("39°C", _formW / 2 + S(46), y, FontBodyBold, Color.White);
+            _lblGpuSleepBadge = MakeLabel("[ 💤 D3Cold ]", _formW / 2 + S(88), y, FontSectionHeader, Color.FromArgb(120, 200, 255));
+            _lblGpuSleepBadge.Visible = false;
 
             y += S(24);
             MakeLabel("CPU FAN:", pad, y, FontBody, SubHeaderColor);
@@ -1217,18 +1232,18 @@ namespace PredatorControlApp
             _lblGpuRpm = MakeLabel("-- RPM", _formW / 2 + S(74), y, FontBodyBold, Color.White);
 
             y += S(24);
+            MakeLabel("SYS FAN:", pad, y, FontBody, SubHeaderColor);
+            _lblSysFanRpm = MakeLabel("-- RPM", pad + S(64), y, FontBodyBold, Color.White);
+
+            MakeLabel("PROTOCOL:", _formW / 2 + S(10), y, FontBody, SubHeaderColor);
+            _lblProtocolBadge = MakeLabel(_wmi.EcHid != null && _wmi.EcHid.IsOpen ? "⚡ Direct EC HID" : "🔌 Acer WMI", _formW / 2 + S(80), y, FontBodyBold, AccentColor);
+
+            y += S(24);
             MakeLabel("Fan speed:", pad, y, FontBody, SubHeaderColor);
             _lblFanStatus = MakeLabel("Auto", pad + S(74), y, FontBodyBold, Color.White);
 
             MakeLabel("Power:", _formW / 2 + S(10), y, FontBody, SubHeaderColor);
             _lblPowerStatus = MakeLabel("Plugged In", _formW / 2 + S(56), y, FontBodyBold, Color.White);
-
-            if (_capabilities.HasThirdFan)
-            {
-                y += S(24);
-                MakeLabel("SYS FAN:", pad, y, FontBody, SubHeaderColor);
-                _lblSysFanRpm = MakeLabel("-- RPM", pad + S(64), y, FontBodyBold, Color.White);
-            }
 
             y += S(24);
             int graphH = S(55);
@@ -1323,7 +1338,9 @@ namespace PredatorControlApp
             y += S(30) + S(20);
             MakeSectionHeader("FAN CONTROL", pad, y);
             
-            y += S(24);
+            y += S(20);
+            _lblFanLockStatus = MakeLabel("🔓 FanLock: Channels Unlocked (Manual & Curve Control Ready)", pad, y, FontHeaderLight, AccentColor);
+            y += S(10);
             int fanBtnW = (contentW - 2 * gap) / 3;
             _btnAutoFan = MakeButton("Auto", pad, y, fanBtnW, btnH);
             _btnMaxFan = MakeButton("Max", pad + (fanBtnW + gap), y, fanBtnW, btnH);
@@ -1378,17 +1395,14 @@ namespace PredatorControlApp
             };
 
             y += S(30) + S(12);
-            int fanCount = _capabilities.HasThirdFan ? 3 : 2;
+            int fanCount = 3;
             int fanSliderW = (contentW - gap * (fanCount - 1)) / fanCount;
             _lblCpuFanSpeedHdr = MakeLabel("CPU FAN: 50%", pad, y, FontSectionHeader, SubHeaderColor);
             _lblGpuFanSpeedHdr = MakeLabel("GPU FAN: 50%", pad + fanSliderW + gap, y, FontSectionHeader, SubHeaderColor);
+            _lblSysFanSpeedHdr = MakeLabel("SYS FAN: 50%", pad + (fanSliderW + gap) * 2, y, FontSectionHeader, SubHeaderColor);
             _lblCpuFanSpeedHdr.Visible = false;
             _lblGpuFanSpeedHdr.Visible = false;
-            if (_capabilities.HasThirdFan)
-            {
-                _lblSysFanSpeedHdr = MakeLabel("SYS FAN: 50%", pad + (fanSliderW + gap) * 2, y, FontSectionHeader, SubHeaderColor);
-                _lblSysFanSpeedHdr.Visible = false;
-            }
+            _lblSysFanSpeedHdr.Visible = false;
 
             y += S(24);
             _cpuFanSlider = new PredatorSlider
@@ -1405,33 +1419,29 @@ namespace PredatorControlApp
                 Minimum  = 10, Maximum = 100, Value = 50,
                 Visible  = false
             };
+            _sysFanSlider = new PredatorSlider
+            {
+                Location = new Point(pad + (fanSliderW + gap) * 2, y),
+                Size     = new Size(fanSliderW, S(28)),
+                Minimum  = 10, Maximum = 100, Value = 50,
+                Visible  = false
+            };
             _contentPanel.Controls.Add(_cpuFanSlider);
             _contentPanel.Controls.Add(_gpuFanSlider);
+            _contentPanel.Controls.Add(_sysFanSlider);
 
-            if (_capabilities.HasThirdFan)
+            _sysFanSlider.ValueChanged += (s, e) =>
             {
-                _sysFanSlider = new PredatorSlider
-                {
-                    Location = new Point(pad + (fanSliderW + gap) * 2, y),
-                    Size     = new Size(fanSliderW, S(28)),
-                    Minimum  = 10, Maximum = 100, Value = 50,
-                    Visible  = false
-                };
-                _contentPanel.Controls.Add(_sysFanSlider);
+                if (_lblSysFanSpeedHdr != null) _lblSysFanSpeedHdr.Text = $"SYS FAN: {_sysFanSlider.Value}%";
+            };
 
-                _sysFanSlider.ValueChanged += (s, e) =>
-                {
-                    if (_lblSysFanSpeedHdr != null) _lblSysFanSpeedHdr.Text = $"SYS FAN: {_sysFanSlider.Value}%";
-                };
-
-                _sysFanSlider.ValueCommitted += (s, e) =>
-                {
-                    int val = _sysFanSlider.Value;
-                    Task.Run(() => _wmi.SetSystemFanSpeed((byte)val));
-                    SaveState("FanSpeedSys", val);
-                    SaveFanSpeedForProfile("Sys", val);
-                };
-            }
+            _sysFanSlider.ValueCommitted += (s, e) =>
+            {
+                int val = _sysFanSlider.Value;
+                Task.Run(() => _wmi.SetSystemFanSpeed((byte)val));
+                SaveState("FanSpeedSys", val);
+                SaveFanSpeedForProfile("Sys", val);
+            };
 
             _cpuFanSlider.ValueChanged   += (s, e) => _lblCpuFanSpeedHdr.Text = $"CPU FAN: {_cpuFanSlider.Value}%";
             _gpuFanSlider.ValueChanged   += (s, e) => _lblGpuFanSpeedHdr.Text = $"GPU FAN: {_gpuFanSlider.Value}%";
@@ -1451,7 +1461,41 @@ namespace PredatorControlApp
                 SaveFanSpeedForProfile("Gpu", val);
             };
 
-            y += S(28) + S(8);
+            y += S(28) + S(6);
+            int lockBtnW = (contentW - gap * 2) / 3;
+            _btnLockCpu = MakeButton("🔓 Lock CPU", pad, y, lockBtnW, S(26));
+            _btnLockGpu = MakeButton("🔓 Lock GPU", pad + lockBtnW + gap, y, lockBtnW, S(26));
+            _btnLockSys = MakeButton("🔓 Lock SYS", pad + (lockBtnW + gap) * 2, y, lockBtnW, S(26));
+            _btnLockCpu.Visible = false;
+            _btnLockGpu.Visible = false;
+            _btnLockSys.Visible = false;
+
+            _btnLockCpu.Click += (s, e) =>
+            {
+                _isCpuFanLocked = !_isCpuFanLocked;
+                _btnLockCpu.Text = _isCpuFanLocked ? "🔒 CPU Locked" : "🔓 Lock CPU";
+                _btnLockCpu.ForeColor = _isCpuFanLocked ? AccentColor : Color.White;
+                _cpuFanSlider.Enabled = !_isCpuFanLocked && !_fanCurveEnabled;
+                UpdateFanLockStatus();
+            };
+            _btnLockGpu.Click += (s, e) =>
+            {
+                _isGpuFanLocked = !_isGpuFanLocked;
+                _btnLockGpu.Text = _isGpuFanLocked ? "🔒 GPU Locked" : "🔓 Lock GPU";
+                _btnLockGpu.ForeColor = _isGpuFanLocked ? AccentColor : Color.White;
+                _gpuFanSlider.Enabled = !_isGpuFanLocked && !_fanCurveEnabled;
+                UpdateFanLockStatus();
+            };
+            _btnLockSys.Click += (s, e) =>
+            {
+                _isSysFanLocked = !_isSysFanLocked;
+                _btnLockSys.Text = _isSysFanLocked ? "🔒 SYS Locked" : "🔓 Lock SYS";
+                _btnLockSys.ForeColor = _isSysFanLocked ? AccentColor : Color.White;
+                if (_sysFanSlider != null) _sysFanSlider.Enabled = !_isSysFanLocked && !_fanCurveEnabled;
+                UpdateFanLockStatus();
+            };
+
+            y += S(26) + S(8);
             int subBtnW = (contentW - gap) / 2;
             _btnFixedSpeed = MakeButton("Fixed Speed", pad, y, subBtnW, btnH);
             _btnFanCurve = MakeButton("Curve", pad + subBtnW + gap, y, subBtnW, btnH);
@@ -1520,88 +1564,79 @@ namespace PredatorControlApp
                 OpenFanCurveEditor();
             };
 
-            if (_capabilities.CoolBoost)
+            y += btnH + S(12);
+            int cbSwitchH = S(30);
+            var lblCoolBoost = MakeLabel("Acer CoolBoost (Max Hardware Fan Boost)", pad, y, FontBody, Color.White);
+            CenterV(lblCoolBoost, y, cbSwitchH);
+            _switchCoolBoost = new PredatorSwitch
             {
-                y += btnH + S(12);
-                int cbSwitchH = S(30);
-                var lblCoolBoost = MakeLabel("Acer CoolBoost (Max Hardware Fan Boost)", pad, y, FontBody, Color.White);
-                CenterV(lblCoolBoost, y, cbSwitchH);
-                _switchCoolBoost = new PredatorSwitch
-                {
-                    Location = new Point(_formW - pad - S(48), y),
-                    Size = new Size(S(48), cbSwitchH)
-                };
-                _switchCoolBoost.Checked = _wmi.GetCoolBoost() ?? false;
-                _switchCoolBoost.CheckedChanged += (s, e) =>
-                {
-                    bool on = _switchCoolBoost.Checked;
-                    Task.Run(() => _wmi.SetCoolBoost(on));
-                };
-                _contentPanel.Controls.Add(_switchCoolBoost);
-                y += cbSwitchH;
-            }
+                Location = new Point(_formW - pad - S(48), y),
+                Size = new Size(S(48), cbSwitchH)
+            };
+            _switchCoolBoost.Checked = _wmi.GetCoolBoost() ?? false;
+            _switchCoolBoost.CheckedChanged += (s, e) =>
+            {
+                bool on = _switchCoolBoost.Checked;
+                Task.Run(() => _wmi.SetCoolBoost(on));
+            };
+            _contentPanel.Controls.Add(_switchCoolBoost);
+            y += cbSwitchH;
 
-            if (_capabilities.DustDefender)
+            y += S(10);
+            _btnDustDefender = MakeButton("🔄  DustDefender (Reverse Spin Cycle)", pad, y, contentW, btnH);
+            _btnDustDefender.Click += (s, e) =>
             {
-                y += S(10);
-                _btnDustDefender = MakeButton("🔄  DustDefender (Reverse Spin Cycle)", pad, y, contentW, btnH);
-                _btnDustDefender.Click += (s, e) =>
+                _btnDustDefender.Enabled = false;
+                _isDustDefenderRunning = true;
+                Task.Run(() =>
                 {
-                    _btnDustDefender.Enabled = false;
-                    _isDustDefenderRunning = true;
-                    Task.Run(() =>
+                    var res = _wmi.StartDustDefender();
+                    BeginInvoke(new Action(() =>
                     {
-                        var res = _wmi.StartDustDefender();
-                        BeginInvoke(new Action(() =>
+                        if (!IsDisposed && _btnDustDefender != null)
                         {
-                            if (!IsDisposed && _btnDustDefender != null)
-                            {
-                                _isDustDefenderRunning = res == DustDefenderStart.Started || res == DustDefenderStart.Running;
-                                _btnDustDefender.Enabled = !_isDustDefenderRunning;
-                                _btnDustDefender.Text = _isDustDefenderRunning ? "🔄  DustDefender: Running..." : "🔄  DustDefender (Reverse Spin Cycle)";
-                            }
-                        }));
-
-                        if (res == DustDefenderStart.Started)
-                        {
-                            Task.Delay(25000).ContinueWith(_ =>
-                            {
-                                if (!IsDisposed && IsHandleCreated)
-                                {
-                                    BeginInvoke(new Action(() =>
-                                    {
-                                        _isDustDefenderRunning = false;
-                                        if (_btnDustDefender != null)
-                                        {
-                                            _btnDustDefender.Text = "🔄  DustDefender (Reverse Spin Cycle)";
-                                            _btnDustDefender.Enabled = true;
-                                        }
-                                    }));
-                                }
-                            });
+                            _isDustDefenderRunning = res == DustDefenderStart.Started || res == DustDefenderStart.Running;
+                            _btnDustDefender.Enabled = !_isDustDefenderRunning;
+                            _btnDustDefender.Text = _isDustDefenderRunning ? "🔄  DustDefender: Running..." : "🔄  DustDefender (Reverse Spin Cycle)";
                         }
-                    });
-                };
-                y += btnH;
-            }
+                    }));
 
-            if (_capabilities.FanTable)
+                    if (res == DustDefenderStart.Started)
+                    {
+                        Task.Delay(25000).ContinueWith(_ =>
+                        {
+                            if (!IsDisposed && IsHandleCreated)
+                            {
+                                BeginInvoke(new Action(() =>
+                                {
+                                    _isDustDefenderRunning = false;
+                                    if (_btnDustDefender != null)
+                                    {
+                                        _btnDustDefender.Text = "🔄  DustDefender (Reverse Spin Cycle)";
+                                        _btnDustDefender.Enabled = true;
+                                    }
+                                }));
+                            }
+                        });
+                    }
+                });
+            };
+            y += btnH;
+
+            y += S(12);
+            MakeLabel("FACTORY EC FAN TABLE:", pad, y, FontSectionHeader, SubHeaderColor);
+            y += S(20);
+            _cboFanTable = new PredatorDropDown { Location = new Point(pad, y), Size = new Size(contentW, S(30)) };
+            _cboFanTable.Items.AddRange(new[] { "Standard", "Faster", "Fastest" });
+            var curTable = _wmi.GetFanTable() ?? FanTable.Standard;
+            _cboFanTable.SelectedIndex = Math.Clamp((int)curTable - 1, 0, 2);
+            _cboFanTable.SelectedIndexChanged += (s, e) =>
             {
-                y += S(12);
-                MakeLabel("FACTORY EC FAN TABLE:", pad, y, FontSectionHeader, SubHeaderColor);
-                y += S(20);
-                _cboFanTable = new PredatorDropDown { Location = new Point(pad, y), Size = new Size(contentW, S(30)) };
-                _cboFanTable.Items.AddRange(new[] { "Standard", "Faster", "Fastest" });
-                var curTable = _wmi.GetFanTable() ?? FanTable.Standard;
-                _cboFanTable.SelectedIndex = Math.Clamp((int)curTable - 1, 0, 2);
-                _cboFanTable.SelectedIndexChanged += (s, e) =>
-                {
-                    var table = (FanTable)(_cboFanTable.SelectedIndex + 1);
-                    Task.Run(() => _wmi.SetFanTable(table));
-                };
-                _contentPanel.Controls.Add(_cboFanTable);
-                y += S(30);
-            }
+                var table = (FanTable)(_cboFanTable.SelectedIndex + 1);
+                Task.Run(() => _wmi.SetFanTable(table));
+            };
+            _contentPanel.Controls.Add(_cboFanTable);
+            y += S(30);
 
             y += btnH + S(20);
             MakeSectionHeader("DISPLAY & LCD OVERDRIVE", pad, y);
@@ -1632,37 +1667,28 @@ namespace PredatorControlApp
             };
             y += odSwitchH;
 
-            if (_capabilities.GpuModeSwitch)
-            {
-                y += S(14);
-                MakeLabel("GPU WORKING MODE (MUX SWITCH):", pad, y, FontSectionHeader, SubHeaderColor);
-                y += S(20);
-                _cboGpuMode = new PredatorDropDown { Location = new Point(pad, y), Size = new Size(contentW, S(30)) };
-                _cboGpuMode.Items.AddRange(new[] { "Hybrid (NVIDIA Optimus)", "Discrete (dGPU Direct Only)" });
-                var curGpuMode = _wmi.GetGpuMode() ?? GpuMode.Hybrid;
-                _cboGpuMode.SelectedIndex = curGpuMode == GpuMode.Discrete ? 1 : 0;
-                _cboGpuMode.SelectedIndexChanged += (s, e) =>
-                {
-                    var targetMode = _cboGpuMode.SelectedIndex == 1 ? GpuMode.Discrete : GpuMode.Hybrid;
-                    Task.Run(() => _wmi.SetGpuMode(targetMode));
-                    var res = MessageBox.Show(this, "GPU Working Mode changed. A system reboot is required for the BIOS MUX switch to take effect. Would you like to restart now?", "MUX Switch Reboot Required", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-                    if (res == DialogResult.Yes)
-                    {
-                        try
-                        {
-                            Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 5") { CreateNoWindow = true, UseShellExecute = false });
-                        }
-                        catch (Exception ex)
-                        {
-                            Program.Report(ex, false);
-                        }
-                    }
-                };
-                _contentPanel.Controls.Add(_cboGpuMode);
-                y += S(30);
-            }
+            y += S(20);
+            MakeSectionHeader("GPU WORKING MODE (MUX SWITCH)", pad, y);
+            y += S(20);
+            MakeLabel("Discrete routes dGPU direct to screen for max FPS. Hybrid saves battery.", pad, y, FontHeaderLight, SubHeaderColor);
+            y += S(20);
 
-            y += S(28);
+            int muxBtnW = (contentW - gap) / 2;
+            _btnGpuHybrid = MakeButton("🔄  Hybrid (Optimus)", pad, y, muxBtnW, btnH);
+            _btnGpuDiscrete = MakeButton("⚡  Discrete (dGPU Direct)", pad + muxBtnW + gap, y, muxBtnW, btnH);
+
+            var curGpuMode = _wmi.GetGpuMode() ?? GpuMode.Hybrid;
+            if (curGpuMode == GpuMode.Discrete)
+                HighlightBtn(_btnGpuDiscrete, ref _activeGpuModeBtn);
+            else
+                HighlightBtn(_btnGpuHybrid, ref _activeGpuModeBtn);
+
+            _btnGpuHybrid.Click += (s, e) => ApplyGpuMode(GpuMode.Hybrid, _btnGpuHybrid);
+            _btnGpuDiscrete.Click += (s, e) => ApplyGpuMode(GpuMode.Discrete, _btnGpuDiscrete);
+            _contentPanel.Controls.Add(_btnGpuHybrid);
+            _contentPanel.Controls.Add(_btnGpuDiscrete);
+
+            y += btnH + S(28);
             MakeSectionHeader("BATTERY CHARGE LIMIT", pad, y);
 
             y += S(24);
@@ -1682,43 +1708,40 @@ namespace PredatorControlApp
                 ApplyBatteryLimit(_switchBatteryLimit.Checked);
             };
 
-            if (_capabilities.UsbCharging)
+            y += switchH + S(12);
+            int usbSwitchH = S(30);
+            var lblUsbCharge = MakeLabel("Power-Off USB Charging", pad, y, FontBody, Color.White);
+            CenterV(lblUsbCharge, y, usbSwitchH);
+            _switchUsbCharging = new PredatorSwitch
             {
-                y += switchH + S(12);
-                int usbSwitchH = S(30);
-                var lblUsbCharge = MakeLabel("Power-Off USB Charging", pad, y, FontBody, Color.White);
-                CenterV(lblUsbCharge, y, usbSwitchH);
-                _switchUsbCharging = new PredatorSwitch
-                {
-                    Location = new Point(_formW - pad - S(48), y),
-                    Size = new Size(S(48), usbSwitchH)
-                };
-                var curUsb = _wmi.GetUsbCharging();
-                _switchUsbCharging.Checked = curUsb?.Enabled ?? true;
-                _contentPanel.Controls.Add(_switchUsbCharging);
+                Location = new Point(_formW - pad - S(48), y),
+                Size = new Size(S(48), usbSwitchH)
+            };
+            var curUsb = _wmi.GetUsbCharging();
+            _switchUsbCharging.Checked = curUsb?.Enabled ?? true;
+            _contentPanel.Controls.Add(_switchUsbCharging);
 
-                y += usbSwitchH + S(6);
-                int usbFloorDropW = contentW;
-                MakeLabel("LOW BATTERY CHARGING FLOOR:", pad, y, FontSectionHeader, SubHeaderColor);
-                y += S(20);
-                _cboUsbFloor = new PredatorDropDown { Location = new Point(pad, y), Size = new Size(usbFloorDropW, S(30)) };
-                _cboUsbFloor.Items.AddRange(new[] { "Stop at 10% Battery", "Stop at 20% Battery", "Stop at 30% Battery" });
-                int floorIdx = curUsb?.FloorPercent switch { 10 => 0, 20 => 1, _ => 2 };
-                _cboUsbFloor.SelectedIndex = floorIdx;
-                _contentPanel.Controls.Add(_cboUsbFloor);
+            y += usbSwitchH + S(6);
+            int usbFloorDropW = contentW;
+            MakeLabel("LOW BATTERY CHARGING FLOOR:", pad, y, FontSectionHeader, SubHeaderColor);
+            y += S(20);
+            _cboUsbFloor = new PredatorDropDown { Location = new Point(pad, y), Size = new Size(usbFloorDropW, S(30)) };
+            _cboUsbFloor.Items.AddRange(new[] { "Stop at 10% Battery", "Stop at 20% Battery", "Stop at 30% Battery" });
+            int floorIdx = curUsb?.FloorPercent switch { 10 => 0, 20 => 1, _ => 2 };
+            _cboUsbFloor.SelectedIndex = floorIdx;
+            _contentPanel.Controls.Add(_cboUsbFloor);
 
-                _switchUsbCharging.CheckedChanged += (s, e) =>
-                {
-                    int floor = _cboUsbFloor.SelectedIndex switch { 0 => 10, 1 => 20, _ => 30 };
-                    Task.Run(() => _wmi.SetUsbCharging(_switchUsbCharging.Checked, floor));
-                };
-                _cboUsbFloor.SelectedIndexChanged += (s, e) =>
-                {
-                    int floor = _cboUsbFloor.SelectedIndex switch { 0 => 10, 1 => 20, _ => 30 };
-                    Task.Run(() => _wmi.SetUsbCharging(_switchUsbCharging.Checked, floor));
-                };
-                y += S(30);
-            }
+            _switchUsbCharging.CheckedChanged += (s, e) =>
+            {
+                int floor = _cboUsbFloor.SelectedIndex switch { 0 => 10, 1 => 20, _ => 30 };
+                Task.Run(() => _wmi.SetUsbCharging(_switchUsbCharging.Checked, floor));
+            };
+            _cboUsbFloor.SelectedIndexChanged += (s, e) =>
+            {
+                int floor = _cboUsbFloor.SelectedIndex switch { 0 => 10, 1 => 20, _ => 30 };
+                Task.Run(() => _wmi.SetUsbCharging(_switchUsbCharging.Checked, floor));
+            };
+            y += S(30);
 
             var batt = WindowsBattery.Read();
             if (batt != null)
@@ -1728,28 +1751,25 @@ namespace PredatorControlApp
                 y += S(20);
             }
 
-            if (_capabilities.BatteryCalibration)
+            y += S(8);
+            _btnBatteryCalibration = MakeButton("⚡  Start Battery Calibration Cycle", pad, y, contentW, btnH);
+            _btnBatteryCalibration.Click += (s, e) =>
             {
-                y += S(8);
-                _btnBatteryCalibration = MakeButton("⚡  Start Battery Calibration Cycle", pad, y, contentW, btnH);
-                _btnBatteryCalibration.Click += (s, e) =>
+                _btnBatteryCalibration.Enabled = false;
+                Task.Run(() =>
                 {
-                    _btnBatteryCalibration.Enabled = false;
-                    Task.Run(() =>
+                    bool ok = _wmi.SetBatteryCalibration(true);
+                    BeginInvoke(new Action(() =>
                     {
-                        bool ok = _wmi.SetBatteryCalibration(true);
-                        BeginInvoke(new Action(() =>
+                        if (!IsDisposed && _btnBatteryCalibration != null)
                         {
-                            if (!IsDisposed && _btnBatteryCalibration != null)
-                            {
-                                _btnBatteryCalibration.Enabled = true;
-                                MessageBox.Show(this, ok ? "Hardware battery calibration initiated. Keep AC adapter connected until calibration completes." : "Could not start calibration cycle.", "Battery Calibration", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
-                            }
-                        }));
-                    });
-                };
-                y += btnH;
-            }
+                            _btnBatteryCalibration.Enabled = true;
+                            MessageBox.Show(this, ok ? "Hardware battery calibration initiated. Keep AC adapter connected until calibration completes." : "Could not start calibration cycle.", "Battery Calibration", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                        }
+                    }));
+                });
+            };
+            y += btnH;
 
             y += switchH + S(12);
             _lblStartupStatus = MakeLabel("Start with Windows", pad, y, FontBody, SubHeaderColor);
@@ -1995,7 +2015,22 @@ namespace PredatorControlApp
                 DiagnosticsDumper.CopyToClipboard(report);
                 MessageBox.Show(this, "Diagnostic report copied to clipboard!", "Predator Diagnostics", MessageBoxButtons.OK, MessageBoxIcon.Information);
             };
-            y += S(30) + S(16);
+            y += S(30) + S(12);
+
+            _btnHardwareOverrides = MakeButton("⚙️  Hardware Features & Overrides", pad, y, contentW, btnH);
+            _btnHardwareOverrides.Click += (s, e) =>
+            {
+                using var form = new HardwareCapabilitiesForm(_wmi, _capabilities, () =>
+                {
+                    _capabilities = CapabilityProbe.Probe(_wmi, _wmi.EcHid);
+                    BuildUI();
+                    ThemeManager.ApplyTheme(this);
+                });
+                form.ShowDialog(this);
+            };
+            _contentPanel.Controls.Add(_btnHardwareOverrides);
+
+            y += btnH + S(16);
             AddSeparator(y);
 
             y += S(20);
@@ -2146,6 +2181,45 @@ namespace PredatorControlApp
             ApplyPowerMode(nextMode, PowerByteToBtn(nextMode));
         }
 
+        private void UpdateFanLockStatus()
+        {
+            if (_lblFanLockStatus == null) return;
+            var lockState = GetCurrentFanLock();
+            if (lockState == FanLock.QuietMode)
+            {
+                _lblFanLockStatus.Text = "🔒 FanLock: Locked by Quiet Mode (Preset EC Curve)";
+                _lblFanLockStatus.ForeColor = Color.FromArgb(255, 180, 50);
+            }
+            else if (lockState == FanLock.EcoMode)
+            {
+                _lblFanLockStatus.Text = "🔒 FanLock: Locked by Eco Mode (Preset EC Curve)";
+                _lblFanLockStatus.ForeColor = Color.FromArgb(255, 180, 50);
+            }
+            else if (lockState == FanLock.DustDefender)
+            {
+                _lblFanLockStatus.Text = "🔄 FanLock: Locked by DustDefender Spin Cycle";
+                _lblFanLockStatus.ForeColor = Color.FromArgb(0, 180, 255);
+            }
+            else
+            {
+                bool anyLocked = _isCpuFanLocked || _isGpuFanLocked || _isSysFanLocked;
+                if (anyLocked)
+                {
+                    var lockedList = new List<string>();
+                    if (_isCpuFanLocked) lockedList.Add("CPU");
+                    if (_isGpuFanLocked) lockedList.Add("GPU");
+                    if (_isSysFanLocked) lockedList.Add("SYS");
+                    _lblFanLockStatus.Text = $"🔒 FanLock: {string.Join("+", lockedList)} Locked (Manual Override)";
+                    _lblFanLockStatus.ForeColor = AccentColor;
+                }
+                else
+                {
+                    _lblFanLockStatus.Text = "🔓 FanLock: Channels Unlocked (Full Independent Control)";
+                    _lblFanLockStatus.ForeColor = Color.FromArgb(100, 180, 120);
+                }
+            }
+        }
+
         private FanLock? GetCurrentFanLock()
         {
             if (_isDustDefenderRunning) return FanLock.DustDefender;
@@ -2153,6 +2227,34 @@ namespace PredatorControlApp
             if (currentPower == 0x00) return FanLock.QuietMode;
             if (currentPower == 0x06) return FanLock.EcoMode;
             return null;
+        }
+
+        private async void ApplyGpuMode(GpuMode mode, PredatorButton btn)
+        {
+            HighlightBtn(btn, ref _activeGpuModeBtn);
+            bool ok = await Task.Run(() => _wmi.SetGpuMode(mode));
+            if (!ok)
+            {
+                MessageBox.Show(this, "Failed to switch GPU working mode via ACPI/WMI.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            var res = MessageBox.Show(this,
+                $"GPU Working Mode switched to {(mode == GpuMode.Discrete ? "Discrete (dGPU Direct)" : "Hybrid (NVIDIA Optimus)")}.\r\n\r\nA system reboot is required for the BIOS MUX switch to take effect. Would you like to restart now?",
+                "MUX Switch Reboot Required", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (res == DialogResult.Yes)
+            {
+                await Task.Run(() =>
+                {
+                    try
+                    {
+                        Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 5") { CreateNoWindow = true, UseShellExecute = false });
+                    }
+                    catch (Exception ex)
+                    {
+                        Program.Report(ex, false);
+                    }
+                });
+            }
         }
 
         private void ApplyLcdOverdrive(bool enable)
@@ -2206,6 +2308,9 @@ namespace PredatorControlApp
             if (_sysFanSlider != null) _sysFanSlider.Visible = isCustom;
             _btnFixedSpeed.Visible = isCustom;
             _btnFanCurve.Visible = isCustom;
+            if (_btnLockCpu != null) _btnLockCpu.Visible = isCustom;
+            if (_btnLockGpu != null) _btnLockGpu.Visible = isCustom;
+            if (_btnLockSys != null) _btnLockSys.Visible = isCustom;
 
             if (isCustom)
             {
@@ -2224,18 +2329,18 @@ namespace PredatorControlApp
                 else
                 {
                     HighlightBtn(_btnFixedSpeed, ref _activeCustomSubBtn);
-                    _cpuFanSlider.Enabled = !isLocked;
-                    _gpuFanSlider.Enabled = !isLocked;
-                    if (_sysFanSlider != null) _sysFanSlider.Enabled = !isLocked;
+                    _cpuFanSlider.Enabled = !isLocked && !_isCpuFanLocked;
+                    _gpuFanSlider.Enabled = !isLocked && !_isGpuFanLocked;
+                    if (_sysFanSlider != null) _sysFanSlider.Enabled = !isLocked && !_isSysFanLocked;
                     byte cpuVal = (byte)_cpuFanSlider.Value;
                     byte gpuVal = (byte)_gpuFanSlider.Value;
                     byte sysVal = (byte)(_sysFanSlider?.Value ?? 50);
                     Task.Run(() =>
                     {
                         _wmi.SetFanBehavior(0x03, applyCustomSpeeds: true);
-                        _wmi.SetCpuFanSpeed(cpuVal);
-                        _wmi.SetGpuFanSpeed(gpuVal);
-                        if (_capabilities.HasThirdFan) _wmi.SetSystemFanSpeed(sysVal);
+                        if (!_isCpuFanLocked) _wmi.SetCpuFanSpeed(cpuVal);
+                        if (!_isGpuFanLocked) _wmi.SetGpuFanSpeed(gpuVal);
+                        if (!_isSysFanLocked) _wmi.SetSystemFanSpeed(sysVal);
                     });
                 }
             }
@@ -2593,7 +2698,7 @@ namespace PredatorControlApp
 
             if (profile.RgbMode >= 0)
             {
-                int mode = Math.Clamp(profile.RgbMode, 0, 7);
+                int mode = Math.Clamp(profile.RgbMode, 0, RgbModeNames.Length - 1);
                 int brightVal = profile.RgbBrightness >= 0 ? Math.Clamp(profile.RgbBrightness, 0, 100) : _brightnessSlider.Value;
                 int speedVal = profile.RgbSpeed >= 0 ? Math.Clamp(profile.RgbSpeed, 1, 100) : _speedSlider.Value;
                 byte bright = (byte)brightVal;
@@ -2687,7 +2792,7 @@ namespace PredatorControlApp
             await Task.Delay(500);
             if (IsDisposed) return;
 
-            int rgbMode = Math.Clamp(snap.RgbMode, 0, 7);
+            int rgbMode = Math.Clamp(snap.RgbMode, 0, RgbModeNames.Length - 1);
             int bright = Math.Clamp(snap.RgbBrightness, 0, 100);
             int speed = Math.Clamp(snap.RgbSpeed, 1, 100);
 
@@ -2747,8 +2852,9 @@ namespace PredatorControlApp
                 using var key = Registry.CurrentUser.CreateSubKey(@"SOFTWARE\PredatorControl");
                 using var hklmKey = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\PredatorControl");
 
-                int savedRgbMode = GetInt(key, "RGB_Mode", -1, 0, 7);
-                if (savedRgbMode == -1) savedRgbMode = GetInt(hklmKey, "RGB_Mode", 3, 0, 7);
+                int maxRgb = RgbModeNames.Length - 1;
+                int savedRgbMode = GetInt(key, "RGB_Mode", -1, 0, maxRgb);
+                if (savedRgbMode == -1) savedRgbMode = GetInt(hklmKey, "RGB_Mode", 3, 0, maxRgb);
 
                 int savedBrightness = GetInt(key, "Brightness", -1, 0, 100);
                 if (savedBrightness == -1) savedBrightness = GetInt(hklmKey, "Brightness", 100, 0, 100);
@@ -2960,7 +3066,7 @@ namespace PredatorControlApp
                     }
                 }
 
-                int clampedMode = Math.Clamp(savedRgbMode, 0, 7);
+                int clampedMode = Math.Clamp(savedRgbMode, 0, maxRgb);
                 _isApplyingRgbMode = true;
                 try
                 {
@@ -3266,7 +3372,7 @@ namespace PredatorControlApp
                 {
                     int cpuTemp = _wmi.CpuTemp;
                     int cpuRpm = _wmi.CpuFanRpm;
-                    int sysRpm = _capabilities.HasThirdFan ? _wmi.SystemFanRpm : 0;
+                    int sysRpm = _wmi.SystemFanRpm;
                     bool gpuAsleep = GpuPowerMonitor.IsGpuAsleep();
 
                     int gpuTemp = 0;
@@ -3324,12 +3430,25 @@ namespace PredatorControlApp
                         _lblCpuTemp.ForeColor = TempColor(_cpuTemp);
                         _lblGpuTemp.ForeColor = TempColor(_gpuTemp);
 
+                        if (_lblGpuSleepBadge != null)
+                        {
+                            _lblGpuSleepBadge.Visible = true;
+                            _lblGpuSleepBadge.Text = gpuAsleep ? "[ 💤 D3Cold ]" : "[ 🔥 Active ]";
+                            _lblGpuSleepBadge.ForeColor = gpuAsleep ? Color.FromArgb(120, 200, 255) : AccentColor;
+                        }
+
+                        if (_lblProtocolBadge != null)
+                        {
+                            _lblProtocolBadge.Text = _wmi.EcHid != null && _wmi.EcHid.IsOpen ? "⚡ Direct EC HID" : "🔌 Acer WMI";
+                        }
+
                         _lblCpuRpm.Text = cpuRpm > 0 ? $"{cpuRpm} RPM" : "-- RPM";
                         _lblGpuRpm.Text = gpuRpm > 0 ? $"{gpuRpm} RPM" : "-- RPM";
                         if (_lblSysFanRpm != null)
                         {
                             _lblSysFanRpm.Text = sysRpm > 0 ? $"{sysRpm} RPM" : "-- RPM";
                         }
+                        UpdateFanLockStatus();
 
                         _cpuHistoryGraph?.PushSample(_cpuTemp > 0 ? _cpuTemp : null, cpuLoad);
                         _gpuHistoryGraph?.PushSample(_gpuTemp > 0 ? _gpuTemp : null, gpuAsleep ? null : gpuLoad);
@@ -3374,7 +3493,7 @@ namespace PredatorControlApp
             targetCpuSpeed = Math.Clamp(targetCpuSpeed, 10, 100);
             bool cpuChanged = forceHardwareApply || (_lastCurveCpuSpeed != targetCpuSpeed);
 
-            if (cpuChanged)
+            if (!_isCpuFanLocked && cpuChanged)
             {
                 _lastCurveCpuSpeed = targetCpuSpeed;
                 _lastCurveCpuTemp = currentCpuTemp;
@@ -3394,7 +3513,7 @@ namespace PredatorControlApp
                 targetGpuSpeed = Math.Clamp(targetGpuSpeed, 10, 100);
                 gpuChanged = forceHardwareApply || (_lastCurveGpuSpeed != targetGpuSpeed);
 
-                if (gpuChanged)
+                if (!_isGpuFanLocked && gpuChanged)
                 {
                     _lastCurveGpuSpeed = targetGpuSpeed;
                     _lastCurveGpuTemp = currentGpuTemp;
@@ -3413,13 +3532,13 @@ namespace PredatorControlApp
 
             bool sysChanged = false;
             int targetSysSpeed = 0;
-            if (_capabilities.HasThirdFan && _sysFanSlider != null)
+            if (_sysFanSlider != null)
             {
                 targetSysSpeed = _sysCurveFollower.Update(currentCpuTemp, _cpuCurvePoints);
                 targetSysSpeed = Math.Clamp(targetSysSpeed, 10, 100);
                 sysChanged = forceHardwareApply || (_lastCurveSysSpeed != targetSysSpeed);
 
-                if (sysChanged)
+                if (!_isSysFanLocked && sysChanged)
                 {
                     _lastCurveSysSpeed = targetSysSpeed;
                     _sysFanSlider.Value = targetSysSpeed;
@@ -3429,18 +3548,18 @@ namespace PredatorControlApp
 
             if (cpuChanged || gpuChanged || sysChanged || forceHardwareApply)
             {
-                int cSpeed = cpuChanged ? targetCpuSpeed : _lastCurveCpuSpeed;
+                int cSpeed = _isCpuFanLocked ? _cpuFanSlider.Value : (cpuChanged ? targetCpuSpeed : _lastCurveCpuSpeed);
                 if (cSpeed <= 0) cSpeed = targetCpuSpeed;
 
-                int gSpeed = gpuChanged ? targetGpuSpeed : _lastCurveGpuSpeed;
-                int sSpeed = sysChanged ? targetSysSpeed : _lastCurveSysSpeed;
+                int gSpeed = _isGpuFanLocked ? _gpuFanSlider.Value : (gpuChanged ? targetGpuSpeed : _lastCurveGpuSpeed);
+                int sSpeed = _isSysFanLocked ? (_sysFanSlider?.Value ?? 50) : (sysChanged ? targetSysSpeed : _lastCurveSysSpeed);
 
                 Task.Run(() =>
                 {
                     _wmi.SetFanBehavior(0x03, applyCustomSpeeds: false);
-                    if (cSpeed > 0) _wmi.SetCpuFanSpeed((byte)cSpeed);
-                    if (gSpeed > 0 && _gpuTemp > 0 && !GpuPowerMonitor.IsGpuAsleep()) _wmi.SetGpuFanSpeed((byte)gSpeed);
-                    if (_capabilities.HasThirdFan && sSpeed > 0) _wmi.SetSystemFanSpeed((byte)sSpeed);
+                    if (!_isCpuFanLocked && cSpeed > 0) _wmi.SetCpuFanSpeed((byte)cSpeed);
+                    if (!_isGpuFanLocked && gSpeed > 0 && _gpuTemp > 0 && !GpuPowerMonitor.IsGpuAsleep()) _wmi.SetGpuFanSpeed((byte)gSpeed);
+                    if (!_isSysFanLocked && sSpeed > 0) _wmi.SetSystemFanSpeed((byte)sSpeed);
                 });
             }
         }
