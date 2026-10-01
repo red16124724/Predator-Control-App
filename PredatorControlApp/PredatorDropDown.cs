@@ -11,6 +11,7 @@ namespace PredatorControlApp
         private bool _isHover;
         private bool _isOpen;
         private bool _isClosingPopup; 
+        private long _lastClosedTicks;
         private int _selectedIndex = -1;
         private readonly List<string> _items = new();
         private Form? _popup;
@@ -122,8 +123,10 @@ namespace PredatorControlApp
 
         protected override void OnMouseClick(MouseEventArgs e)
         {
+            if (!Enabled) return;
             if (e.Button == MouseButtons.Left)
             {
+                if (Environment.TickCount64 - _lastClosedTicks < 250) return;
                 if (_isOpen) ClosePopup();
                 else OpenPopup();
             }
@@ -191,7 +194,16 @@ namespace PredatorControlApp
             _popup = popup;
             _listBox = listBox;
 
-            popup.Show(this.FindForm()!);
+            var parentForm = this.FindForm();
+            if (parentForm == null || parentForm.IsDisposed)
+            {
+                _isOpen = false;
+                _popup = null;
+                _listBox = null;
+                popup.Dispose();
+                return;
+            }
+            popup.Show(parentForm);
             listBox.Focus();
         }
 
@@ -203,6 +215,7 @@ namespace PredatorControlApp
             try
             {
                 _isOpen = false;
+                _lastClosedTicks = Environment.TickCount64;
                 Invalidate();
 
                 var popup = _popup;

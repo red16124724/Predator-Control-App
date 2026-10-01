@@ -64,7 +64,9 @@ namespace PredatorControlApp
             this.StartPosition = FormStartPosition.CenterParent;
             this.BackColor = FormBg;
             this.ForeColor = TextColor;
-            this.ClientSize = new Size(780, 800);
+            int workH = Screen.PrimaryScreen?.WorkingArea.Height ?? 800;
+            int formH = Math.Min(800, Math.Max(500, workH - 40));
+            this.ClientSize = new Size(780, formH);
             this.DoubleBuffered = true;
             this.ShowInTaskbar = false;
             try { this.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
@@ -151,6 +153,7 @@ namespace PredatorControlApp
                 Location = new Point(editorX, contentY),
                 Size = new Size(editorW, editorH),
                 BackColor = FormBg,
+                AutoScroll = true,
                 Visible = false
             };
             this.Controls.Add(_pnlEditor);
@@ -260,10 +263,10 @@ namespace PredatorControlApp
                 g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
                 int cy = _btnColorPick.Height / 2;
                 int cx = _btnColorPick.Width / 2 - 70;
-                using var brush = new SolidBrush(_selectedColor);
-                g.FillEllipse(brush, cx - 6, cy - 6, 12, 12);
                 using var glowBrush = new SolidBrush(Color.FromArgb(100, _selectedColor));
                 g.FillEllipse(glowBrush, cx - 8, cy - 8, 16, 16);
+                using var brush = new SolidBrush(_selectedColor);
+                g.FillEllipse(brush, cx - 6, cy - 6, 12, 12);
             };
             _btnColorPick.Click += (s, ev) =>
             {
@@ -286,6 +289,8 @@ namespace PredatorControlApp
             _btnRemove = new PredatorButton { Text = "🗑  Remove", Location = new Point(btnW + 12, ey), Size = new Size(btnW, 38) };
             _pnlEditor.Controls.Add(_btnRemove);
             _btnRemove.Click += BtnRemove_Click;
+
+            _pnlEditor.AutoScrollMinSize = new Size(0, ey + 38 + 20);
         }
 
         #endregion
@@ -439,14 +444,17 @@ namespace PredatorControlApp
 
         private GameProfile EditorToProfile()
         {
+            int powerIdx = Math.Max(0, _cboPower.SelectedIndex);
+            int fanIdx = Math.Max(0, _cboFan.SelectedIndex);
+
             var p = new GameProfile
             {
                 ExecutableName = _editingProfile?.ExecutableName ?? "",
                 DisplayName = _editingProfile?.DisplayName ?? "",
-                PowerMode = PowerModeValues[_cboPower.SelectedIndex],
-                FanMode = FanModeValues[_cboFan.SelectedIndex],
-                CpuFanSpeed = _cboFan.SelectedIndex == 2 ? _trkCpuFan.Value : -1,
-                GpuFanSpeed = _cboFan.SelectedIndex == 2 ? _trkGpuFan.Value : -1,
+                PowerMode = PowerModeValues[powerIdx],
+                FanMode = FanModeValues[fanIdx],
+                CpuFanSpeed = fanIdx == 2 ? _trkCpuFan.Value : -1,
+                GpuFanSpeed = fanIdx == 2 ? _trkGpuFan.Value : -1,
             };
 
             p.RefreshRate = _cboRefresh.SelectedIndex switch
@@ -517,10 +525,12 @@ namespace PredatorControlApp
             };
 
             List<string> allProcs;
+            System.Diagnostics.Process[]? procs = null;
             try
             {
                 var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var p in System.Diagnostics.Process.GetProcesses())
+                procs = System.Diagnostics.Process.GetProcesses();
+                foreach (var p in procs)
                 {
                     try
                     {
@@ -529,14 +539,22 @@ namespace PredatorControlApp
                             names.Add(name + ".exe");
                     }
                     catch { }
-                    finally { p.Dispose(); }
                 }
                 allProcs = names.OrderBy(n => n).ToList();
-                GC.Collect(0, GCCollectionMode.Optimized);
             }
             catch
             {
                 allProcs = new List<string>();
+            }
+            finally
+            {
+                if (procs != null)
+                {
+                    foreach (var p in procs)
+                    {
+                        try { p.Dispose(); } catch { }
+                    }
+                }
             }
 
             if (allProcs.Count == 0)
@@ -741,6 +759,15 @@ namespace PredatorControlApp
                 _pnlEditor.Visible = false;
                 PopulateList();
             }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                try { _colorPicker.Dispose(); } catch { }
+            }
+            base.Dispose(disposing);
         }
 
         #endregion

@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -10,12 +11,13 @@ using Microsoft.Win32;
 
 namespace PredatorControlApp
 {
-    internal sealed record UpdateInfo(Version Version, string Tag, string Notes, string DownloadUrl);
+    internal sealed record UpdateInfo(Version Version, string Tag, string Notes, string DownloadUrl, string? ExpectedSha256 = null);
 
     [SupportedOSPlatform("windows")]
     internal static class Updater
     {
-        private const string ReleasesApi = "https://api.github.com/repos/supesonly/Acer-P-Helper/releases";
+        internal const string ReleasesApi = "https://api.github.com/repos/red16124724/Predator-Control-App/releases";
+        internal const string ReleasesWeb = "https://github.com/red16124724/Predator-Control-App/releases";
         private const string RegPath = @"SOFTWARE\PredatorControl";
         private const StringComparison OIC = StringComparison.OrdinalIgnoreCase;
 
@@ -31,7 +33,13 @@ namespace PredatorControlApp
         {
             v = new Version(0, 0, 0);
             if (string.IsNullOrEmpty(tag)) return false;
-            if (!Version.TryParse(tag.TrimStart('v', 'V').Trim(), out var parsed)) return false;
+            string clean = tag.Trim();
+            if (clean.StartsWith("v.", StringComparison.OrdinalIgnoreCase))
+                clean = clean.Substring(2);
+            else if (clean.StartsWith("v", StringComparison.OrdinalIgnoreCase))
+                clean = clean.Substring(1);
+
+            if (!Version.TryParse(clean.Trim(), out var parsed)) return false;
             v = Norm(parsed);
             return true;
         }
@@ -61,11 +69,36 @@ namespace PredatorControlApp
                      .AppendLine(Str(rel, "body").Trim().Replace("\r\n", "\n").Replace("\n", Environment.NewLine))
                      .AppendLine();
 
-                if (newest == null && PickAsset(rel, IsSelfContained) is string url)
-                    newest = new UpdateInfo(v, Str(rel, "tag_name"), "", url);
+                if (newest == null || v > newest.Version)
+                {
+                    string url = PickAsset(rel, IsSelfContained) ?? Str(rel, "html_url", ReleasesWeb);
+                    string? sha256 = ExtractExpectedSha256(rel, url);
+                    newest = new UpdateInfo(v, Str(rel, "tag_name"), "", url, sha256);
+                }
             }
 
             return newest == null ? null : newest with { Notes = notes.ToString().TrimEnd() };
+        }
+
+        internal static string? ExtractExpectedSha256(JsonElement rel, string? targetUrl = null)
+        {
+            string body = Str(rel, "body");
+            if (string.IsNullOrEmpty(body)) return null;
+
+            // If a specific asset name is identifiable from the download url, try matching that asset's hash first
+            if (!string.IsNullOrEmpty(targetUrl))
+            {
+                string assetName = Path.GetFileName(new Uri(targetUrl, UriKind.RelativeOrAbsolute).LocalPath);
+                if (!string.IsNullOrEmpty(assetName))
+                {
+                    var assetMatch = Regex.Match(body, Regex.Escape(assetName) + @"[\s:=]+([a-fA-F0-9]{64})", RegexOptions.IgnoreCase);
+                    if (assetMatch.Success) return assetMatch.Groups[1].Value.ToLowerInvariant();
+                }
+            }
+
+            var match = Regex.Match(body, @"(?:SHA-?256|checksum)[\s:=]+([a-fA-F0-9]{64})", RegexOptions.IgnoreCase);
+            if (match.Success) return match.Groups[1].Value.ToLowerInvariant();
+            return null;
         }
 
         private static bool Flag(JsonElement e, string name) =>
@@ -103,19 +136,62 @@ namespace PredatorControlApp
 
         internal static async Task ApplyAsync(UpdateInfo info)
         {
+            if (!Uri.TryCreate(info.DownloadUrl, UriKind.Absolute, out var uri) ||
+                uri.Scheme != Uri.UriSchemeHttps ||
+                !(uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase) ||
+                  uri.Host.EndsWith(".github.com", StringComparison.OrdinalIgnoreCase) ||
+                  uri.Host.Equals("objects.githubusercontent.com", StringComparison.OrdinalIgnoreCase) ||
+                  uri.Host.EndsWith(".githubusercontent.com", StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new System.Security.SecurityException("Download URL is not a recognized GitHub HTTPS endpoint.");
+            }
+
+            if (!info.DownloadUrl.EndsWith(".exe", OIC))
+            {
+                Process.Start(new ProcessStartInfo(info.DownloadUrl) { UseShellExecute = true });
+                return;
+            }
             string target = Environment.ProcessPath ?? Application.ExecutablePath;
             string staged = Path.Combine(Path.GetTempPath(), "PredatorControl-update.exe");
 
+            string computedHashHex;
             using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) })
             {
                 http.DefaultRequestHeaders.UserAgent.ParseAdd("PredatorControl");
                 using var src = await http.GetStreamAsync(info.DownloadUrl);
                 using var dst = File.Create(staged);
-                await src.CopyToAsync(dst);
+                using var incHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+
+                byte[] buffer = new byte[81920];
+                int bytesRead;
+                long totalBytes = 0;
+                const long maxAllowedBytes = 250 * 1024 * 1024; // 250 MB ceiling to prevent unbounded stream DoS
+
+                while ((bytesRead = await src.ReadAsync(buffer)) > 0)
+                {
+                    totalBytes += bytesRead;
+                    if (totalBytes > maxAllowedBytes)
+                    {
+                        try { File.Delete(staged); } catch { }
+                        throw new InvalidOperationException("Download exceeded maximum allowed size threshold.");
+                    }
+                    await dst.WriteAsync(buffer.AsMemory(0, bytesRead));
+                    incHash.AppendData(buffer, 0, bytesRead);
+                }
+                computedHashHex = Convert.ToHexString(incHash.GetHashAndReset()).ToLowerInvariant();
             }
 
             if (new FileInfo(staged).Length < 100_000)
                 throw new IOException("Downloaded file looks truncated.");
+
+            if (!string.IsNullOrEmpty(info.ExpectedSha256))
+            {
+                if (!string.Equals(computedHashHex, info.ExpectedSha256.Trim().ToLowerInvariant(), StringComparison.OrdinalIgnoreCase))
+                {
+                    try { File.Delete(staged); } catch { }
+                    throw new System.Security.SecurityException($"SHA256 verification failed! Expected {info.ExpectedSha256}, got {computedHashHex}");
+                }
+            }
 
             try
             {
@@ -131,22 +207,47 @@ namespace PredatorControlApp
                 @echo off
                 chcp 65001 >nul
                 :wait
-                tasklist /fi "PID eq {pid}" /nh | find "{pid}" >nul
+                "%SystemRoot%\System32\tasklist.exe" /fi "PID eq {pid}" /nh | "%SystemRoot%\System32\findstr.exe" /r "\<{pid}\>" >nul
                 if not errorlevel 1 (
-                    timeout /t 1 /nobreak >nul
+                    "%SystemRoot%\System32\timeout.exe" /t 1 /nobreak >nul
                     goto wait
                 )
-                move /y "{staged}" "{target}" >nul
+                set retries=0
+                :trymove
+                move /y "{staged}" "{target}" >nul 2>&1
+                if not errorlevel 1 goto launch
+                set /a retries+=1
+                if %retries% geq 30 goto cleanup
+                "%SystemRoot%\System32\timeout.exe" /t 1 /nobreak >nul
+                goto trymove
+                :launch
                 start "" "{target}"
+                :cleanup
                 (goto) 2>nul & del "%~f0"
                 """, new UTF8Encoding(false));
 
-            Process.Start(new ProcessStartInfo("cmd.exe", $"/c \"{script}\"")
+            string cmdPath = Path.Combine(Environment.SystemDirectory, "cmd.exe");
+            Process.Start(new ProcessStartInfo(cmdPath, $"/c \"{script}\"")
             {
                 CreateNoWindow = true,
                 UseShellExecute = false,
-                WorkingDirectory = Path.GetTempPath()
+                WorkingDirectory = Environment.SystemDirectory
             });
+        }
+
+        internal static string ComputeFileSha256(string filePath)
+        {
+            using var sha = SHA256.Create();
+            using var fs = File.OpenRead(filePath);
+            byte[] hash = sha.ComputeHash(fs);
+            return Convert.ToHexString(hash).ToLowerInvariant();
+        }
+
+        internal static bool VerifySha256(string filePath, string expectedHash)
+        {
+            if (string.IsNullOrWhiteSpace(expectedHash) || !File.Exists(filePath)) return false;
+            string actual = ComputeFileSha256(filePath);
+            return string.Equals(actual, expectedHash.Trim().ToLowerInvariant(), StringComparison.OrdinalIgnoreCase);
         }
 
         #endregion

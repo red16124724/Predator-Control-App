@@ -111,8 +111,8 @@ namespace PredatorControlApp
 
         private RectangleF GraphArea => new(
             PadLeft, PadTop,
-            Width - PadLeft - PadRight,
-            Height - PadTop - PadBottom);
+            Math.Max(1f, Width - PadLeft - PadRight),
+            Math.Max(1f, Height - PadTop - PadBottom));
 
         private float TempToX(int temp)
         {
@@ -131,14 +131,16 @@ namespace PredatorControlApp
         private int XToTemp(float x)
         {
             var g = GraphArea;
-            float frac = (x - g.Left) / g.Width;
+            if (g.Width <= 0) return TempMin;
+            float frac = Math.Clamp((x - g.Left) / g.Width, 0f, 1f);
             return TempMin + (int)Math.Round(frac * (TempMax - TempMin));
         }
 
         private int YToSpeed(float y)
         {
             var g = GraphArea;
-            float frac = (g.Bottom - y) / g.Height;
+            if (g.Height <= 0) return SpeedMin;
+            float frac = Math.Clamp((g.Bottom - y) / g.Height, 0f, 1f);
             return SpeedMin + (int)Math.Round(frac * (SpeedMax - SpeedMin));
         }
 
@@ -146,7 +148,7 @@ namespace PredatorControlApp
 
         public int InterpolateSpeed(int temperature)
         {
-            if (_points.Count == 0) return 0;
+            if (_points == null || _points.Count == 0) return 50;
             if (temperature <= _points[0].X) return _points[0].Y;
             if (temperature >= _points[^1].X) return _points[^1].Y;
 
@@ -233,8 +235,9 @@ namespace PredatorControlApp
 
         private void DrawStatus(Graphics g, RectangleF area)
         {
-            int speed = InterpolateSpeed(_currentTemp);
-            string status = $"{_currentTemp}°C → {speed}%";
+            string status = _currentTemp > 0
+                ? $"{_currentTemp}°C → {InterpolateSpeed(_currentTemp)}%"
+                : (_fanLabel.Contains("GPU", StringComparison.OrdinalIgnoreCase) ? "Asleep (D3Cold)" : "Offline");
 
             using var font = new Font("Segoe UI", 8f);
             using var brush = new SolidBrush(_curveColor);
@@ -341,7 +344,7 @@ namespace PredatorControlApp
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
-            if (e.Button == MouseButtons.Left)
+            if (e.Button == MouseButtons.Left && Enabled)
             {
                 int index = HitTestPoint(e.Location);
                 if (index >= 0)
@@ -357,11 +360,11 @@ namespace PredatorControlApp
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
-            if (_dragIndex >= 0)
+            if (_dragIndex >= 0 && Enabled)
             {
                 UpdateDraggedPoint(e.Location);
             }
-            else
+            else if (Enabled)
             {
                 int newHover = HitTestPoint(e.Location);
                 if (newHover != _hoverIndex)
@@ -412,9 +415,14 @@ namespace PredatorControlApp
 
         private void UpdateDraggedPoint(Point mousePos)
         {
+            if (_dragIndex < 0 || _dragIndex >= _points.Count) return;
+
             int temp = XToTemp(mousePos.X);
             int speed = YToSpeed(mousePos.Y);
-
+            if ((ModifierKeys & Keys.Control) == Keys.Control)
+            {
+                speed = (int)(Math.Round(speed / 5.0) * 5.0);
+            }
             speed = Math.Clamp(speed, SpeedMin, SpeedMax);
 
             if (_dragIndex == 0)

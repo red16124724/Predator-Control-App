@@ -81,7 +81,7 @@ namespace PredatorControlApp
 
         protected override void OnMouseUp(MouseEventArgs e)
         {
-            if (e.Button == MouseButtons.Left && Enabled)
+            if (e.Button == MouseButtons.Left && Enabled && ClientRectangle.Contains(e.Location))
             {
                 Checked = !Checked;
             }

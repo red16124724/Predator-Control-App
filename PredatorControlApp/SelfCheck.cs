@@ -27,6 +27,10 @@ namespace PredatorControlApp
             Debug.Assert(Form1.BatteryProfileValues[3] == 0x06, "battery Eco must map to 0x06");
             Debug.Assert(Form1.AcProfileValues.Length == 5, "AC table size");
             Debug.Assert(Form1.AcProfileValues[4] == 0x05, "AC Turbo must map to 0x05");
+            Debug.Assert(Form1.FanProfileValues.Length == 4, "fan table size");
+            Debug.Assert(Form1.AcFanValues.Length == 4, "AC fan table size");
+            Debug.Assert(Form1.BatteryFanValues.Length == 4, "Battery fan table size");
+            Debug.Assert(Form1.AcFanValues[3] == 0x03, "AC fan Custom must map to 0x03");
 
             CheckPowerLineDebounce();
         }

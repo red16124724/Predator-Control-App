@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text.Json;
 
@@ -11,7 +12,9 @@ namespace PredatorControlApp
         private readonly List<GameProfile> _profiles = new();
         private readonly string _savePath;
 
+        private readonly object _lock = new();
         private bool _enabled;
+        private bool _disposed;
         private string? _activeExe;                   
         private DashboardSnapshot? _savedSnapshot;    
 
@@ -23,48 +26,75 @@ namespace PredatorControlApp
 
         public bool IsEnabled
         {
-            get => _enabled;
+            get { lock (_lock) { return _enabled; } }
             set
             {
-                if (_enabled != value)
+                bool changed = false;
+                DashboardSnapshot? snapToExit = null;
+                lock (_lock)
                 {
-                    _enabled = value;
-                    if (_enabled)
-                        _pollTimer.Start();
-                    else
+                    if (_enabled != value)
                     {
-                        _pollTimer.Stop();
-                        if (_activeExe != null && _savedSnapshot != null)
+                        _enabled = value;
+                        changed = true;
+                        if (_enabled)
+                            _pollTimer.Start();
+                        else
                         {
-                            GameExited?.Invoke(_savedSnapshot);
-                            _activeExe = null;
-                            _savedSnapshot = null;
+                            _pollTimer.Stop();
+                            if (_activeExe != null)
+                            {
+                                snapToExit = _savedSnapshot;
+                                _activeExe = null;
+                                _savedSnapshot = null;
+                            }
                         }
+                        SaveUnderLock();
                     }
-                    EnabledChanged?.Invoke(_enabled);
-                    Save();
+                }
+                if (changed)
+                {
+                    if (snapToExit != null) GameExited?.Invoke(snapToExit);
+                    EnabledChanged?.Invoke(value);
                 }
             }
         }
 
-        public IReadOnlyList<GameProfile> Profiles => _profiles.AsReadOnly();
-        public string? ActiveGameExe => _activeExe;
-
-        public GameSyncController()
+        public IReadOnlyList<GameProfile> Profiles
         {
-            _savePath = "";
-            try
+            get
             {
-                var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-                if (string.IsNullOrEmpty(appData))
-                    appData = Path.GetTempPath();
-                var dir = Path.Combine(appData, "PredatorControl");
-                Directory.CreateDirectory(dir);
-                _savePath = Path.Combine(dir, "game_sync.json");
+                lock (_lock) { return _profiles.ToList().AsReadOnly(); }
             }
-            catch { }
+        }
 
-            _pollTimer = new System.Windows.Forms.Timer { Interval = 3000 };
+        public string? ActiveGameExe
+        {
+            get { lock (_lock) { return _activeExe; } }
+        }
+
+        public GameSyncController(string? customSavePath = null)
+        {
+            if (customSavePath != null)
+            {
+                _savePath = customSavePath;
+            }
+            else
+            {
+                _savePath = "";
+                try
+                {
+                    var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                    if (string.IsNullOrEmpty(appData))
+                        appData = Path.GetTempPath();
+                    var dir = Path.Combine(appData, "PredatorControl");
+                    Directory.CreateDirectory(dir);
+                    _savePath = Path.Combine(dir, "game_sync.json");
+                }
+                catch { }
+            }
+
+            _pollTimer = new System.Windows.Forms.Timer { Interval = 5000 };
             _pollTimer.Tick += PollProcesses;
 
             Load();
@@ -75,113 +105,260 @@ namespace PredatorControlApp
 
         public void AddProfile(GameProfile profile)
         {
-            _profiles.RemoveAll(p => p.ExecutableName.Equals(profile.ExecutableName, StringComparison.OrdinalIgnoreCase));
-            _profiles.Add(profile);
-            Save();
+            if (profile == null || string.IsNullOrWhiteSpace(profile.ExecutableName)) return;
+            lock (_lock)
+            {
+                _profiles.RemoveAll(p => p.ExecutableName.Equals(profile.ExecutableName, StringComparison.OrdinalIgnoreCase));
+                _profiles.Add(profile);
+                SaveUnderLock();
+            }
         }
 
         public void RemoveProfile(string exeName)
         {
-            _profiles.RemoveAll(p => p.ExecutableName.Equals(exeName, StringComparison.OrdinalIgnoreCase));
-
-            if (_activeExe != null && _activeExe.Equals(exeName, StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrWhiteSpace(exeName)) return;
+            DashboardSnapshot? snapToExit = null;
+            lock (_lock)
             {
-                if (_savedSnapshot != null)
-                    GameExited?.Invoke(_savedSnapshot);
-                _activeExe = null;
-                _savedSnapshot = null;
+                _profiles.RemoveAll(p => p.ExecutableName.Equals(exeName, StringComparison.OrdinalIgnoreCase));
+
+                if (_activeExe != null && _activeExe.Equals(exeName, StringComparison.OrdinalIgnoreCase))
+                {
+                    snapToExit = _savedSnapshot;
+                    _activeExe = null;
+                    _savedSnapshot = null;
+                }
+                SaveUnderLock();
             }
-            Save();
+            if (snapToExit != null)
+            {
+                GameExited?.Invoke(snapToExit);
+            }
         }
 
         public void UpdateProfile(GameProfile profile)
         {
-            var idx = _profiles.FindIndex(p => p.ExecutableName.Equals(profile.ExecutableName, StringComparison.OrdinalIgnoreCase));
-            if (idx >= 0)
-                _profiles[idx] = profile;
-            else
-                _profiles.Add(profile);
-            Save();
+            if (profile == null || string.IsNullOrWhiteSpace(profile.ExecutableName)) return;
+            lock (_lock)
+            {
+                var idx = _profiles.FindIndex(p => p.ExecutableName.Equals(profile.ExecutableName, StringComparison.OrdinalIgnoreCase));
+                if (idx >= 0)
+                    _profiles[idx] = profile;
+                else
+                    _profiles.Add(profile);
+                SaveUnderLock();
+            }
         }
 
         public void SetPreGameSnapshot(DashboardSnapshot snapshot)
         {
-            _savedSnapshot = snapshot;
+            lock (_lock)
+            {
+                _savedSnapshot = snapshot;
+            }
         }
+
+        private int _isPolling;
+        private int _cachedActivePid = -1;
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
         private bool IsProcessActive(string nameWithoutExe)
         {
+            if (string.IsNullOrWhiteSpace(nameWithoutExe)) return false;
+
+            // 1. Fast Path: Check if currently focused/foreground window belongs to this process (O(1) < 0.05ms)
             try
             {
-                var matches = Process.GetProcessesByName(nameWithoutExe);
+                IntPtr fgHwnd = GetForegroundWindow();
+                if (fgHwnd != IntPtr.Zero)
+                {
+                    GetWindowThreadProcessId(fgHwnd, out uint fgPid);
+                    if (fgPid > 0)
+                    {
+                        try
+                        {
+                            using var fgProc = Process.GetProcessById((int)fgPid);
+                            if (fgProc.ProcessName.Equals(nameWithoutExe, StringComparison.OrdinalIgnoreCase))
+                            {
+                                _cachedActivePid = (int)fgPid;
+                                return true;
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }
+            catch { }
+
+            // 2. Fast Path: Check previously tracked PID without scanning all processes
+            if (_cachedActivePid > 0)
+            {
+                try
+                {
+                    using var proc = Process.GetProcessById(_cachedActivePid);
+                    if (!proc.HasExited && proc.ProcessName.Equals(nameWithoutExe, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+                catch
+                {
+                    _cachedActivePid = -1;
+                }
+            }
+
+            // 3. Fallback: Search by process name
+            Process[]? matches = null;
+            try
+            {
+                matches = Process.GetProcessesByName(nameWithoutExe);
                 if (matches.Length == 0) return false;
 
                 bool isBrowser = nameWithoutExe.Equals("chrome", StringComparison.OrdinalIgnoreCase) ||
                                  nameWithoutExe.Equals("brave", StringComparison.OrdinalIgnoreCase) ||
                                  nameWithoutExe.Equals("msedge", StringComparison.OrdinalIgnoreCase);
 
-                bool active = false;
-                if (isBrowser)
+                foreach (var p in matches)
                 {
-                    active = matches.Any(p => p.MainWindowHandle != IntPtr.Zero);
-                }
-                else
-                {
-                    active = true;
+                    try
+                    {
+                        if (isBrowser)
+                        {
+                            if (p.MainWindowHandle != IntPtr.Zero)
+                            {
+                                _cachedActivePid = p.Id;
+                                return true;
+                            }
+                        }
+                        else
+                        {
+                            try
+                            {
+                                if (!p.HasExited)
+                                {
+                                    _cachedActivePid = p.Id;
+                                    return true;
+                                }
+                            }
+                            catch
+                            {
+                                // Access Denied from anti-cheat or elevated game process means it is active!
+                                _cachedActivePid = p.Id;
+                                return true;
+                            }
+                        }
+                    }
+                    catch { }
                 }
 
-                foreach (var p in matches) p.Dispose();
-                return active;
+                return false;
             }
             catch
             {
                 return false;
             }
-        }
-
-        private void PollProcesses(object? sender, EventArgs e)
-        {
-            if (!_enabled || _profiles.Count == 0) return;
-
-            if (_activeExe != null)
+            finally
             {
-                string nameWithoutExe = Path.GetFileNameWithoutExtension(_activeExe);
-                bool stillRunning = IsProcessActive(nameWithoutExe);
-
-                if (!stillRunning)
+                if (matches != null)
                 {
-                    var snapshot = _savedSnapshot;
-                    _activeExe = null;
-                    _savedSnapshot = null;
-                    if (snapshot != null)
-                        GameExited?.Invoke(snapshot);
-                }
-            }
-            else
-            {
-                foreach (var profile in _profiles)
-                {
-                    string nameWithoutExe = Path.GetFileNameWithoutExtension(profile.ExecutableName);
-                    if (IsProcessActive(nameWithoutExe))
+                    foreach (var p in matches)
                     {
-                        _activeExe = profile.ExecutableName;
-                        GameDetected?.Invoke(profile);
-                        break;
+                        try { p.Dispose(); } catch { }
                     }
                 }
             }
         }
 
+        private void PollProcesses(object? sender, EventArgs e)
+        {
+            if (Interlocked.CompareExchange(ref _isPolling, 1, 0) != 0) return;
+            Task.Run(() =>
+            {
+                try
+                {
+                    PollOnce();
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref _isPolling, 0);
+                }
+            });
+        }
+
+        internal void PollOnce()
+        {
+            GameProfile? detectedProfile = null;
+            DashboardSnapshot? exitedSnapshot = null;
+            string? currentActiveExe;
+            List<GameProfile> profilesSnapshot;
+
+            lock (_lock)
+            {
+                if (!_enabled || _profiles.Count == 0) return;
+                currentActiveExe = _activeExe;
+                profilesSnapshot = _profiles.ToList();
+            }
+
+            if (currentActiveExe != null)
+            {
+                string nameWithoutExe = Path.GetFileNameWithoutExtension(currentActiveExe).Trim();
+                bool stillRunning = IsProcessActive(nameWithoutExe);
+
+                if (!stillRunning)
+                {
+                    lock (_lock)
+                    {
+                        if (_activeExe == currentActiveExe)
+                        {
+                            exitedSnapshot = _savedSnapshot;
+                            _activeExe = null;
+                            _savedSnapshot = null;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                foreach (var profile in profilesSnapshot)
+                {
+                    string nameWithoutExe = Path.GetFileNameWithoutExtension(profile.ExecutableName).Trim();
+                    if (IsProcessActive(nameWithoutExe))
+                    {
+                        lock (_lock)
+                        {
+                            if (_enabled && _activeExe == null)
+                            {
+                                _activeExe = profile.ExecutableName;
+                                detectedProfile = profile;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+
+            if (exitedSnapshot != null)
+                GameExited?.Invoke(exitedSnapshot);
+            else if (detectedProfile != null)
+                GameDetected?.Invoke(detectedProfile);
+        }
+
         #region Persistence
 
-        private void Save()
+        private void SaveUnderLock()
         {
             try
             {
+                if (string.IsNullOrEmpty(_savePath)) return;
                 var data = new GameSyncData
                 {
                     Enabled = _enabled,
-                    Profiles = _profiles
+                    Profiles = _profiles.ToList()
                 };
                 var json = JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(_savePath, json);
@@ -189,22 +366,33 @@ namespace PredatorControlApp
             catch { }
         }
 
-        private void Load()
+        public void Save()
         {
-            try
+            lock (_lock)
             {
-                if (!File.Exists(_savePath)) return;
-                var json = File.ReadAllText(_savePath);
-                var data = JsonSerializer.Deserialize<GameSyncData>(json);
-                if (data != null)
-                {
-                    _enabled = data.Enabled;
-                    _profiles.Clear();
-                    if (data.Profiles != null)
-                        _profiles.AddRange(data.Profiles);
-                }
+                SaveUnderLock();
             }
-            catch { }
+        }
+
+        public void Load()
+        {
+            lock (_lock)
+            {
+                try
+                {
+                    if (string.IsNullOrEmpty(_savePath) || !File.Exists(_savePath)) return;
+                    var json = File.ReadAllText(_savePath);
+                    var data = JsonSerializer.Deserialize<GameSyncData>(json);
+                    if (data != null)
+                    {
+                        _enabled = data.Enabled;
+                        _profiles.Clear();
+                        if (data.Profiles != null)
+                            _profiles.AddRange(data.Profiles);
+                    }
+                }
+                catch { }
+            }
         }
 
         private class GameSyncData
@@ -217,6 +405,12 @@ namespace PredatorControlApp
 
         public void Dispose()
         {
+            lock (_lock)
+            {
+                if (_disposed) return;
+                _disposed = true;
+                _enabled = false;
+            }
             _pollTimer.Stop();
             _pollTimer.Dispose();
         }
