@@ -1,0 +1,62 @@
+name: 🐛 Bug Report
+description: Create a report to help us fix a problem or issue in Predator Control App
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting an issue! Please provide as much detail as possible so we can help you quickly.
+  - type: input
+    id: laptop_model
+    attributes:
+      label: Laptop Model
+      description: What Acer Predator model do you have?
+      placeholder: e.g., Acer Predator Helios Neo 16 (PHN16-71), Helios 300, Triton 500, etc.
+    validations:
+      required: true
+  - type: dropdown
+    id: os_version
+    attributes:
+      label: Operating System
+      description: What version of Windows are you running?
+      options:
+        - Windows 11 (64-bit)
+        - Windows 10 (64-bit)
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: app_version
+    attributes:
+      label: Predator Control App Version
+      description: What version of the app are you running?
+      placeholder: e.g., v1.4.0
+    validations:
+      required: true
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened?
+      description: Describe the problem clearly in simple words.
+      placeholder: Tell us what went wrong...
+    validations:
+      required: true
+  - type: textarea
+    id: steps_to_reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: How can someone else see this issue?
+      placeholder: |
+        1. Open the app as Administrator
+        2. Click on ...
+        3. See error ...
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostic_dump
+    attributes:
+      label: Diagnostic Dump (Optional but super helpful!)
+      description: In the app, click the "Diagnostic Dump" button and paste the clipboard content here.
+      placeholder: Paste diagnostic dump here...
+      render: shell
