@@ -1,4 +1,4 @@
-# 🦅 Predator Control App
+# Predator Control App
 
 <div align="center">
 
