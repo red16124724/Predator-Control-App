@@ -105,7 +105,6 @@ The app will open up with your laptop's live temperatures, fan controls, and pow
 ### ❄️ Advanced Fan & Cooling Control
 - **Direct EC Hardware Access**: Communicates directly with your laptop's Embedded Controller (EC) chip via high-speed HID commands, with automatic fallback to Acer WMI.
 - **3-Fan Support**: Full controls for laptops with CPU, GPU, and 3rd Chassis/System fans.
-- **Acer DustDefender**: One-click fan reverse-spin cycle to blow accumulated dust and lint out of your laptop's heatsinks!
 - **Acer CoolBoost Toggle**: Unlocks elevated maximum fan RPM limits for intense gaming sessions.
 - **Interactive Fan Curve Editor**: Design custom multi-point fan curves with your mouse.
 - **Spike Damping & Hysteresis**: Prevents irritating fan spin-up and spin-down noises caused by momentary 1-second CPU usage spikes.
@@ -120,8 +119,7 @@ The app will open up with your laptop's live temperatures, fan controls, and pow
 Upgrade from the 8 basic factory presets to **34 dynamic lighting effects**:
 - *Static, Breathing, Neon, Wave, Shifting, Zoom, Meteor, Twinkling, Rainbow, Spiral, Fire, Waterfall, and 22 more!*
 - Adjustable lighting speed, brightness slider, and custom 4-zone colors.
-- **Backlight Auto-Off Timer**: Automatically turns off the keyboard lights after a set period of inactivity to save battery life.
-
+  
 ### 🔋 Battery Care & Health
 - **Live Battery Health & Wear**: See your laptop battery's real wear percentage, designed capacity, and full charge capacity.
 - **Battery Cycle Count**: Track how many charge cycles your battery has completed.
