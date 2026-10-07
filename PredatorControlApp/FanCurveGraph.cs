@@ -8,21 +8,48 @@ namespace PredatorControlApp
     [SupportedOSPlatform("windows")]
     public class FanCurveGraph : Control
     {
-        private static readonly List<Point> _defaultPoints = new()
+        public const int ControlPointCount = 8;
+
+        public static IReadOnlyList<Point> DefaultCpuCurve => DefaultCpuPoints;
+
+        public static readonly List<Point> DefaultCpuPoints = new()
         {
-            new Point(30, 10),
-            new Point(45, 15),
-            new Point(55, 30),
-            new Point(65, 50),
-            new Point(72, 65),
-            new Point(80, 80),
-            new Point(88, 92),
-            new Point(95, 100)
+            new Point(30, 0),
+            new Point(50, 10),
+            new Point(60, 20),
+            new Point(70, 25),
+            new Point(77, 30),
+            new Point(85, 45),
+            new Point(90, 60),
+            new Point(100, 100)
         };
 
-        private static readonly Color BackgroundColor = Color.FromArgb(28, 28, 32);
-        private static readonly Color GridColor = Color.FromArgb(45, 45, 50);
-        private static readonly Color LabelColor = Color.FromArgb(100, 100, 110);
+        public static readonly List<Point> DefaultGpuPoints = new()
+        {
+            new Point(30, 0),
+            new Point(50, 0),
+            new Point(60, 20),
+            new Point(70, 35),
+            new Point(78, 45),
+            new Point(85, 60),
+            new Point(90, 75),
+            new Point(100, 100)
+        };
+
+        private static readonly List<Point> _defaultPoints = DefaultCpuPoints;
+
+        private static Color BackgroundColor => ThemeManager.IsDarkThemeActive ? Color.FromArgb(20, 24, 33) : Color.FromArgb(245, 248, 252);
+        private static Color GridColor => ThemeManager.IsDarkThemeActive ? Color.FromArgb(40, 48, 64) : Color.FromArgb(215, 222, 235);
+        private static Color LabelColor => ThemeManager.IsDarkThemeActive ? Color.FromArgb(140, 150, 170) : Color.FromArgb(90, 100, 120);
+        private static Color BorderColor => ThemeManager.CardBorder;
+
+        private static readonly Font s_fontAxis = new("Segoe UI", 7.5f);
+        private static readonly Font s_fontTitle = new("Segoe UI", 8.5f, FontStyle.Bold);
+        private static readonly Font s_fontStatus = new("Segoe UI", 8f);
+        private static readonly Font s_fontTooltip = new("Segoe UI", 7.5f);
+        private static readonly StringFormat s_sfCenter = new() { Alignment = StringAlignment.Center };
+        private static readonly StringFormat s_sfRight = new() { Alignment = StringAlignment.Far, LineAlignment = StringAlignment.Center };
+        private static readonly StringFormat s_sfFar = new() { Alignment = StringAlignment.Far };
 
         private const int PadLeft = 45;
         private const int PadRight = 15;
@@ -39,6 +66,7 @@ namespace PredatorControlApp
         private const int PointRadiusHover = 7;
         private const int HitTestRadius = 10;
 
+        private readonly object _pointsLock = new();
         private List<Point> _points;
         private Color _curveColor = Color.FromArgb(0, 180, 255);
         private int _currentTemp;
@@ -52,49 +80,142 @@ namespace PredatorControlApp
         public Color CurveColor
         {
             get => _curveColor;
-            set { _curveColor = value; Invalidate(); }
+            set { _curveColor = value; if (Visible) SafeInvalidate(); }
         }
 
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public int CurrentTemp
         {
             get => _currentTemp;
-            set { _currentTemp = value; Invalidate(); }
+            set
+            {
+                if (_currentTemp != value)
+                {
+                    _currentTemp = value;
+                    if (Visible) SafeInvalidate();
+                }
+            }
         }
 
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public string FanLabel
         {
             get => _fanLabel;
-            set { _fanLabel = value; Invalidate(); }
+            set { _fanLabel = value; SafeInvalidate(); }
         }
 
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public List<Point> Points
         {
-            get => _points;
+            get
+            {
+                lock (_pointsLock)
+                {
+                    return new List<Point>(_points);
+                }
+            }
             set
             {
-                _points = Normalize(value);
+                var norm = Normalize(value);
+                lock (_pointsLock)
+                {
+                    _points = norm;
+                }
+                SafeInvalidate();
+            }
+        }
+
+        private void SafeInvalidate()
+        {
+            if (IsDisposed || !IsHandleCreated) return;
+            if (InvokeRequired)
+            {
+                try { BeginInvoke(new Action(Invalidate)); } catch { }
+            }
+            else
+            {
                 Invalidate();
             }
         }
 
-        public static List<Point> Normalize(List<Point>? src)
-        {
-            if (src == null || src.Count < 2) return new List<Point>(_defaultPoints);
+        private static readonly int[] s_defaultTemps = [30, 50, 60, 70, 77, 85, 90, 100];
 
-            var pts = src
+        public static List<Point> Normalize(IEnumerable<Point>? src)
+        {
+            if (src == null) return new List<Point>(DefaultCpuPoints);
+
+            var raw = src.ToList();
+            if (raw.Count < 2) return new List<Point>(DefaultCpuPoints);
+
+            var clamped = raw
                 .Select(p => new Point(Math.Clamp(p.X, TempMin, TempMax), Math.Clamp(p.Y, SpeedMin, SpeedMax)))
                 .OrderBy(p => p.X)
                 .ToList();
 
-            pts[0] = new Point(TempMin, pts[0].Y);
-            pts[^1] = new Point(TempMax, pts[^1].Y);
-            return pts;
+            if (clamped.Count == ControlPointCount)
+            {
+                var pts = new List<Point>(clamped);
+                pts[0] = new Point(TempMin, pts[0].Y);
+                pts[ControlPointCount - 1] = new Point(TempMax, pts[ControlPointCount - 1].Y);
+
+                for (int i = 1; i < ControlPointCount - 1; i++)
+                {
+                    int minX = pts[i - 1].X + 1;
+                    if (pts[i].X < minX)
+                        pts[i] = new Point(minX, pts[i].Y);
+                }
+                for (int i = ControlPointCount - 2; i >= 1; i--)
+                {
+                    int maxX = pts[i + 1].X - 1;
+                    if (pts[i].X > maxX)
+                        pts[i] = new Point(maxX, pts[i].Y);
+                }
+                for (int i = 1; i < ControlPointCount - 1; i++)
+                {
+                    int minX = pts[i - 1].X + 1;
+                    if (pts[i].X < minX)
+                        pts[i] = new Point(minX, pts[i].Y);
+                }
+
+                return pts;
+            }
+            else
+            {
+                int InterpolateClamped(int temp)
+                {
+                    if (temp <= clamped[0].X) return clamped[0].Y;
+                    if (temp >= clamped[^1].X) return clamped[^1].Y;
+
+                    for (int i = 0; i < clamped.Count - 1; i++)
+                    {
+                        if (temp >= clamped[i].X && temp <= clamped[i + 1].X)
+                        {
+                            int span = clamped[i + 1].X - clamped[i].X;
+                            if (span <= 0) return clamped[i + 1].Y;
+                            float t = (float)(temp - clamped[i].X) / span;
+                            return (int)Math.Round(clamped[i].Y + t * (clamped[i + 1].Y - clamped[i].Y));
+                        }
+                    }
+                    return clamped[^1].Y;
+                }
+
+                var resampled = new List<Point>(ControlPointCount);
+                foreach (int t in s_defaultTemps)
+                {
+                    int spd = Math.Clamp(InterpolateClamped(t), SpeedMin, SpeedMax);
+                    resampled.Add(new Point(t, spd));
+                }
+                return resampled;
+            }
         }
 
-        public List<Point> DefaultPoints => new(_defaultPoints);
+        public static List<Point> Normalize(List<Point>? src) => Normalize((IEnumerable<Point>?)src);
+
+        public List<Point> DefaultPoints => _fanLabel.Contains("GPU", StringComparison.OrdinalIgnoreCase)
+            ? new List<Point>(DefaultGpuPoints)
+            : new List<Point>(DefaultCpuPoints);
+
+        private readonly Action _themeHandler;
 
         public FanCurveGraph()
         {
@@ -107,6 +228,15 @@ namespace PredatorControlApp
             Size = new Size(420, 220);
             _points = new List<Point>(_defaultPoints);
             Cursor = Cursors.Default;
+
+            _themeHandler = () =>
+            {
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    Invalidate();
+                }
+            };
+            ThemeManager.ThemeChanged += _themeHandler;
         }
 
         private RectangleF GraphArea => new(
@@ -148,21 +278,26 @@ namespace PredatorControlApp
 
         public int InterpolateSpeed(int temperature)
         {
-            if (_points == null || _points.Count == 0) return 50;
-            if (temperature <= _points[0].X) return _points[0].Y;
-            if (temperature >= _points[^1].X) return _points[^1].Y;
-
-            for (int i = 0; i < _points.Count - 1; i++)
+            lock (_pointsLock)
             {
-                if (temperature >= _points[i].X && temperature <= _points[i + 1].X)
+                if (_points == null || _points.Count == 0) return 50;
+                if (_points.Count == 1) return Math.Clamp(_points[0].Y, SpeedMin, SpeedMax);
+                if (temperature <= _points[0].X) return Math.Clamp(_points[0].Y, SpeedMin, SpeedMax);
+                if (temperature >= _points[^1].X) return Math.Clamp(_points[^1].Y, SpeedMin, SpeedMax);
+
+                for (int i = 0; i < _points.Count - 1; i++)
                 {
-                    float span = _points[i + 1].X - _points[i].X;
-                    if (span == 0) return _points[i].Y;
-                    float t = (temperature - _points[i].X) / span;
-                    return (int)Math.Round(_points[i].Y + t * (_points[i + 1].Y - _points[i].Y));
+                    if (temperature >= _points[i].X && temperature <= _points[i + 1].X)
+                    {
+                        float span = _points[i + 1].X - _points[i].X;
+                        if (span <= 0) return Math.Clamp(_points[i].Y, SpeedMin, SpeedMax);
+                        float t = (float)(temperature - _points[i].X) / span;
+                        int result = (int)Math.Round(_points[i].Y + t * (_points[i + 1].Y - _points[i].Y));
+                        return Math.Clamp(result, SpeedMin, SpeedMax);
+                    }
                 }
+                return Math.Clamp(_points[^1].Y, SpeedMin, SpeedMax);
             }
-            return _points[^1].Y;
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -174,15 +309,21 @@ namespace PredatorControlApp
 
             var area = GraphArea;
 
-            DrawGrid(g, area);
-            DrawAxisLabels(g, area);
-            DrawTitle(g, area);
-            DrawStatus(g, area);
-            DrawCurveFill(g, area);
-            DrawCurveLine(g);
-            DrawCrosshair(g, area);
-            DrawControlPoints(g);
-            DrawDragTooltip(g);
+            lock (_pointsLock)
+            {
+                DrawGrid(g, area);
+                DrawAxisLabels(g, area);
+                DrawTitle(g, area);
+                DrawStatus(g, area);
+                DrawCurveFill(g, area);
+                DrawCurveLine(g);
+                DrawCrosshair(g, area);
+                DrawControlPoints(g);
+                DrawDragTooltip(g);
+            }
+
+            using var borderPen = new Pen(BorderColor, 1f);
+            g.DrawRectangle(borderPen, 0, 0, Width - 1, Height - 1);
         }
 
         private void DrawGrid(Graphics g, RectangleF area)
@@ -204,33 +345,25 @@ namespace PredatorControlApp
 
         private void DrawAxisLabels(Graphics g, RectangleF area)
         {
-            using var font = new Font("Segoe UI", 7.5f);
             using var brush = new SolidBrush(LabelColor);
-            using var sfCenter = new StringFormat { Alignment = StringAlignment.Center };
-            using var sfRight = new StringFormat
-            {
-                Alignment = StringAlignment.Far,
-                LineAlignment = StringAlignment.Center
-            };
 
             for (int temp = TempMin; temp <= TempMax; temp += 10)
             {
                 float x = TempToX(temp);
-                g.DrawString($"{temp}°", font, brush, x, area.Bottom + 4, sfCenter);
+                g.DrawString($"{temp}°", s_fontAxis, brush, x, area.Bottom + 4, s_sfCenter);
             }
 
             for (int speed = SpeedMin; speed <= SpeedMax; speed += 20)
             {
                 float y = SpeedToY(speed);
-                g.DrawString($"{speed}%", font, brush, area.Left - 4, y, sfRight);
+                g.DrawString($"{speed}%", s_fontAxis, brush, area.Left - 4, y, s_sfRight);
             }
         }
 
         private void DrawTitle(Graphics g, RectangleF area)
         {
-            using var font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
             using var brush = new SolidBrush(_curveColor);
-            g.DrawString(_fanLabel, font, brush, area.Left, area.Top - 22);
+            g.DrawString(_fanLabel, s_fontTitle, brush, area.Left, area.Top - 22);
         }
 
         private void DrawStatus(Graphics g, RectangleF area)
@@ -239,10 +372,8 @@ namespace PredatorControlApp
                 ? $"{_currentTemp}°C → {InterpolateSpeed(_currentTemp)}%"
                 : (_fanLabel.Contains("GPU", StringComparison.OrdinalIgnoreCase) ? "Asleep (D3Cold)" : "Offline");
 
-            using var font = new Font("Segoe UI", 8f);
             using var brush = new SolidBrush(_curveColor);
-            using var sf = new StringFormat { Alignment = StringAlignment.Far };
-            g.DrawString(status, font, brush, area.Right, area.Top - 22, sf);
+            g.DrawString(status, s_fontStatus, brush, area.Right, area.Top - 22, s_sfFar);
         }
 
         private void DrawCurveFill(Graphics g, RectangleF area)
@@ -327,8 +458,7 @@ namespace PredatorControlApp
             var px = CurvePointToPixel(pt);
             string text = $"{pt.X}°C, {pt.Y}%";
 
-            using var font = new Font("Segoe UI", 7.5f);
-            var sz = g.MeasureString(text, font);
+            var sz = g.MeasureString(text, s_fontTooltip);
 
             float tx = px.X - sz.Width / 2;
             float ty = px.Y - PointRadiusHover - sz.Height - 6;
@@ -339,7 +469,7 @@ namespace PredatorControlApp
             using var bgBrush = new SolidBrush(Color.FromArgb(220, 22, 22, 26));
             using var fgBrush = new SolidBrush(_curveColor);
             g.FillRectangle(bgBrush, tx - 3, ty - 1, sz.Width + 6, sz.Height + 2);
-            g.DrawString(text, font, fgBrush, tx, ty);
+            g.DrawString(text, s_fontTooltip, fgBrush, tx, ty);
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
@@ -402,53 +532,74 @@ namespace PredatorControlApp
 
         private int HitTestPoint(Point mousePos)
         {
-            for (int i = 0; i < _points.Count; i++)
+            lock (_pointsLock)
             {
-                var px = CurvePointToPixel(_points[i]);
-                float dx = mousePos.X - px.X;
-                float dy = mousePos.Y - px.Y;
-                if (dx * dx + dy * dy <= HitTestRadius * HitTestRadius)
-                    return i;
+                for (int i = 0; i < _points.Count; i++)
+                {
+                    var px = CurvePointToPixel(_points[i]);
+                    float dx = mousePos.X - px.X;
+                    float dy = mousePos.Y - px.Y;
+                    if (dx * dx + dy * dy <= HitTestRadius * HitTestRadius)
+                        return i;
+                }
+                return -1;
             }
-            return -1;
         }
 
         private void UpdateDraggedPoint(Point mousePos)
         {
-            if (_dragIndex < 0 || _dragIndex >= _points.Count) return;
+            bool changed = false;
+            lock (_pointsLock)
+            {
+                if (_dragIndex < 0 || _dragIndex >= _points.Count) return;
 
-            int temp = XToTemp(mousePos.X);
-            int speed = YToSpeed(mousePos.Y);
-            if ((ModifierKeys & Keys.Control) == Keys.Control)
-            {
-                speed = (int)(Math.Round(speed / 5.0) * 5.0);
-            }
-            speed = Math.Clamp(speed, SpeedMin, SpeedMax);
+                int temp = XToTemp(mousePos.X);
+                int speed = YToSpeed(mousePos.Y);
+                if ((ModifierKeys & Keys.Control) == Keys.Control)
+                {
+                    speed = (int)(Math.Round(speed / 5.0) * 5.0);
+                }
+                speed = Math.Clamp(speed, SpeedMin, SpeedMax);
 
-            if (_dragIndex == 0)
-            {
-                temp = TempMin;
-            }
-            else if (_dragIndex == _points.Count - 1)
-            {
-                temp = TempMax;
-            }
-            else
-            {
-                temp = Math.Clamp(temp, TempMin, TempMax);
+                if (_dragIndex == 0)
+                {
+                    temp = TempMin;
+                }
+                else if (_dragIndex == _points.Count - 1)
+                {
+                    temp = TempMax;
+                }
+                else
+                {
+                    temp = Math.Clamp(temp, TempMin, TempMax);
 
-                int lo = _points[_dragIndex - 1].X + MinTempGap;
-                int hi = _points[_dragIndex + 1].X - MinTempGap;
-                temp = lo > hi ? (lo + hi) / 2 : Math.Clamp(temp, lo, hi);
+                    int lo = _points[_dragIndex - 1].X + MinTempGap;
+                    int hi = _points[_dragIndex + 1].X - MinTempGap;
+                    temp = lo > hi ? (lo + hi) / 2 : Math.Clamp(temp, lo, hi);
+                }
+
+                var updated = new Point(temp, speed);
+                if (_points[_dragIndex] != updated)
+                {
+                    _points[_dragIndex] = updated;
+                    changed = true;
+                }
             }
 
-            var updated = new Point(temp, speed);
-            if (_points[_dragIndex] != updated)
+            if (changed)
             {
-                _points[_dragIndex] = updated;
                 CurveChanged?.Invoke(this, EventArgs.Empty);
                 Invalidate();
             }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                ThemeManager.ThemeChanged -= _themeHandler;
+            }
+            base.Dispose(disposing);
         }
     }
 }

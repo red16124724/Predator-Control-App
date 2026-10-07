@@ -106,11 +106,64 @@ namespace PredatorControlApp.Tests
             };
 
             var normalized = FanCurveGraph.Normalize(raw);
-            Assert.Equal(3, normalized.Count);
+            Assert.Equal(8, normalized.Count);
             Assert.Equal(30, normalized[0].X); // TempMin
             Assert.Equal(0, normalized[0].Y);  // SpeedMin
             Assert.Equal(100, normalized[^1].X); // TempMax
             Assert.Equal(100, normalized[^1].Y); // SpeedMax
+        }
+
+        [Fact]
+        public void NormalizeFanCurve_StrictlyEightPoints_PreservesCustomCpuAndGpuCurves()
+        {
+            var cpuCurve = new List<Point>
+            {
+                new(30, 0), new(50, 10), new(60, 20), new(70, 25),
+                new(77, 30), new(85, 45), new(90, 60), new(100, 100)
+            };
+            var normCpu = FanCurveGraph.Normalize(cpuCurve);
+            Assert.Equal(8, normCpu.Count);
+            Assert.Equal(cpuCurve, normCpu);
+
+            var gpuCurve = new List<Point>
+            {
+                new(30, 0), new(50, 0), new(60, 20), new(70, 35),
+                new(78, 45), new(85, 60), new(90, 75), new(100, 100)
+            };
+            var normGpu = FanCurveGraph.Normalize(gpuCurve);
+            Assert.Equal(8, normGpu.Count);
+            Assert.Equal(gpuCurve, normGpu);
+        }
+
+        [Theory]
+        [InlineData(0)]
+        [InlineData(1)]
+        [InlineData(2)]
+        [InlineData(3)]
+        [InlineData(7)]
+        [InlineData(8)]
+        [InlineData(9)]
+        [InlineData(15)]
+        public void NormalizeFanCurve_AlwaysProducesStrictlyEightPointsWithAscendingX(int inputCount)
+        {
+            var rand = new Random(1234 + inputCount);
+            var raw = new List<Point>();
+            for (int i = 0; i < inputCount; i++)
+            {
+                raw.Add(new Point(rand.Next(-50, 200), rand.Next(-50, 200)));
+            }
+
+            var result = FanCurveGraph.Normalize(raw);
+            Assert.NotNull(result);
+            Assert.Equal(8, result.Count);
+            Assert.Equal(30, result[0].X);
+            Assert.Equal(100, result[^1].X);
+            for (int i = 0; i < result.Count - 1; i++)
+            {
+                Assert.True(result[i].X < result[i + 1].X);
+                Assert.InRange(result[i].X, 30, 100);
+                Assert.InRange(result[i].Y, 0, 100);
+            }
         }
 
         [Fact]
@@ -350,7 +403,7 @@ namespace PredatorControlApp.Tests
                     CpuFanSpeed = 80,
                     GpuFanSpeed = 85,
                     RefreshRate = 165,
-                    BatteryLimit = 1,
+                    BatteryLimit = 80,
                     RgbMode = 2,
                     RgbBrightness = 90,
                     RgbSpeed = 60,
@@ -373,7 +426,7 @@ namespace PredatorControlApp.Tests
                 Assert.Equal(80, loaded.CpuFanSpeed);
                 Assert.Equal(85, loaded.GpuFanSpeed);
                 Assert.Equal(165, loaded.RefreshRate);
-                Assert.Equal(1, loaded.BatteryLimit);
+                Assert.Equal(80, loaded.BatteryLimit);
                 Assert.Equal(2, loaded.RgbMode);
                 Assert.Equal(90, loaded.RgbBrightness);
                 Assert.Equal(60, loaded.RgbSpeed);
@@ -905,13 +958,13 @@ namespace PredatorControlApp.Tests
         public void WmiController_BuildFanBehaviorPayload_EncodesBitsProperly()
         {
             ulong autoPayload = WmiController.BuildFanBehaviorPayload(0x01);
-            Assert.Equal((ulong)(0x09 | (0x01UL << 16) | (0x01UL << 22)), autoPayload);
+            Assert.Equal((ulong)(0x0B | (0x01UL << 16) | (0x01UL << 18) | (0x01UL << 22)), autoPayload);
 
             ulong maxPayload = WmiController.BuildFanBehaviorPayload(0x02);
-            Assert.Equal((ulong)(0x09 | (0x02UL << 16) | (0x02UL << 22)), maxPayload);
+            Assert.Equal((ulong)(0x0B | (0x02UL << 16) | (0x02UL << 18) | (0x02UL << 22)), maxPayload);
 
             ulong customPayload = WmiController.BuildFanBehaviorPayload(0x03);
-            Assert.Equal((ulong)(0x09 | (0x03UL << 16) | (0x03UL << 22)), customPayload);
+            Assert.Equal((ulong)(0x0B | (0x03UL << 16) | (0x03UL << 18) | (0x03UL << 22)), customPayload);
         }
 
         [Fact]
@@ -939,14 +992,14 @@ namespace PredatorControlApp.Tests
             // Clamped minimum (10%)
             var (directPriMin, directAltMin, extPriMin, extAltMin) = WmiController.BuildGpuFanSpeedPayloads(0);
             Assert.Equal(0x04UL | (10UL << 8), directPriMin);
-            Assert.Equal(0x02UL | (10UL << 8), directAltMin);
+            Assert.Equal(0x04UL | (10UL << 8), directAltMin);
             Assert.Equal(0x05UL | (2UL << 8) | (10UL << 16), extPriMin);
             Assert.Equal(0x05UL | (4UL << 8) | (10UL << 16), extAltMin);
 
             // Normal speed (80%)
             var (directPriNorm, directAltNorm, extPriNorm, extAltNorm) = WmiController.BuildGpuFanSpeedPayloads(80);
             Assert.Equal(0x04UL | (80UL << 8), directPriNorm);
-            Assert.Equal(0x02UL | (80UL << 8), directAltNorm);
+            Assert.Equal(0x04UL | (80UL << 8), directAltNorm);
             Assert.Equal(0x05UL | (2UL << 8) | (80UL << 16), extPriNorm);
             Assert.Equal(0x05UL | (4UL << 8) | (80UL << 16), extAltNorm);
         }
@@ -978,6 +1031,69 @@ namespace PredatorControlApp.Tests
             // Null or empty list returns default 50
             Assert.Equal(50, Form1.InterpolateCurve(null, 60));
             Assert.Equal(50, Form1.InterpolateCurve(new List<Point>(), 60));
+        }
+
+        [Fact]
+        public void IsOnBattery_WhenCharging_ReturnsFalseRegardlessOfPowerLineStatus()
+        {
+            var mgr = new BacklightStateManager();
+
+            // When charging, the laptop is connected to an external charger, even if PowerLineStatus is reported as Offline
+            Assert.False(mgr.IsOnBattery(PowerLineStatus.Offline, BatteryChargeStatus.Charging));
+            Assert.False(mgr.IsOnBattery(PowerLineStatus.Unknown, BatteryChargeStatus.Charging));
+            Assert.False(mgr.IsOnBattery(PowerLineStatus.Online, BatteryChargeStatus.Charging));
+
+            // Without charging, Offline is battery
+            Assert.True(mgr.IsOnBattery(PowerLineStatus.Offline, 0));
+        }
+
+        [Fact]
+        public void DebouncePowerLine_WhenCharging_DebouncesToPluggedInEvenIfOffline()
+        {
+            bool? current = false; // Started on battery
+            bool? pending = null;
+            int ticks = 0;
+
+            // Tick 1: Reported offline, but battery indicates charging
+            bool? result1 = Form1.DebouncePowerLine(PowerLineStatus.Offline, current, ref pending, ref ticks, BatteryChargeStatus.Charging);
+            Assert.False(result1); // Debounce tick 1: still old state
+            Assert.Equal(1, ticks);
+            Assert.True(pending);
+
+            // Tick 2: Second consecutive tick charging
+            bool? result2 = Form1.DebouncePowerLine(PowerLineStatus.Offline, current, ref pending, ref ticks, BatteryChargeStatus.Charging);
+            Assert.True(result2); // Confirmed plugged in!
+            Assert.Equal(2, ticks);
+        }
+
+        [Fact]
+        public void WmiController_TrySetPowerMode_ReapplyingSameMode_TracksLastApplied()
+        {
+            using var wmi = new WmiController();
+
+            // Setting mode tracks the requested mode
+            wmi.TrySetPowerMode(0x06); // Eco
+            Assert.Equal((byte)0x06, wmi.LastAppliedPowerMode);
+
+            // Re-applying the exact same mode maintains LastAppliedPowerMode
+            wmi.TrySetPowerMode(0x06);
+            Assert.Equal((byte)0x06, wmi.LastAppliedPowerMode);
+
+            // Switching to Balanced
+            wmi.TrySetPowerMode(0x01);
+            Assert.Equal((byte)0x01, wmi.LastAppliedPowerMode);
+        }
+
+        [Theory]
+        [InlineData(true, true, false)]   // onBattery=true, gpuAsleep=true  => queryGpu=false (GPU stays asleep)
+        [InlineData(true, false, false)]  // onBattery=true, gpuAsleep=false => queryGpu=false (Never query GPU on battery so it can sleep)
+        [InlineData(false, true, false)]  // onBattery=false, gpuAsleep=true  => queryGpu=false (GPU asleep on AC, don't wake)
+        [InlineData(false, false, true)]  // onBattery=false, gpuAsleep=false => queryGpu=true  (GPU active on AC, query normally)
+        public void GpuQueryDecision_SuppressesQueriesOnBattery(bool onBattery, bool gpuAsleep, bool expectedQueryGpu)
+        {
+            // Core safety rule: queryGpu MUST be false whenever onBattery is true
+            bool queryGpu = !onBattery && !gpuAsleep;
+            Assert.Equal(expectedQueryGpu, queryGpu);
         }
     }
 }

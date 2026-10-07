@@ -30,6 +30,7 @@ namespace PredatorControlApp
         private static readonly Color FlashRed = Color.FromArgb(220, 50, 50);
 
         private static readonly Font FontTitle = new("Segoe UI", 10f, FontStyle.Bold);
+        private static readonly Font FontClose = new("Segoe UI", 10f, FontStyle.Bold);
 
         #endregion
 
@@ -127,7 +128,8 @@ namespace PredatorControlApp
                 ForeColor = TitleTextColor,
                 AutoSize = true,
                 Location = new Point(SidePad, (TitleBarHeight - FontTitle.Height) / 2),
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+                UseMnemonic = false
             };
             lblTitle.MouseDown += TitleBar_MouseDown;
             pnlTitle.Controls.Add(lblTitle);
@@ -135,11 +137,12 @@ namespace PredatorControlApp
             var lblClose = new Label
             {
                 Text = "✕",
-                Font = new Font("Segoe UI", 10f, FontStyle.Bold),
+                Font = FontClose,
                 ForeColor = Color.FromArgb(140, 140, 145),
                 AutoSize = true,
                 Cursor = Cursors.Hand,
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+                UseMnemonic = false
             };
             lblClose.Location = new Point(
                 ClientSize.Width - SidePad - lblClose.PreferredWidth - 2,
@@ -219,8 +222,8 @@ namespace PredatorControlApp
 
         private void BtnReset_Click(object? sender, EventArgs e)
         {
-            _graphCpu.Points = _graphCpu.DefaultPoints;
-            _graphGpu.Points = _graphGpu.DefaultPoints;
+            _graphCpu.Points = FanCurveGraph.DefaultCpuPoints;
+            _graphGpu.Points = FanCurveGraph.DefaultGpuPoints;
         }
 
         private void BtnApply_Click(object? sender, EventArgs e)
@@ -245,6 +248,7 @@ namespace PredatorControlApp
         private void FlashTimer_Tick(object? sender, EventArgs e)
         {
             _flashTimer.Stop();
+            if (IsDisposed || _btnApply.IsDisposed) return;
             _btnApply.IsActive = false;
             _btnApply.CustomActiveColor = null;
         }
@@ -255,18 +259,36 @@ namespace PredatorControlApp
 
         public void UpdateTemps(int cpuTemp, int gpuTemp)
         {
+            if (IsDisposed || !IsHandleCreated) return;
+            if (InvokeRequired)
+            {
+                try { BeginInvoke(new Action(() => UpdateTemps(cpuTemp, gpuTemp))); } catch { }
+                return;
+            }
             _graphCpu.CurrentTemp = cpuTemp;
             _graphGpu.CurrentTemp = gpuTemp;
         }
 
         public void SetCpuCurve(List<Point> points)
         {
-            _graphCpu.Points = new List<Point>(points);
+            if (IsDisposed) return;
+            if (IsHandleCreated && InvokeRequired)
+            {
+                try { BeginInvoke(new Action(() => SetCpuCurve(points))); } catch { }
+                return;
+            }
+            _graphCpu.Points = points != null && points.Count > 0 ? points : FanCurveGraph.DefaultCpuPoints;
         }
 
         public void SetGpuCurve(List<Point> points)
         {
-            _graphGpu.Points = new List<Point>(points);
+            if (IsDisposed) return;
+            if (IsHandleCreated && InvokeRequired)
+            {
+                try { BeginInvoke(new Action(() => SetGpuCurve(points))); } catch { }
+                return;
+            }
+            _graphGpu.Points = points != null && points.Count > 0 ? points : FanCurveGraph.DefaultGpuPoints;
         }
 
         public List<Point> GetCpuCurve() => new(_graphCpu.Points);
@@ -285,8 +307,13 @@ namespace PredatorControlApp
         {
             if (disposing)
             {
-                _flashTimer?.Stop();
-                _flashTimer?.Dispose();
+                if (_flashTimer != null)
+                {
+                    _flashTimer.Stop();
+                    _flashTimer.Tick -= FlashTimer_Tick;
+                    _flashTimer.Dispose();
+                }
+                try { Icon?.Dispose(); } catch { }
             }
             base.Dispose(disposing);
         }

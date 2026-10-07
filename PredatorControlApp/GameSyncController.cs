@@ -73,6 +73,49 @@ namespace PredatorControlApp
             get { lock (_lock) { return _activeExe; } }
         }
 
+        public static string SafeGetExecutableName(string? exeName)
+        {
+            if (string.IsNullOrWhiteSpace(exeName)) return "";
+            string trimmed = exeName.Trim().Trim('"', (char)39);
+            if (string.IsNullOrWhiteSpace(trimmed)) return "";
+            try
+            {
+                string fileName = Path.GetFileName(trimmed);
+                return string.IsNullOrWhiteSpace(fileName) ? trimmed : fileName;
+            }
+            catch
+            {
+                int lastSlash = Math.Max(trimmed.LastIndexOf('/'), trimmed.LastIndexOf('\\'));
+                if (lastSlash >= 0 && lastSlash < trimmed.Length - 1)
+                    return trimmed.Substring(lastSlash + 1);
+                return trimmed;
+            }
+        }
+
+        public static string SafeGetProcessName(string? exeName)
+        {
+            string name = SafeGetExecutableName(exeName);
+            if (string.IsNullOrWhiteSpace(name)) return "";
+            if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                return name.Substring(0, name.Length - 4);
+            return name;
+        }
+
+        public static void SanitizeProfileValues(GameProfile p)
+        {
+            if (p == null) return;
+            if (p.CpuFanSpeed != -1) p.CpuFanSpeed = Math.Clamp(p.CpuFanSpeed, 0, 100);
+            if (p.GpuFanSpeed != -1) p.GpuFanSpeed = Math.Clamp(p.GpuFanSpeed, 0, 100);
+            if (p.SysFanSpeed != -1) p.SysFanSpeed = Math.Clamp(p.SysFanSpeed, 0, 100);
+            if (p.RefreshRate != -1 && p.RefreshRate < 30) p.RefreshRate = -1;
+            if (p.BatteryLimit != -1) p.BatteryLimit = Math.Clamp(p.BatteryLimit, 50, 100);
+            if (p.RgbBrightness != -1) p.RgbBrightness = Math.Clamp(p.RgbBrightness, 0, 100);
+            if (p.RgbSpeed != -1) p.RgbSpeed = Math.Clamp(p.RgbSpeed, 0, 100);
+            if (p.RgbR != -1) p.RgbR = Math.Clamp(p.RgbR, 0, 255);
+            if (p.RgbG != -1) p.RgbG = Math.Clamp(p.RgbG, 0, 255);
+            if (p.RgbB != -1) p.RgbB = Math.Clamp(p.RgbB, 0, 255);
+        }
+
         public GameSyncController(string? customSavePath = null)
         {
             if (customSavePath != null)
@@ -106,6 +149,7 @@ namespace PredatorControlApp
         public void AddProfile(GameProfile profile)
         {
             if (profile == null || string.IsNullOrWhiteSpace(profile.ExecutableName)) return;
+            SanitizeProfileValues(profile);
             lock (_lock)
             {
                 _profiles.RemoveAll(p => p.ExecutableName.Equals(profile.ExecutableName, StringComparison.OrdinalIgnoreCase));
@@ -139,6 +183,7 @@ namespace PredatorControlApp
         public void UpdateProfile(GameProfile profile)
         {
             if (profile == null || string.IsNullOrWhiteSpace(profile.ExecutableName)) return;
+            SanitizeProfileValues(profile);
             lock (_lock)
             {
                 var idx = _profiles.FindIndex(p => p.ExecutableName.Equals(profile.ExecutableName, StringComparison.OrdinalIgnoreCase));
@@ -362,6 +407,7 @@ namespace PredatorControlApp
                 };
                 var json = JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(_savePath, json);
+                try { File.Copy(_savePath, _savePath + ".bak", overwrite: true); } catch { }
             }
             catch { }
         }
@@ -378,20 +424,63 @@ namespace PredatorControlApp
         {
             lock (_lock)
             {
+                bool loaded = false;
                 try
                 {
-                    if (string.IsNullOrEmpty(_savePath) || !File.Exists(_savePath)) return;
-                    var json = File.ReadAllText(_savePath);
-                    var data = JsonSerializer.Deserialize<GameSyncData>(json);
-                    if (data != null)
+                    if (!string.IsNullOrEmpty(_savePath) && File.Exists(_savePath))
                     {
-                        _enabled = data.Enabled;
-                        _profiles.Clear();
-                        if (data.Profiles != null)
-                            _profiles.AddRange(data.Profiles);
+                        var json = File.ReadAllText(_savePath);
+                        var data = JsonSerializer.Deserialize<GameSyncData>(json);
+                        if (data != null)
+                        {
+                            _enabled = data.Enabled;
+                            _profiles.Clear();
+                            if (data.Profiles != null)
+                            {
+                                foreach (var p in data.Profiles)
+                                {
+                                    if (p != null && !string.IsNullOrWhiteSpace(p.ExecutableName))
+                                    {
+                                        SanitizeProfileValues(p);
+                                        _profiles.Add(p);
+                                    }
+                                }
+                            }
+                            loaded = true;
+                        }
                     }
                 }
                 catch { }
+
+                if (!loaded && !string.IsNullOrEmpty(_savePath))
+                {
+                    string bakPath = _savePath + ".bak";
+                    if (File.Exists(bakPath))
+                    {
+                        try
+                        {
+                            var json = File.ReadAllText(bakPath);
+                            var data = JsonSerializer.Deserialize<GameSyncData>(json);
+                            if (data != null)
+                            {
+                                _enabled = data.Enabled;
+                                _profiles.Clear();
+                                if (data.Profiles != null)
+                                {
+                                    foreach (var p in data.Profiles)
+                                    {
+                                        if (p != null && !string.IsNullOrWhiteSpace(p.ExecutableName))
+                                        {
+                                            SanitizeProfileValues(p);
+                                            _profiles.Add(p);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                }
             }
         }
 
@@ -399,6 +488,71 @@ namespace PredatorControlApp
         {
             public bool Enabled { get; set; }
             public List<GameProfile>? Profiles { get; set; }
+        }
+
+        private static readonly HashSet<string> BlockedExecutables = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "cmd.exe", "powershell.exe", "pwsh.exe", "wscript.exe", "cscript.exe", "mshta.exe",
+            "rundll32.exe", "regsvr32.exe", "explorer.exe", "svchost.exe", "csrss.exe", "winlogon.exe", "lsass.exe"
+        };
+
+        private const long MaxImportBytes = 5 * 1024 * 1024;
+
+        private static void ValidateJsonPath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("Path required.", nameof(path));
+            if (!path.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException("Only .json files are allowed.", nameof(path));
+            if (path.Split('/', '\\').Any(s => s == ".."))
+                throw new System.Security.SecurityException("Path traversal rejected.");
+        }
+
+        public void ExportProfiles(string path)
+        {
+            ValidateJsonPath(path);
+            string full = Path.GetFullPath(path);
+            string json;
+            lock (_lock)
+            {
+                json = JsonSerializer.Serialize(new GameSyncData { Enabled = _enabled, Profiles = _profiles.ToList() },
+                    new JsonSerializerOptions { WriteIndented = true });
+            }
+            File.WriteAllText(full, json);
+        }
+
+        public int ImportProfiles(string path, bool merge = true)
+        {
+            ValidateJsonPath(path);
+            string full = Path.GetFullPath(path);
+            if (new FileInfo(full).Length > MaxImportBytes)
+                throw new InvalidDataException("Import file too large.");
+            var data = JsonSerializer.Deserialize<GameSyncData>(File.ReadAllText(full));
+            var accepted = new List<GameProfile>();
+            if (data?.Profiles != null)
+            {
+                foreach (var p in data.Profiles)
+                {
+                    if (p == null || string.IsNullOrWhiteSpace(p.ExecutableName)) continue;
+                    string name = p.ExecutableName.Trim();
+                    if (name.IndexOfAny(new[] { '/', '\\', ':' }) >= 0 || name.Contains("..")
+                        || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0
+                        || BlockedExecutables.Contains(name)) continue;
+                    p.ExecutableName = name;
+                    SanitizeProfileValues(p);
+                    accepted.Add(p);
+                }
+            }
+            lock (_lock)
+            {
+                if (!merge) _profiles.Clear();
+                foreach (var p in accepted)
+                {
+                    _profiles.RemoveAll(x => x.ExecutableName.Equals(p.ExecutableName, StringComparison.OrdinalIgnoreCase));
+                    _profiles.Add(p);
+                }
+                SaveUnderLock();
+            }
+            return accepted.Count;
         }
 
         #endregion

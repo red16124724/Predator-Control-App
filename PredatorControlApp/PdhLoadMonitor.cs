@@ -10,7 +10,6 @@ namespace PredatorControlApp
     public sealed class PdhLoadMonitor : IDisposable
     {
         private const uint PDH_FMT_DOUBLE = 0x00000200;
-        private const uint PDH_MORE_DATA = 0x800007D2;
 
         [DllImport("pdh.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         private static extern uint PdhOpenQuery(IntPtr szDataSource, IntPtr dwUserData, out IntPtr phQuery);
@@ -27,10 +26,6 @@ namespace PredatorControlApp
         [DllImport("pdh.dll", SetLastError = true)]
         private static extern uint PdhCloseQuery(IntPtr hQuery);
 
-        [DllImport("pdh.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        private static extern uint PdhGetFormattedCounterArray(
-            IntPtr hCounter, uint dwFormat, ref uint lpdwBufferSize, ref uint lpdwItemCount, IntPtr pItemBuffer);
-
         [StructLayout(LayoutKind.Sequential)]
         private struct PDH_FMT_COUNTERVALUE
         {
@@ -38,17 +33,122 @@ namespace PredatorControlApp
             public double doubleValue;
         }
 
-        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-        private struct PDH_FMT_COUNTERVALUE_ITEM
-        {
-            public IntPtr szName;
-            public PDH_FMT_COUNTERVALUE FmtValue;
-        }
-
         private IntPtr _query = IntPtr.Zero;
         private IntPtr _cpuCounter = IntPtr.Zero;
-        private IntPtr _gpuCounter = IntPtr.Zero;
         private bool _isDisposed;
+        private readonly object _lock = new();
+        private DateTime _lastInitAttempt = DateTime.MinValue;
+
+        #region NVAPI Direct Hardware Interop (Zero DPC Latency / Zero Dxgkrnl Stalls)
+
+        private static bool _nvapiInitialized;
+        private static bool _nvapiAvailable;
+        private static IntPtr[]? _nvGpuHandles;
+        private static int _nvGpuCount;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NV_USAGES
+        {
+            public uint Version;
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 33)]
+            public uint[] Usages;
+        }
+
+        [DllImport("nvapi64.dll", EntryPoint = "nvapi_QueryInterface")]
+        private static extern IntPtr NvAPI_QueryInterface(uint id);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate int NvAPI_Initialize_Delegate();
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate int NvAPI_EnumPhysicalGPUs_Delegate([Out] IntPtr[] gpuHandles, out int gpuCount);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate int NvAPI_GPU_GetUsages_Delegate(IntPtr gpuHandle, ref NV_USAGES usages);
+
+        private static NvAPI_GPU_GetUsages_Delegate? _nvGetUsages;
+        private static readonly uint s_nvUsagesVersion = (uint)(Marshal.SizeOf<NV_USAGES>() | 0x10000);
+        [ThreadStatic]
+        private static NV_USAGES s_reusableUsages;
+
+        private static readonly object s_nvapiLock = new();
+
+        private static void EnsureNvApi()
+        {
+            if (_nvapiInitialized) return;
+            lock (s_nvapiLock)
+            {
+                if (_nvapiInitialized) return;
+                try
+                {
+                    IntPtr pInit = NvAPI_QueryInterface(0x0150E828); // NvAPI_Initialize
+                    if (pInit == IntPtr.Zero) return;
+                    var init = Marshal.GetDelegateForFunctionPointer<NvAPI_Initialize_Delegate>(pInit);
+                    if (init() != 0) return;
+
+                    IntPtr pEnum = NvAPI_QueryInterface(0xE5AC92AA); // NvAPI_EnumPhysicalGPUs
+                    if (pEnum == IntPtr.Zero) return;
+                    var enumGpus = Marshal.GetDelegateForFunctionPointer<NvAPI_EnumPhysicalGPUs_Delegate>(pEnum);
+                    var handles = new IntPtr[64];
+                    if (enumGpus(handles, out int count) != 0 || count == 0) return;
+
+                    IntPtr pUsages = NvAPI_QueryInterface(0x189A1F42); // NvAPI_GPU_GetUsages
+                    if (pUsages == IntPtr.Zero) return;
+                    _nvGetUsages = Marshal.GetDelegateForFunctionPointer<NvAPI_GPU_GetUsages_Delegate>(pUsages);
+
+                    _nvGpuHandles = handles;
+                    _nvGpuCount = Math.Min(count, handles.Length);
+                    _nvapiAvailable = true;
+                }
+                catch { }
+                finally
+                {
+                    _nvapiInitialized = true;
+                }
+            }
+        }
+
+        private static double? TrySampleNvApi()
+        {
+            EnsureNvApi();
+            if (!_nvapiAvailable || _nvGetUsages == null || _nvGpuHandles == null || _nvGpuCount == 0)
+                return null;
+
+            try
+            {
+                if (s_reusableUsages.Usages == null)
+                {
+                    s_reusableUsages = new NV_USAGES
+                    {
+                        Version = s_nvUsagesVersion,
+                        Usages = new uint[33]
+                    };
+                }
+
+                double maxUsage = 0;
+                bool anyRead = false;
+                for (int i = 0; i < _nvGpuCount; i++)
+                {
+                    s_reusableUsages.Version = s_nvUsagesVersion;
+                    Array.Clear(s_reusableUsages.Usages, 0, s_reusableUsages.Usages.Length);
+
+                    if (_nvGetUsages(_nvGpuHandles[i], ref s_reusableUsages) == 0)
+                    {
+                        uint gpuCoreUsage = s_reusableUsages.Usages[3]; // Index 3 is GPU Core load
+                        if (gpuCoreUsage <= 100)
+                        {
+                            if (gpuCoreUsage > maxUsage) maxUsage = gpuCoreUsage;
+                            anyRead = true;
+                        }
+                    }
+                }
+                if (anyRead) return Math.Clamp(maxUsage, 0.0, 100.0);
+            }
+            catch { }
+            return null;
+        }
+
+        #endregion
 
         public PdhLoadMonitor()
         {
@@ -57,6 +157,14 @@ namespace PredatorControlApp
 
         private void Init()
         {
+            if (_query != IntPtr.Zero)
+            {
+                try { PdhCloseQuery(_query); } catch { }
+                _query = IntPtr.Zero;
+                _cpuCounter = IntPtr.Zero;
+            }
+
+            _lastInitAttempt = DateTime.UtcNow;
             try
             {
                 if (PdhOpenQuery(IntPtr.Zero, IntPtr.Zero, out _query) == 0)
@@ -64,99 +172,108 @@ namespace PredatorControlApp
                     // CPU Counter
                     if (PdhAddEnglishCounter(_query, @"\Processor Information(_Total)\% Processor Utility", IntPtr.Zero, out _cpuCounter) != 0)
                     {
-                        PdhAddEnglishCounter(_query, @"\Processor(_Total)\% Processor Time", IntPtr.Zero, out _cpuCounter);
+                        if (PdhAddEnglishCounter(_query, @"\Processor(_Total)\% Processor Time", IntPtr.Zero, out _cpuCounter) != 0)
+                        {
+                            _cpuCounter = IntPtr.Zero;
+                        }
                     }
 
-                    // GPU 3D Engine Counter
-                    PdhAddEnglishCounter(_query, @"\GPU Engine(*engtype_3D)\Utilization Percentage", IntPtr.Zero, out _gpuCounter);
+                    if (_cpuCounter == IntPtr.Zero)
+                    {
+                        try { PdhCloseQuery(_query); } catch { }
+                        _query = IntPtr.Zero;
+                        return;
+                    }
 
                     // Initial collection to prime the counter
                     PdhCollectQueryData(_query);
                 }
-            }
-            catch { }
-        }
-
-        public (double? Cpu, double? Gpu) Sample()
-        {
-            if (_isDisposed || _query == IntPtr.Zero) return (null, null);
-
-            try
-            {
-                if (PdhCollectQueryData(_query) != 0) return (null, null);
-
-                double? cpu = null;
-                if (_cpuCounter != IntPtr.Zero)
+                else
                 {
-                    if (PdhGetFormattedCounterValue(_cpuCounter, PDH_FMT_DOUBLE, out _, out var val) == 0 && val.CStatus <= 1)
-                    {
-                        cpu = Math.Clamp(val.doubleValue, 0.0, 100.0);
-                    }
+                    _query = IntPtr.Zero;
                 }
-
-                double? gpu = SampleGpu();
-                return (cpu, gpu);
             }
             catch
             {
-                return (null, null);
+                if (_query != IntPtr.Zero)
+                {
+                    try { PdhCloseQuery(_query); } catch { }
+                    _query = IntPtr.Zero;
+                }
+                _cpuCounter = IntPtr.Zero;
             }
+        }
+
+        public (double? Cpu, double? Gpu) Sample(bool sampleGpu = true)
+        {
+            if (_isDisposed) return (null, null);
+
+            double? cpu = null;
+            lock (_lock)
+            {
+                if (_isDisposed) return (null, null);
+
+                if (_query == IntPtr.Zero && (DateTime.UtcNow - _lastInitAttempt).TotalSeconds > 5)
+                {
+                    _lastInitAttempt = DateTime.UtcNow;
+                    Init();
+                }
+
+                if (_query != IntPtr.Zero)
+                {
+                    try
+                    {
+                        if (PdhCollectQueryData(_query) == 0 && _cpuCounter != IntPtr.Zero)
+                        {
+                            if (PdhGetFormattedCounterValue(_cpuCounter, PDH_FMT_DOUBLE, out _, out var val) == 0 && val.CStatus <= 1 && !double.IsNaN(val.doubleValue) && !double.IsInfinity(val.doubleValue))
+                            {
+                                cpu = Math.Clamp(val.doubleValue, 0.0, 100.0);
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        try { PdhCloseQuery(_query); } catch { }
+                        _query = IntPtr.Zero;
+                        _cpuCounter = IntPtr.Zero;
+                    }
+                }
+            }
+
+            double? gpu = sampleGpu ? SampleGpu() : null;
+            return (cpu, gpu);
         }
 
         private double? SampleGpu()
         {
-            if (_gpuCounter == IntPtr.Zero) return null;
-
-            try
-            {
-                uint bufSize = 0;
-                uint itemCount = 0;
-                uint status = PdhGetFormattedCounterArray(_gpuCounter, PDH_FMT_DOUBLE, ref bufSize, ref itemCount, IntPtr.Zero);
-                if (status != PDH_MORE_DATA && status != 0) return null;
-                if (bufSize == 0 || itemCount == 0) return 0.0;
-
-                IntPtr pBuf = Marshal.AllocHGlobal((int)bufSize);
-                try
-                {
-                    if (PdhGetFormattedCounterArray(_gpuCounter, PDH_FMT_DOUBLE, ref bufSize, ref itemCount, pBuf) == 0)
-                    {
-                        double maxVal = 0.0;
-                        int itemSize = Marshal.SizeOf<PDH_FMT_COUNTERVALUE_ITEM>();
-                        for (int i = 0; i < itemCount; i++)
-                        {
-                            IntPtr pItem = (IntPtr)((long)pBuf + (i * itemSize));
-                            var item = Marshal.PtrToStructure<PDH_FMT_COUNTERVALUE_ITEM>(pItem);
-                            if (item.FmtValue.CStatus <= 1)
-                            {
-                                if (item.FmtValue.doubleValue > maxVal)
-                                    maxVal = item.FmtValue.doubleValue;
-                            }
-                        }
-                        return Math.Clamp(maxVal, 0.0, 100.0);
-                    }
-                }
-                finally
-                {
-                    Marshal.FreeHGlobal(pBuf);
-                }
-            }
-            catch { }
-            return null;
+            // Direct hardware query via NVAPI (zero DPC latency, zero dxgkrnl calls/stalls)
+            // PDH \GPU Engine counters are deliberately excluded to prevent dxgkrnl driver stalls and A/V desync
+            return TrySampleNvApi();
         }
 
         public void Dispose()
         {
-            if (_isDisposed) return;
-            _isDisposed = true;
-            try
+            lock (_lock)
             {
-                if (_query != IntPtr.Zero)
+                if (_isDisposed) return;
+                _isDisposed = true;
+                try
                 {
-                    PdhCloseQuery(_query);
-                    _query = IntPtr.Zero;
+                    if (_query != IntPtr.Zero)
+                    {
+                        PdhCloseQuery(_query);
+                        _query = IntPtr.Zero;
+                        _cpuCounter = IntPtr.Zero;
+                    }
                 }
+                catch { }
             }
-            catch { }
+            GC.SuppressFinalize(this);
+        }
+
+        ~PdhLoadMonitor()
+        {
+            Dispose();
         }
     }
 }

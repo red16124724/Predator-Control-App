@@ -15,7 +15,7 @@ namespace PredatorControlApp
         private static bool _dialogOpen;
         private static readonly object _reportLock = new();
 
-        private const string DefaultMutexName = "PredatorControlApp_Unique_System_Mutex_999";
+        private const string DefaultMutexName = @"Global\PredatorControlApp_Unique_System_Mutex_999";
         internal static string MutexName = DefaultMutexName;
 
         internal static bool TryTakeSingleInstanceLock(string? customMutexName = null)
@@ -52,9 +52,12 @@ namespace PredatorControlApp
 
         internal static void ReleaseSingleInstanceLock()
         {
-            try { _appMutex?.ReleaseMutex(); } catch { }
-            _appMutex?.Dispose();
-            _appMutex = null;
+            var mtx = Interlocked.Exchange(ref _appMutex, null);
+            if (mtx != null)
+            {
+                try { mtx.ReleaseMutex(); } catch { }
+                try { mtx.Dispose(); } catch { }
+            }
         }
 
         private static string LogPath
@@ -114,7 +117,18 @@ namespace PredatorControlApp
 
             if (!TryTakeSingleInstanceLock())
             {
-                PostMessage((IntPtr)HWND_BROADCAST, Form1.WM_SHOWME, IntPtr.Zero, IntPtr.Zero);
+                try
+                {
+                    bool sent = SecureNamedPipeIpc.SendMessageWithVerificationAsync("SHOW", 1500).GetAwaiter().GetResult();
+                    if (!sent)
+                    {
+                        PostMessage((IntPtr)HWND_BROADCAST, Form1.WM_SHOWME, IntPtr.Zero, IntPtr.Zero);
+                    }
+                }
+                catch
+                {
+                    PostMessage((IntPtr)HWND_BROADCAST, Form1.WM_SHOWME, IntPtr.Zero, IntPtr.Zero);
+                }
                 return;
             }
 
@@ -331,6 +345,7 @@ namespace PredatorControlApp
 
         private static byte FinalizeFanMode(int mode)
         {
+            if (mode is < 0 or > 255) return 0x01;
             byte b = (byte)mode;
             if (b != 0x01 && b != 0x02 && b != 0x03)
             {
@@ -341,6 +356,7 @@ namespace PredatorControlApp
 
         private static byte FinalizeMode(int mode, bool onBattery)
         {
+            if (mode is < 0 or > 255) return 0x01;
             byte b = (byte)mode;
             if (b != 0x00 && b != 0x01 && b != 0x04 && b != 0x05 && b != 0x06)
             {
@@ -444,8 +460,9 @@ namespace PredatorControlApp
         {
             try
             {
-                var lineStatus = SystemInformation.PowerStatus.PowerLineStatus;
-                bool onBattery = lineStatus != PowerLineStatus.Online;
+                var power = SystemInformation.PowerStatus;
+                bool isCharging = (power.BatteryChargeStatus & BatteryChargeStatus.Charging) != 0;
+                bool onBattery = power.PowerLineStatus != PowerLineStatus.Online && !isCharging;
                 byte powerMode = ResolvePowerMode(onBattery);
                 byte fanMode = ResolveFanMode(onBattery);
 

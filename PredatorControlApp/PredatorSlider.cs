@@ -1,6 +1,9 @@
+using System;
 using System.ComponentModel;
+using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Runtime.Versioning;
+using System.Windows.Forms;
 
 namespace PredatorControlApp
 {
@@ -12,10 +15,10 @@ namespace PredatorControlApp
         private int _maximum = 100;
         private bool _isDragging;
 
-        private static readonly Color TrackBg = Color.FromArgb(55, 55, 62);
-        private static readonly Color FillColor = Color.FromArgb(0, 200, 160);
-        private static readonly Color ThumbColor = Color.FromArgb(0, 200, 160);
-        private static readonly Color GlowColor = Color.FromArgb(50, 0, 200, 160);
+        private static Color TrackBg => ThemeManager.ControlBorder;
+        private static Color FillColor => ThemeManager.Accent;
+        private static Color ThumbColor => ThemeManager.Accent;
+        private static Color GlowColor => Color.FromArgb(40, ThemeManager.Accent);
 
         private const int TrackHeight = 4;
         private const int ThumbRadius = 7;
@@ -61,6 +64,8 @@ namespace PredatorControlApp
 
         public event EventHandler? ValueCommitted;
 
+        private readonly Action _themeHandler;
+
         public PredatorSlider()
         {
             SetStyle(
@@ -71,6 +76,15 @@ namespace PredatorControlApp
 
             Size = new Size(300, 28);
             Cursor = Cursors.Hand;
+
+            _themeHandler = () =>
+            {
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    try { Invalidate(); } catch { }
+                }
+            };
+            ThemeManager.ThemeChanged += _themeHandler;
         }
 
         private int TrackLeft => ThumbRadius;
@@ -83,14 +97,14 @@ namespace PredatorControlApp
         {
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.Clear(Parent?.BackColor ?? Color.FromArgb(30, 30, 30));
+            g.Clear(Parent?.BackColor ?? ThemeManager.CardBg);
 
             int cy = Height / 2;
             int trackY = cy - TrackHeight / 2;
             int fillWidth = ThumbX - TrackLeft;
 
-            Color currentFill = Enabled ? FillColor : Color.FromArgb(50, 50, 55);
-            Color currentThumb = Enabled ? ThumbColor : Color.FromArgb(80, 80, 85);
+            Color currentFill = Enabled ? FillColor : ThemeManager.ControlDisabled;
+            Color currentThumb = Enabled ? ThumbColor : ThemeManager.TextMuted;
 
             using (var brush = new SolidBrush(TrackBg))
                 g.FillRectangle(brush, TrackLeft, trackY, TrackWidth, TrackHeight);
@@ -114,7 +128,7 @@ namespace PredatorControlApp
             int innerR = ThumbRadius - 3;
             if (innerR > 0 && Enabled)
             {
-                using var innerBrush = new SolidBrush(Color.FromArgb(80, 255, 255, 255));
+                using var innerBrush = new SolidBrush(Color.FromArgb(90, 255, 255, 255));
                 g.FillEllipse(innerBrush, ThumbX - innerR, cy - innerR, innerR * 2, innerR * 2);
             }
         }
@@ -139,7 +153,10 @@ namespace PredatorControlApp
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
-            if (_isDragging && Enabled) UpdateValueFromMouse(e.X);
+            if (_isDragging && Enabled)
+            {
+                UpdateValueFromMouse(e.X);
+            }
             base.OnMouseMove(e);
         }
 
@@ -149,7 +166,7 @@ namespace PredatorControlApp
             {
                 _isDragging = false;
                 Capture = false;
-                if (Enabled) ValueCommitted?.Invoke(this, EventArgs.Empty);
+                ValueCommitted?.Invoke(this, EventArgs.Empty);
             }
             base.OnMouseUp(e);
         }
@@ -157,43 +174,56 @@ namespace PredatorControlApp
         private void UpdateValueFromMouse(int mouseX)
         {
             if (TrackWidth <= 0) return;
-            float fraction = (float)(mouseX - TrackLeft) / TrackWidth;
-            fraction = Math.Clamp(fraction, 0f, 1f);
-            int newValue = _minimum + (int)Math.Round(fraction * (_maximum - _minimum));
-            if (newValue != _value)
+            float fraction = Math.Clamp((float)(mouseX - TrackLeft) / TrackWidth, 0f, 1f);
+            int newVal = _minimum + (int)Math.Round(fraction * (_maximum - _minimum));
+            if (newVal != _value)
             {
-                _value = newValue;
-                ValueChanged?.Invoke(this, EventArgs.Empty);
+                _value = newVal;
                 Invalidate();
+                ValueChanged?.Invoke(this, EventArgs.Empty);
             }
         }
 
-        protected override void OnKeyDown(KeyEventArgs e)
+        protected override bool ProcessDialogKey(Keys keyData)
         {
-            if (!Enabled) return;
-            int step = 1;
-            int oldVal = _value;
-            if (e.KeyCode == Keys.Left || e.KeyCode == Keys.Down)
+            if (!Enabled) return base.ProcessDialogKey(keyData);
+
+            int step = Math.Max(1, (_maximum - _minimum) / 20);
+            switch (keyData)
             {
-                Value = Math.Max(_minimum, _value - step);
-                if (_value != oldVal)
-                {
+                case Keys.Left:
+                case Keys.Down:
+                    Value = Math.Max(_minimum, _value - step);
                     ValueChanged?.Invoke(this, EventArgs.Empty);
                     ValueCommitted?.Invoke(this, EventArgs.Empty);
-                }
-                e.Handled = true;
-            }
-            else if (e.KeyCode == Keys.Right || e.KeyCode == Keys.Up)
-            {
-                Value = Math.Min(_maximum, _value + step);
-                if (_value != oldVal)
-                {
+                    return true;
+                case Keys.Right:
+                case Keys.Up:
+                    Value = Math.Min(_maximum, _value + step);
                     ValueChanged?.Invoke(this, EventArgs.Empty);
                     ValueCommitted?.Invoke(this, EventArgs.Empty);
-                }
-                e.Handled = true;
+                    return true;
+                case Keys.Home:
+                    Value = _minimum;
+                    ValueChanged?.Invoke(this, EventArgs.Empty);
+                    ValueCommitted?.Invoke(this, EventArgs.Empty);
+                    return true;
+                case Keys.End:
+                    Value = _maximum;
+                    ValueChanged?.Invoke(this, EventArgs.Empty);
+                    ValueCommitted?.Invoke(this, EventArgs.Empty);
+                    return true;
             }
-            base.OnKeyDown(e);
+            return base.ProcessDialogKey(keyData);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                ThemeManager.ThemeChanged -= _themeHandler;
+            }
+            base.Dispose(disposing);
         }
     }
 }

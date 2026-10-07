@@ -1,7 +1,10 @@
 #pragma warning disable WFO1000
 
+using System;
+using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.ComponentModel;
+using System.Windows.Forms;
 
 namespace PredatorControlApp
 {
@@ -35,6 +38,8 @@ namespace PredatorControlApp
             }
         }
 
+        private readonly Action _themeHandler;
+
         public PredatorToggle()
         {
             this.DoubleBuffered = true;
@@ -46,6 +51,15 @@ namespace PredatorControlApp
 
             _animTimer = new System.Windows.Forms.Timer { Interval = AnimIntervalMs };
             _animTimer.Tick += OnAnimTick;
+
+            _themeHandler = () =>
+            {
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    try { Invalidate(); } catch { }
+                }
+            };
+            ThemeManager.ThemeChanged += _themeHandler;
         }
 
         private void OnAnimTick(object? sender, EventArgs e)
@@ -87,24 +101,24 @@ namespace PredatorControlApp
         {
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.Clear(Parent?.BackColor ?? Color.FromArgb(22, 22, 26));
+            g.Clear(Parent?.BackColor ?? ThemeManager.CardBg);
 
             float t = _knobProgress;
 
-            Color trackOff = Color.FromArgb(45, 45, 50);
-            Color trackOn = Color.FromArgb(0, 80, 65);
-            Color trackDisabled = Color.FromArgb(35, 35, 40);
+            Color trackOff = ThemeManager.ControlBg;
+            Color trackOn = ThemeManager.ControlActive;
+            Color trackDisabled = ThemeManager.ControlDisabled;
 
-            Color knobOff = Color.FromArgb(80, 80, 85);
-            Color knobOn = Color.FromArgb(0, 200, 160);
-            Color knobDisabled = Color.FromArgb(55, 55, 60);
+            Color knobOff = ThemeManager.TextSecondary;
+            Color knobOn = ThemeManager.Accent;
+            Color knobDisabled = ThemeManager.TextMuted;
 
             Color trackColor = Enabled ? LerpColor(trackOff, trackOn, t) : trackDisabled;
             Color knobColor = Enabled ? LerpColor(knobOff, knobOn, t) : knobDisabled;
 
             Color borderColor = Enabled
-                ? (_isHovered ? Color.FromArgb(90, 90, 100) : Color.FromArgb(70, 70, 75))
-                : Color.FromArgb(50, 50, 55);
+                ? (_isHovered ? ThemeManager.BorderHover : ThemeManager.ControlBorder)
+                : ThemeManager.BorderDisabled;
             
             using (var path = GetRoundedRectPath(new Rectangle(1, 1, Width - 3, Height - 3), Height / 2))
             {
@@ -136,7 +150,10 @@ namespace PredatorControlApp
             else
             {
                 int alpha = (int)((0.5f - t) * 2f * 200f);
-                using var pen = new Pen(Color.FromArgb(Math.Clamp(alpha, 0, 255), 200, 200, 200), 1.5f);
+                Color iconOffColor = ThemeManager.IsDarkThemeActive
+                    ? Color.FromArgb(Math.Clamp(alpha, 0, 255), 200, 200, 200)
+                    : Color.FromArgb(Math.Clamp(alpha, 0, 255), 70, 75, 90);
+                using var pen = new Pen(iconOffColor, 1.5f);
                 g.DrawEllipse(pen, cx - iconR, cy - iconR, iconR * 2, iconR * 2);
             }
         }
@@ -155,7 +172,12 @@ namespace PredatorControlApp
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { _animTimer.Stop(); _animTimer.Dispose(); }
+            if (disposing)
+            {
+                ThemeManager.ThemeChanged -= _themeHandler;
+                _animTimer.Stop();
+                _animTimer.Dispose();
+            }
             base.Dispose(disposing);
         }
     }

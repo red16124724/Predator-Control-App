@@ -41,6 +41,8 @@ namespace PredatorControlApp
         private static readonly Font FontBody = new("Segoe UI", 9f, FontStyle.Regular);
         private static readonly Font FontBodyBold = new("Segoe UI", 9f, FontStyle.Bold);
         private static readonly Font FontMono = new("Consolas", 8.5f, FontStyle.Regular);
+        private static readonly Font FontClose = new("Arial", 12f);
+        private static readonly Font FontSubHeader = new("Segoe UI", 7.8f, FontStyle.Regular);
 
         #endregion
 
@@ -49,13 +51,13 @@ namespace PredatorControlApp
         private readonly Action<DeviceCapabilities>? _onOverridesSaved;
         private float _dpiScale = 1.0f;
         private int _formW;
+        private Bitmap? _appIconBitmap;
 
         private DarkScrollPanel _contentPanel = null!;
         private PredatorDropDown _cboCoolBoost = null!;
         private PredatorDropDown _cboOperatingModes = null!;
         private PredatorDropDown _cboGpuMode = null!;
         private PredatorDropDown _cboThirdFan = null!;
-        private PredatorDropDown _cboDustDefender = null!;
         private PredatorDropDown _cboFanTable = null!;
         private PredatorDropDown _cboUsbCharging = null!;
         private PredatorDropDown _cboBatteryCalibration = null!;
@@ -133,7 +135,16 @@ namespace PredatorControlApp
                 Location = new Point(pad, S(12)),
                 BackColor = Color.Transparent
             };
-            try { var extIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); if (extIcon != null) picIcon.Image = extIcon.ToBitmap(); } catch { }
+            try
+            {
+                using var extIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+                if (extIcon != null)
+                {
+                    _appIconBitmap = extIcon.ToBitmap();
+                    picIcon.Image = _appIconBitmap;
+                }
+            }
+            catch { }
             picIcon.MouseDown += TitleBar_MouseDown;
             pnlTitle.Controls.Add(picIcon);
 
@@ -144,7 +155,8 @@ namespace PredatorControlApp
                 Font = FontTitle,
                 AutoSize = true,
                 Location = new Point(pad + S(26), S(11)),
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+                UseMnemonic = false
             };
             lblTitle.MouseDown += TitleBar_MouseDown;
             pnlTitle.Controls.Add(lblTitle);
@@ -153,11 +165,12 @@ namespace PredatorControlApp
             {
                 Text = "●",
                 ForeColor = Color.FromArgb(255, 95, 86),
-                Font = new Font("Arial", 12f),
+                Font = FontClose,
                 AutoSize = true,
                 Location = new Point(_formW - pad - S(6), S(10)),
                 Cursor = Cursors.Hand,
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+                UseMnemonic = false
             };
             lblClose.Click += (s, e) => this.Close();
             pnlTitle.Controls.Add(lblClose);
@@ -234,14 +247,15 @@ namespace PredatorControlApp
                 ForeColor = SubHeaderColor,
                 Font = FontBody,
                 Location = new Point(pad, curY),
-                AutoSize = true
+                AutoSize = true,
+                UseMnemonic = false
             };
             _contentPanel.Controls.Add(lblDesc);
             curY += S(24);
 
             var curOverrides = CapabilityOverrides.LoadFromRegistry();
 
-            int cardOverridesH = S(390);
+            int cardOverridesH = S(346);
             var cardOverrides = CreateCard(pad, curY, contentW, cardOverridesH);
             int oy = S(12);
 
@@ -251,14 +265,12 @@ namespace PredatorControlApp
             _cboOperatingModes = AddOverrideRow(cardOverrides, "Operating Power Modes", "Quiet, Balanced, Performance, Turbo, Eco", curOverrides.OperatingModes, _capabilities.OperatingModes.Count > 0, oy);
             oy += S(44);
 
-            _cboGpuMode = AddOverrideRow(cardOverrides, "MUX Switch / GPU Working Mode", "Optimus Hybrid vs. Discrete GPU direct mode", curOverrides.GpuModeSwitch, _capabilities.GpuModeSwitch, oy);
+            _cboGpuMode = AddOverrideRow(cardOverrides, "MUX Switch / GPU Working Mode", "3-Mode MUX: Auto (Optimus/DDS), iGPU Only, and dGPU Only", curOverrides.GpuModeSwitch, _capabilities.GpuModeSwitch, oy);
             oy += S(44);
 
             _cboThirdFan = AddOverrideRow(cardOverrides, "3rd System / Chassis Fan", "Triple-fan cooling speed slider and RPM readout", curOverrides.ThirdFan, _capabilities.HasThirdFan, oy);
             oy += S(44);
 
-            _cboDustDefender = AddOverrideRow(cardOverrides, "Acer DustDefender", "Reverse-spin fan cycle for cooling fin debris cleaning", curOverrides.DustDefender, _capabilities.DustDefender, oy);
-            oy += S(44);
 
             _cboFanTable = AddOverrideRow(cardOverrides, "Factory EC Fan Tables", "Standard, Faster, Fastest hardware lookup tables", curOverrides.FanTable, _capabilities.FanTable, oy);
             oy += S(44);
@@ -355,7 +367,8 @@ namespace PredatorControlApp
                 Font = FontBodyBold,
                 ForeColor = Color.White,
                 Location = new Point(padX, y),
-                AutoSize = true
+                AutoSize = true,
+                UseMnemonic = false
             };
             parent.Controls.Add(lblTitle);
 
@@ -363,10 +376,11 @@ namespace PredatorControlApp
             var lblSub = new Label
             {
                 Text = $"{subtitle} ({probedStatus})",
-                Font = new Font("Segoe UI", 7.8f, FontStyle.Regular),
+                Font = FontSubHeader,
                 ForeColor = SubHeaderColor,
                 Location = new Point(padX, y + S(18)),
-                AutoSize = true
+                AutoSize = true,
+                UseMnemonic = false
             };
             parent.Controls.Add(lblSub);
 
@@ -410,7 +424,6 @@ namespace PredatorControlApp
                     OperatingModes = GetVal(_cboOperatingModes),
                     GpuModeSwitch = GetVal(_cboGpuMode),
                     ThirdFan = GetVal(_cboThirdFan),
-                    DustDefender = GetVal(_cboDustDefender),
                     FanTable = GetVal(_cboFanTable),
                     UsbCharging = GetVal(_cboUsbCharging),
                     BatteryCalibration = GetVal(_cboBatteryCalibration)
@@ -436,7 +449,6 @@ namespace PredatorControlApp
                 _cboOperatingModes.SelectedIndex = 0;
                 _cboGpuMode.SelectedIndex = 0;
                 _cboThirdFan.SelectedIndex = 0;
-                _cboDustDefender.SelectedIndex = 0;
                 _cboFanTable.SelectedIndex = 0;
                 _cboUsbCharging.SelectedIndex = 0;
                 _cboBatteryCalibration.SelectedIndex = 0;
@@ -463,7 +475,8 @@ namespace PredatorControlApp
                 AutoSize = true,
                 Font = FontSection,
                 ForeColor = HeaderColor,
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+                UseMnemonic = false
             };
             _contentPanel.Controls.Add(lbl);
         }
@@ -492,7 +505,8 @@ namespace PredatorControlApp
                 Font = FontBody,
                 ForeColor = SubHeaderColor,
                 Location = new Point(x, y),
-                AutoSize = true
+                AutoSize = true,
+                UseMnemonic = false
             };
             card.Controls.Add(lblKey);
 
@@ -502,7 +516,8 @@ namespace PredatorControlApp
                 Font = FontBodyBold,
                 ForeColor = valColor ?? Color.White,
                 Location = new Point(x + keyWidth, y),
-                AutoSize = true
+                AutoSize = true,
+                UseMnemonic = false
             };
             card.Controls.Add(lblVal);
         }
@@ -514,6 +529,16 @@ namespace PredatorControlApp
                 ReleaseCapture();
                 SendMessage(Handle, WM_NCLBUTTONDOWN, HT_CAPTION, 0);
             }
+        }
+    
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                try { Icon?.Dispose(); } catch { }
+                try { _appIconBitmap?.Dispose(); } catch { }
+            }
+            base.Dispose(disposing);
         }
     }
 }

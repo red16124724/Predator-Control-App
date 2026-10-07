@@ -7,20 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.4.0] - 2026-10-01
+## [1.4.0] - 2026-10-07
 
 ### 🚀 Summary
-A massive release transforming Predator Control App into the ultimate lightweight, high-performance control center for Acer Predator gaming laptops. Brings 26+ advanced hardware features, direct EC HID hardware communication, MUX switch control, an interactive custom fan curve graph, 34 keyboard RGB lighting modes, hardware battery calibration, offline update security, and zero-dependency standalone distribution.
+A major release bringing 16:9 adaptive maximization, 26+ advanced Acer Predator hardware controls, accurate high-RPM telemetry, full custom fan curve persistence, CoolBoost support, 34 keyboard RGB lighting modes, zero-dependency standalone distribution, and deep defensive stability hardening.
 
 ### 🌟 Added
+- **16:9 Maximize Mode**: Added a dedicated top-right maximize caption button and double-click titlebar maximize/restore. Automatically calculates and scales the application window to the largest possible 16:9 aspect ratio centered on the active display.
 - **Direct Embedded Controller (EC) HID Protocol**: Communicates directly with laptop EC hardware for instantaneous response with seamless, transparent fallback to Acer WMI.
 - **MUX Switch / GPU Working Mode**: Directly connected to Acer BIOS. Effortlessly toggle between **Hybrid (Nvidia Optimus)** for maximum battery life and **Discrete GPU** for uncompromised gaming FPS (requires standard reboot to apply).
 - **GPU Sleep / D3Cold Awareness**: Instant visual indicator in the UI showing when the dedicated Nvidia GPU is in low-power deep sleep (D3Cold).
 - **3rd Fan / System Fan Control**: Full support and speed monitoring for modern Predator laptops equipped with 3 fans (CPU, GPU, and System/Chassis).
 - **Acer DustDefender**: Integrated automated reverse spin fan cycle to clear accumulated dust and debris from cooling fins.
-- **Acer CoolBoost Hardware Toggle**: Direct hardware toggle to unlock elevated fan ceiling curves during intense workloads.
+- **Acer CoolBoost Hardware Toggle**: Direct hardware toggle to unlock elevated fan ceiling curves during intense workloads with persistent state retention.
 - **Factory OEM Fan Lookup Tables**: Accurately mapped Acer factory fan lookup tables for native hardware RPM-to-percentage scaling.
-- **Interactive Graphical Fan Curve Editor**: Full custom visual fan curve editor with support for multi-point curves.
+- **Interactive Graphical Fan Curve Editor**: Full custom visual fan curve editor with support for multi-point curves, persistent settings, and deep-cloned points.
 - **Curve Hysteresis & Spike Damping**: Eliminates annoying rapid fan throttling on momentary CPU spikes using smoothing and hysteresis.
 - **Sensor Failsafe & Periodic Reassertion**: Guardrails to guarantee fans reassert failsafe cooling if background software hangs or crashes.
 - **Independent Fan Channel Locking (FanLock)**: Lock CPU, GPU, or System fans to specific speeds independently.
@@ -29,15 +30,22 @@ A massive release transforming Predator Control App into the ultimate lightweigh
 - **Comprehensive Battery Telemetry**: Real-time readouts of battery health %, wear percentage, cycle count, charge rate, and power status.
 - **Hardware Battery Calibration Cycle**: Automated cycle to discharge, reset, and recalibrate internal battery fuel-gauge sensors.
 - **Power-Off USB Charging & Low-Battery Floor**: Toggle external device charging via USB ports while the laptop is turned off, with a low-battery protection floor.
-- **Expanded Keyboard RGB Engine (34 Effects)**: Upgraded from 8 to 34 rich dynamic lighting effects (Static, Breathing, Neon, Wave, Shifting, Zoom, Meteor, Twinkling, Rainbow, Spiral, Fire, Waterfall, and more) with fine-grained color, speed, and brightness controls.
+- **Expanded Keyboard RGB Engine (34 Effects)**: Upgraded from 8 to 34 rich dynamic lighting effects with fine-grained color, speed, and brightness controls.
 - **Physical Predator Mode Key Interception**: Non-blocking Raw Input interception for the dedicated physical hardware "Mode" key on Predator keyboards, including synchronized Mode Key LED indicator.
-- **Backlight Auto-Off Timeout**: Configurable inactivity timer to automatically switch off keyboard backlight and preserve battery.
 - **Comprehensive Hardware Identity & SMBIOS Probing**: Full DMI/SMBIOS hardware detection for exact motherboard model, BIOS version, EC version, and CPU/GPU identities.
 - **User Hardware Capability Overrides**: Ability to override probed hardware capabilities via local configuration if needed.
 - **System / Light / Dark Themes**: Clean, modern UI theme switching with native high-DPI scaling and DarkScrollPanel.
 - **One-Click Diagnostic Dump**: Instantly copies all hardware IDs, sensor values, power modes, and fan status to the clipboard for troubleshooting.
-- **Secure Named Pipe IPC & Anti-Spoofing**: Secure single-instance communication preventing spoofing and unauthorized process injection.
 - **Zero-Dependency Standalone Build**: Single-file executable (`PredatorControlApp-Standalone.exe`) that runs immediately on any Windows 10/11 x64 system without needing .NET installed.
+
+### 🛠️ Fixed & Improved
+- **Accurate Fan Speed Readings**: Fixed the dashboard RPM calculation and eliminated the false 2560 RPM ceiling clamp when fans operate at full throttle.
+- **Fan Curve Persistence**: Custom CPU and GPU fan curves now reliably save and persist across application restarts.
+- **Acer CoolBoost Retention**: Fixed CoolBoost state persistence across restarts and power mode transitions.
+- **Startup Button Highlighting**: Active power modes, fan modes, refresh rates, and GPU modes are now properly highlighted immediately on launch.
+- **Single-Instance Window Activation**: Launching the application when already running now reliably brings the existing window to the front instead of minimizing/toggling visibility.
+- **Removed Keyboard Backlight Timeout**: Completely removed keyboard backlight timeout setting and background worker.
+- **Stability & Crash Prevention**: Protected against unhandled exceptions during GPU mode changes and startup tasks, hardened registry path validation against traversal, and eliminated race conditions under high-concurrency loads.
 
 ### 🔒 Security & Networking
 - **100% Offline by Default**: The application contains zero background network requests, zero telemetry, zero analytics, and zero startup checks.

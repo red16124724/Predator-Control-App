@@ -276,10 +276,12 @@ namespace PredatorControlApp.Tests
                         normPath.StartsWith(".vs/") || normPath.Contains("/.vs/") ||
                         normPath.StartsWith(".git/") || normPath.Contains("/.git/") ||
                         normPath.StartsWith("publish/") || normPath.Contains("/publish/") ||
+                        normPath.StartsWith("publish_out/") || normPath.Contains("/publish_out/") ||
                         normPath.StartsWith("testresults/") || normPath.Contains("/testresults/") ||
                         normPath.StartsWith("predatorcontrolapp-code/") || normPath.Contains("/predatorcontrolapp-code/") ||
                         normPath.EndsWith(".exe") || normPath.EndsWith(".zip") ||
                         normPath.EndsWith(".dll") || normPath.EndsWith(".pdb") ||
+                        normPath.EndsWith(".txt") || normPath.EndsWith(".log") ||
                         normPath.EndsWith(".user") || normPath.EndsWith(".suo"))
                     {
                         continue;

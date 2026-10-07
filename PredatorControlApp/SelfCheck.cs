@@ -10,7 +10,7 @@ namespace PredatorControlApp
             var messy = new List<Point> { new(500, 500), new(10, -20), new(60, 60), new(60, 61) };
             var n = FanCurveGraph.Normalize(messy);
 
-            Debug.Assert(n.Count == messy.Count, "Normalize dropped points");
+            Debug.Assert(n.Count == FanCurveGraph.ControlPointCount, "Normalize must yield strictly 8 points");
             Debug.Assert(n[0].X == 30 && n[^1].X == 100, "Normalize must pin first/last temp");
             for (int i = 0; i < n.Count; i++)
             {
@@ -19,9 +19,9 @@ namespace PredatorControlApp
                 Debug.Assert(i == 0 || n[i - 1].X <= n[i].X, "Normalize must sort by temp");
             }
 
-            Debug.Assert(FanCurveGraph.Normalize(null).Count >= 2, "null must yield default curve");
-            Debug.Assert(FanCurveGraph.Normalize(new List<Point> { new(50, 50) }).Count >= 2,
-                "single point must yield default curve");
+            Debug.Assert(FanCurveGraph.Normalize(null).Count == FanCurveGraph.ControlPointCount, "null must yield default 8-point curve");
+            Debug.Assert(FanCurveGraph.Normalize(new List<Point> { new(50, 50) }).Count == FanCurveGraph.ControlPointCount,
+                "single point must yield default 8-point curve");
 
             Debug.Assert(Form1.BatteryProfileValues.Length == 4, "battery table size");
             Debug.Assert(Form1.BatteryProfileValues[3] == 0x06, "battery Eco must map to 0x06");

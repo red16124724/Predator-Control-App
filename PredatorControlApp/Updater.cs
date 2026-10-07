@@ -88,11 +88,16 @@ namespace PredatorControlApp
             // If a specific asset name is identifiable from the download url, try matching that asset's hash first
             if (!string.IsNullOrEmpty(targetUrl))
             {
-                string assetName = Path.GetFileName(new Uri(targetUrl, UriKind.RelativeOrAbsolute).LocalPath);
-                if (!string.IsNullOrEmpty(assetName))
+                if (Uri.TryCreate(targetUrl, UriKind.Absolute, out var parsedUri) ||
+                    Uri.TryCreate(targetUrl, UriKind.Relative, out parsedUri))
                 {
-                    var assetMatch = Regex.Match(body, Regex.Escape(assetName) + @"[\s:=]+([a-fA-F0-9]{64})", RegexOptions.IgnoreCase);
-                    if (assetMatch.Success) return assetMatch.Groups[1].Value.ToLowerInvariant();
+                    string localPath = parsedUri.IsAbsoluteUri ? parsedUri.LocalPath : targetUrl;
+                    string assetName = Path.GetFileName(localPath);
+                    if (!string.IsNullOrEmpty(assetName))
+                    {
+                        var assetMatch = Regex.Match(body, Regex.Escape(assetName) + @"[\s:=]+([a-fA-F0-9]{64})", RegexOptions.IgnoreCase);
+                        if (assetMatch.Success) return assetMatch.Groups[1].Value.ToLowerInvariant();
+                    }
                 }
             }
 
@@ -151,88 +156,132 @@ namespace PredatorControlApp
                 Process.Start(new ProcessStartInfo(info.DownloadUrl) { UseShellExecute = true });
                 return;
             }
+
             string target = Environment.ProcessPath ?? Application.ExecutablePath;
-            string staged = Path.Combine(Path.GetTempPath(), "PredatorControl-update.exe");
+            target = Path.GetFullPath(target);
 
-            string computedHashHex;
-            using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) })
+            // Validation: target path must not contain quotes, newlines, or invalid path characters to prevent command injection
+            if (target.IndexOfAny(Path.GetInvalidPathChars()) >= 0 || target.Contains('"') || target.Contains('\r') || target.Contains('\n'))
             {
-                http.DefaultRequestHeaders.UserAgent.ParseAdd("PredatorControl");
-                using var src = await http.GetStreamAsync(info.DownloadUrl);
-                using var dst = File.Create(staged);
-                using var incHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-
-                byte[] buffer = new byte[81920];
-                int bytesRead;
-                long totalBytes = 0;
-                const long maxAllowedBytes = 250 * 1024 * 1024; // 250 MB ceiling to prevent unbounded stream DoS
-
-                while ((bytesRead = await src.ReadAsync(buffer)) > 0)
-                {
-                    totalBytes += bytesRead;
-                    if (totalBytes > maxAllowedBytes)
-                    {
-                        try { File.Delete(staged); } catch { }
-                        throw new InvalidOperationException("Download exceeded maximum allowed size threshold.");
-                    }
-                    await dst.WriteAsync(buffer.AsMemory(0, bytesRead));
-                    incHash.AppendData(buffer, 0, bytesRead);
-                }
-                computedHashHex = Convert.ToHexString(incHash.GetHashAndReset()).ToLowerInvariant();
+                throw new System.Security.SecurityException("Invalid characters detected in target executable path.");
             }
 
-            if (new FileInfo(staged).Length < 100_000)
-                throw new IOException("Downloaded file looks truncated.");
-
-            if (!string.IsNullOrEmpty(info.ExpectedSha256))
+            string tempDir = Path.GetTempPath();
+            var tempDirInfo = new DirectoryInfo(tempDir);
+            if (tempDirInfo.Exists && (tempDirInfo.Attributes & FileAttributes.ReparsePoint) != 0)
             {
-                if (!string.Equals(computedHashHex, info.ExpectedSha256.Trim().ToLowerInvariant(), StringComparison.OrdinalIgnoreCase))
-                {
-                    try { File.Delete(staged); } catch { }
-                    throw new System.Security.SecurityException($"SHA256 verification failed! Expected {info.ExpectedSha256}, got {computedHashHex}");
-                }
+                throw new System.Security.SecurityException("Insecure temporary directory junction detected.");
             }
+
+            string staged = Path.GetFullPath(Path.Combine(tempDir, $"PredatorControl-update-{Guid.NewGuid():N}.exe"));
+            string script = Path.GetFullPath(Path.Combine(tempDir, $"PredatorControl-update-{Guid.NewGuid():N}.cmd"));
 
             try
             {
-                using var key = Registry.CurrentUser.CreateSubKey(RegPath);
-                key.SetValue("UpdateNotes", info.Notes);
-                key.SetValue("UpdateNotesVersion", info.Version.ToString(3));
-            }
-            catch { }
+                string computedHashHex;
+                using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) })
+                {
+                    http.DefaultRequestHeaders.UserAgent.ParseAdd("PredatorControl");
+                    using var src = await http.GetStreamAsync(info.DownloadUrl);
+                    using var dst = File.Create(staged);
+                    using var incHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 
-            int pid = Environment.ProcessId;
-            string script = Path.Combine(Path.GetTempPath(), "PredatorControl-update.cmd");
-            File.WriteAllText(script, $"""
-                @echo off
-                chcp 65001 >nul
-                :wait
-                "%SystemRoot%\System32\tasklist.exe" /fi "PID eq {pid}" /nh | "%SystemRoot%\System32\findstr.exe" /r "\<{pid}\>" >nul
-                if not errorlevel 1 (
+                    byte[] buffer = new byte[81920];
+                    int bytesRead;
+                    long totalBytes = 0;
+                    const long maxAllowedBytes = 250 * 1024 * 1024; // 250 MB ceiling to prevent unbounded stream DoS
+
+                    while ((bytesRead = await src.ReadAsync(buffer)) > 0)
+                    {
+                        totalBytes += bytesRead;
+                        if (totalBytes > maxAllowedBytes)
+                        {
+                            try { File.Delete(staged); } catch { }
+                            throw new InvalidOperationException("Download exceeded maximum allowed size threshold.");
+                        }
+                        await dst.WriteAsync(buffer.AsMemory(0, bytesRead));
+                        incHash.AppendData(buffer, 0, bytesRead);
+                    }
+                    computedHashHex = Convert.ToHexString(incHash.GetHashAndReset()).ToLowerInvariant();
+                }
+
+                if (new FileInfo(staged).Length < 100_000)
+                {
+                    try { File.Delete(staged); } catch { }
+                    throw new IOException("Downloaded file looks truncated.");
+                }
+
+                if (!string.IsNullOrEmpty(info.ExpectedSha256))
+                {
+                    if (!string.Equals(computedHashHex, info.ExpectedSha256.Trim().ToLowerInvariant(), StringComparison.OrdinalIgnoreCase))
+                    {
+                        try { File.Delete(staged); } catch { }
+                        throw new System.Security.SecurityException($"SHA256 verification failed! Expected {info.ExpectedSha256}, got {computedHashHex}");
+                    }
+                }
+
+                try
+                {
+                    using var key = Registry.CurrentUser.CreateSubKey(RegPath);
+                    key.SetValue("UpdateNotes", info.Notes);
+                    key.SetValue("UpdateNotesVersion", info.Version.ToString(3));
+                }
+                catch { }
+
+                int pid = Environment.ProcessId;
+
+                // Completely static parameterized batch script. NO string interpolation of paths or PID!
+                // All values (%~1, %~2, %~3) are passed safely as separate arguments via ProcessStartInfo.ArgumentList.
+                string scriptContent = """
+                    @echo off
+                    chcp 65001 >nul
+                    set "STAGED=%~1"
+                    set "TARGET=%~2"
+                    set "PID=%~3"
+                    :wait
+                    "%SystemRoot%\System32\tasklist.exe" /fi "PID eq %PID%" /nh | "%SystemRoot%\System32\findstr.exe" /r "\<%PID%\>" >nul
+                    if not errorlevel 1 (
+                        "%SystemRoot%\System32\timeout.exe" /t 1 /nobreak >nul
+                        goto wait
+                    )
+                    set retries=0
+                    :trymove
+                    move /y "%STAGED%" "%TARGET%" >nul 2>&1
+                    if not errorlevel 1 goto launch
+                    set /a retries+=1
+                    if %retries% geq 30 goto cleanup
                     "%SystemRoot%\System32\timeout.exe" /t 1 /nobreak >nul
-                    goto wait
-                )
-                set retries=0
-                :trymove
-                move /y "{staged}" "{target}" >nul 2>&1
-                if not errorlevel 1 goto launch
-                set /a retries+=1
-                if %retries% geq 30 goto cleanup
-                "%SystemRoot%\System32\timeout.exe" /t 1 /nobreak >nul
-                goto trymove
-                :launch
-                start "" "{target}"
-                :cleanup
-                (goto) 2>nul & del "%~f0"
-                """, new UTF8Encoding(false));
+                    goto trymove
+                    :launch
+                    start "" "%TARGET%"
+                    :cleanup
+                    if exist "%STAGED%" del /f /q "%STAGED%" >nul 2>&1
+                    (goto) 2>nul & del "%~f0"
+                    """;
 
-            string cmdPath = Path.Combine(Environment.SystemDirectory, "cmd.exe");
-            Process.Start(new ProcessStartInfo(cmdPath, $"/c \"{script}\"")
+                File.WriteAllText(script, scriptContent, new UTF8Encoding(false));
+
+                string cmdPath = Path.Combine(Environment.SystemDirectory, "cmd.exe");
+                var psi = new ProcessStartInfo(cmdPath)
+                {
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    WorkingDirectory = Environment.SystemDirectory
+                };
+                psi.ArgumentList.Add("/c");
+                psi.ArgumentList.Add(script);
+                psi.ArgumentList.Add(staged);
+                psi.ArgumentList.Add(target);
+                psi.ArgumentList.Add(pid.ToString());
+
+                Process.Start(psi);
+            }
+            catch
             {
-                CreateNoWindow = true,
-                UseShellExecute = false,
-                WorkingDirectory = Environment.SystemDirectory
-            });
+                try { if (File.Exists(staged)) File.Delete(staged); } catch { }
+                try { if (File.Exists(script)) File.Delete(script); } catch { }
+                throw;
+            }
         }
 
         internal static string ComputeFileSha256(string filePath)
@@ -248,6 +297,19 @@ namespace PredatorControlApp
             if (string.IsNullOrWhiteSpace(expectedHash) || !File.Exists(filePath)) return false;
             string actual = ComputeFileSha256(filePath);
             return string.Equals(actual, expectedHash.Trim().ToLowerInvariant(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        internal static void CleanStaleUpdateArtifacts()
+        {
+            try
+            {
+                string tempDir = Path.GetTempPath();
+                string staged = Path.Combine(tempDir, "update_staged.exe");
+                if (File.Exists(staged)) File.Delete(staged);
+                string script = Path.Combine(tempDir, "apply_update.cmd");
+                if (File.Exists(script)) File.Delete(script);
+            }
+            catch { }
         }
 
         #endregion
@@ -367,7 +429,8 @@ namespace PredatorControlApp
                 AutoSize = true,
                 Font = new Font("Segoe UI", 10f, FontStyle.Bold),
                 ForeColor = TitleTextColor,
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+                UseMnemonic = false
             };
             lblTitle.MouseDown += (s, e) => Drag(dlg, e);
             bar.Controls.Add(lblTitle);
@@ -380,7 +443,8 @@ namespace PredatorControlApp
                 TextAlign = ContentAlignment.MiddleCenter,
                 Font = new Font("Segoe UI", 10f),
                 ForeColor = TitleTextColor,
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                UseMnemonic = false
             };
             lblClose.MouseEnter += (s, e) => lblClose.ForeColor = CloseHoverColor;
             lblClose.MouseLeave += (s, e) => lblClose.ForeColor = TitleTextColor;
@@ -401,7 +465,8 @@ namespace PredatorControlApp
                 Size = new Size(W - Pad * 2, 48),
                 Font = new Font("Segoe UI", 10f, FontStyle.Bold),
                 ForeColor = TextColor,
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+                UseMnemonic = false
             });
 
             var txt = new TextBox

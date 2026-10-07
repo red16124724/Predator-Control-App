@@ -1,7 +1,10 @@
+using System;
 using System.ComponentModel;
+using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using System.Runtime.Versioning;
+using System.Windows.Forms;
 
 namespace PredatorControlApp
 {
@@ -10,18 +13,8 @@ namespace PredatorControlApp
     {
         private bool _isHover;
         private bool _isActive;
+        private bool _isNavButton;
         private Color? _customActiveColor;
-
-        private static readonly Color BgNormal = Color.FromArgb(37, 37, 40);
-        private static readonly Color BgHover = Color.FromArgb(48, 48, 52);
-        private static readonly Color BgActive = Color.FromArgb(20, 50, 45);
-        private static readonly Color BgDisabled = Color.FromArgb(28, 28, 30);
-        private static readonly Color BorderNormal = Color.FromArgb(60, 60, 66);
-        private static readonly Color BorderHover = Color.FromArgb(80, 80, 88);
-        private static readonly Color BorderDisabled = Color.FromArgb(40, 40, 44);
-        private static readonly Color Accent = Color.FromArgb(0, 200, 160);
-        private static readonly Color TextNormal = Color.FromArgb(170, 170, 175);
-        private static readonly Color TextDisabled = Color.FromArgb(70, 70, 75);
 
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public bool IsActive
@@ -31,11 +24,49 @@ namespace PredatorControlApp
         }
 
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public bool IsNavButton
+        {
+            get => _isNavButton;
+            set { _isNavButton = value; Invalidate(); }
+        }
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public Color? CustomActiveColor
         {
             get => _customActiveColor;
             set { _customActiveColor = value; Invalidate(); }
         }
+
+        private bool _useMnemonic = false;
+
+        [DefaultValue(false)]
+        public bool UseMnemonic
+        {
+            get => _useMnemonic;
+            set { _useMnemonic = value; Invalidate(); }
+        }
+
+        private static readonly Font s_defaultFont = new("Segoe UI", 9.25f, FontStyle.Regular);
+        private Font? _boldFont;
+
+        private Font GetBoldFont()
+        {
+            if (_boldFont == null || _boldFont.FontFamily.Name != Font.FontFamily.Name || Math.Abs(_boldFont.Size - Font.Size) > 0.01f)
+            {
+                _boldFont?.Dispose();
+                _boldFont = new Font(Font, FontStyle.Bold);
+            }
+            return _boldFont;
+        }
+
+        protected override void OnFontChanged(EventArgs e)
+        {
+            _boldFont?.Dispose();
+            _boldFont = null;
+            base.OnFontChanged(e);
+        }
+
+        private readonly Action _themeHandler;
 
         public PredatorButton()
         {
@@ -43,11 +74,22 @@ namespace PredatorControlApp
                 ControlStyles.AllPaintingInWmPaint |
                 ControlStyles.UserPaint |
                 ControlStyles.OptimizedDoubleBuffer |
-                ControlStyles.ResizeRedraw, true);
+                ControlStyles.ResizeRedraw |
+                ControlStyles.Selectable, true);
 
-            Font = new Font("Segoe UI", 9.25f, FontStyle.Regular);
+            TabStop = true;
+            Font = s_defaultFont;
             Size = new Size(96, 40);
             Cursor = Cursors.Hand;
+
+            _themeHandler = () =>
+            {
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    try { Invalidate(); } catch { }
+                }
+            };
+            ThemeManager.ThemeChanged += _themeHandler;
         }
 
         private static GraphicsPath RoundedRect(Rectangle bounds, int radius)
@@ -68,63 +110,148 @@ namespace PredatorControlApp
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
 
-            g.Clear(Parent?.BackColor ?? Color.FromArgb(30, 30, 30));
+            Color parentBg = Parent?.BackColor ?? ThemeManager.CardBg;
+            g.Clear(parentBg);
 
             var rect = new Rectangle(1, 1, Width - 3, Height - 3);
-            using var path = RoundedRect(rect, 8);
+
+            if (_isNavButton)
+            {
+                // Sleek OpenSense-style navigation rail button
+                Color navBg = _isActive
+                    ? ThemeManager.ControlActive
+                    : (_isHover ? ThemeManager.ControlHover : Color.Transparent);
+
+                Color navText = _isActive
+                    ? (_customActiveColor ?? (ThemeManager.IsDarkThemeActive ? ThemeManager.Accent : Color.White))
+                    : (_isHover ? ThemeManager.TextPrimary : ThemeManager.TextSecondary);
+
+                using (var path = RoundedRect(new Rectangle(4, 2, Width - 8, Height - 4), 6))
+                {
+                    if (navBg != Color.Transparent)
+                    {
+                        using var brush = new SolidBrush(navBg);
+                        g.FillPath(brush, path);
+                    }
+
+                    if (_isActive)
+                    {
+                        // Left vertical accent indicator bar
+                        using var accBrush = new SolidBrush(ThemeManager.Accent);
+                        g.FillRectangle(accBrush, 4, 6, 3, Height - 12);
+                    }
+                }
+
+                Font navFont = _isActive ? GetBoldFont() : Font;
+                var navFlags = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine;
+                if (!_useMnemonic) navFlags |= TextFormatFlags.NoPrefix;
+                TextRenderer.DrawText(g, Text, navFont,
+                    new Rectangle(20, 0, Width - 24, Height), navText,
+                    navFlags);
+
+                if (Focused && Enabled)
+                {
+                    using var focusPen = new Pen(ThemeManager.FocusRing, 1.2f) { DashStyle = DashStyle.Dot };
+                    g.DrawRectangle(focusPen, 6, 4, Width - 12, Height - 8);
+                }
+                return;
+            }
+
+            // Standard card/dialog button with rounded borders
+            using var pathBtn = RoundedRect(rect, 7);
 
             Color bg, border, textColor;
             float borderWidth;
 
             if (!Enabled)
             {
-                bg = BgDisabled;
-                border = BorderDisabled;
-                textColor = TextDisabled;
+                bg = ThemeManager.ControlDisabled;
+                border = ThemeManager.BorderDisabled;
+                textColor = ThemeManager.TextMuted;
                 borderWidth = 1f;
             }
             else if (_isActive)
             {
-                bg = BgActive;
-                border = Accent;
-                textColor = _customActiveColor ?? Accent;
-                borderWidth = 1.6f;
+                bg = ThemeManager.ControlActive;
+                border = _customActiveColor ?? ThemeManager.Accent;
+                textColor = _customActiveColor ?? (ThemeManager.IsDarkThemeActive ? ThemeManager.Accent : Color.White);
+                borderWidth = 2.0f;
             }
             else if (_isHover)
             {
-                bg = BgHover;
-                border = BorderHover;
-                textColor = Color.White;
+                bg = ThemeManager.ControlHover;
+                border = ThemeManager.BorderHover;
+                textColor = ThemeManager.TextPrimary;
                 borderWidth = 1f;
             }
             else
             {
-                bg = BgNormal;
-                border = BorderNormal;
-                textColor = TextNormal;
+                bg = ThemeManager.ControlBg;
+                border = ThemeManager.ControlBorder;
+                textColor = ThemeManager.TextPrimary;
                 borderWidth = 1f;
             }
 
             using (var bgBrush = new SolidBrush(bg))
-                g.FillPath(bgBrush, path);
+                g.FillPath(bgBrush, pathBtn);
 
             using (var pen = new Pen(border, borderWidth))
-                g.DrawPath(pen, path);
+                g.DrawPath(pen, pathBtn);
 
             if (_isActive && Enabled)
             {
-                using var glowPen = new Pen(Color.FromArgb(35, 0, 200, 160), 3f);
-                g.DrawPath(glowPen, path);
+                using var glowPen = new Pen(Color.FromArgb(70, border), 3.0f);
+                g.DrawPath(glowPen, pathBtn);
             }
 
-            TextRenderer.DrawText(g, Text, Font, ClientRectangle, textColor,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            if (Focused && Enabled)
+            {
+                using var focusPen = new Pen(ThemeManager.FocusRing, 1.2f) { DashStyle = DashStyle.Dot };
+                g.DrawRectangle(focusPen, 4, 4, Width - 9, Height - 9);
+            }
+
+            Font btnFont = _isActive ? GetBoldFont() : Font;
+            var btnFlags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter;
+            if (!_useMnemonic) btnFlags |= TextFormatFlags.NoPrefix;
+            TextRenderer.DrawText(g, Text, btnFont, ClientRectangle, textColor,
+                btnFlags);
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if (Enabled && (e.KeyCode == Keys.Space || e.KeyCode == Keys.Enter))
+            {
+                OnClick(EventArgs.Empty);
+                e.Handled = true;
+            }
+            base.OnKeyDown(e);
+        }
+
+        protected override void OnGotFocus(EventArgs e)
+        {
+            Invalidate();
+            base.OnGotFocus(e);
+        }
+
+        protected override void OnLostFocus(EventArgs e)
+        {
+            Invalidate();
+            base.OnLostFocus(e);
         }
 
         protected override void OnTextChanged(EventArgs e)
         {
             base.OnTextChanged(e);
             Invalidate();
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            if (Enabled && CanFocus)
+            {
+                Focus();
+            }
+            base.OnMouseDown(e);
         }
 
         protected override void OnMouseEnter(EventArgs e)
@@ -146,6 +273,17 @@ namespace PredatorControlApp
             else { Cursor = Cursors.Hand; }
             Invalidate();
             base.OnEnabledChanged(e);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                ThemeManager.ThemeChanged -= _themeHandler;
+                _boldFont?.Dispose();
+                _boldFont = null;
+            }
+            base.Dispose(disposing);
         }
     }
 }

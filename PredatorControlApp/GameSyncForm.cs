@@ -49,6 +49,7 @@ namespace PredatorControlApp
         private static readonly string[] FanModeNames = { "Auto", "Max", "Custom" };
         private static readonly byte[] FanModeValues = { 0x01, 0x02, 0x03 };
         private static readonly string[] RgbModeNames = { "Don't Change", "Static", "Breathing", "Neon", "Wave", "Shifting", "Zoom", "Meteor", "Twinkling" };
+        private static readonly StringFormat s_sfCenter = new() { LineAlignment = StringAlignment.Center };
 
         #endregion
 
@@ -351,9 +352,44 @@ namespace PredatorControlApp
 
         #region List Drawing
 
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            _controller.GameDetected += OnControllerGameDetected;
+            _controller.GameExited += OnControllerGameExited;
+        }
+
+        private void OnControllerGameDetected(GameProfile profile)
+        {
+            if (IsDisposed || !IsHandleCreated) return;
+            try
+            {
+                BeginInvoke(new Action(() =>
+                {
+                    if (IsDisposed) return;
+                    _lstProfiles.Invalidate();
+                }));
+            }
+            catch { }
+        }
+
+        private void OnControllerGameExited(DashboardSnapshot snap)
+        {
+            if (IsDisposed || !IsHandleCreated) return;
+            try
+            {
+                BeginInvoke(new Action(() =>
+                {
+                    if (IsDisposed) return;
+                    _lstProfiles.Invalidate();
+                }));
+            }
+            catch { }
+        }
+
         private void LstProfiles_DrawItem(object? sender, DrawItemEventArgs e)
         {
-            if (e.Index < 0) return;
+            if (e.Index < 0 || e.Index >= _lstProfiles.Items.Count) return;
             e.DrawBackground();
 
             bool selected = (e.State & DrawItemState.Selected) != 0;
@@ -363,8 +399,7 @@ namespace PredatorControlApp
             string text = _lstProfiles.Items[e.Index]?.ToString() ?? "";
             using var textBrush = new SolidBrush(selected ? AccentColor : TextColor);
             var textRect = new Rectangle(e.Bounds.X + 10, e.Bounds.Y, e.Bounds.Width - 10, e.Bounds.Height);
-            var sf = new StringFormat { LineAlignment = StringAlignment.Center };
-            e.Graphics.DrawString(text, FontBody, textBrush, textRect, sf);
+            e.Graphics.DrawString(text, FontBody, textBrush, textRect, s_sfCenter);
 
             if (selected)
             {
@@ -765,7 +800,10 @@ namespace PredatorControlApp
         {
             if (disposing)
             {
+                _controller.GameDetected -= OnControllerGameDetected;
+                _controller.GameExited -= OnControllerGameExited;
                 try { _colorPicker.Dispose(); } catch { }
+                try { Icon?.Dispose(); } catch { }
             }
             base.Dispose(disposing);
         }

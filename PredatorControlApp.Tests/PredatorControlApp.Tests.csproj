@@ -22,4 +22,8 @@
     <ProjectReference Include="..\PredatorControlApp\PredatorControlApp.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

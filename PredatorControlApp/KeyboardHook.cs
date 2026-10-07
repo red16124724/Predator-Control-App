@@ -1,7 +1,8 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Threading;
 
 namespace PredatorControlApp
 {
@@ -14,22 +15,42 @@ namespace PredatorControlApp
         private const int WM_KEYUP = 0x0101;
         private const int WM_SYSKEYUP = 0x0105;
         private const uint SC_PREDATOR = 0x75;
+        private const uint SC_MODE = 0x76;
+        private const uint SC_MODE_ALT = 0x77;
+
+        // LLKHF Flags
+        private const uint LLKHF_EXTENDED = 0x01;
+        private const uint LLKHF_LOWER_IL_INJECTED = 0x02;
+        private const uint LLKHF_INJECTED = 0x10;
+        private const uint LLKHF_ALTDOWN = 0x20;
+        private const uint LLKHF_UP = 0x80;
 
         private readonly Action _onPredatorSensePressed;
         private readonly Action<int>? _onPredatorNumberPressed;
+        private readonly Action? _onModeKeyPressed;
         private readonly LowLevelKeyboardProc _proc;
         private IntPtr _hookId = IntPtr.Zero;
         private bool _isDisposed;
+
+        public event Action? ModeKeyPressed;
 
         private bool _isPredatorKeyPressed;
         private bool _predatorUsedInCombo;
         private bool _suppressPredatorReleaseAction;
         private int? _activePredatorNumber;
+        private long _lastModeKeyTick;
 
-        public KeyboardHook(Action onPredatorSensePressed, Action<int>? onPredatorNumberPressed = null)
+        /// <summary>
+        /// When false (default), synthetic or injected keystrokes (LLKHF_INJECTED or LLKHF_LOWER_IL_INJECTED)
+        /// are rejected to protect against unprivileged software spoofing.
+        /// </summary>
+        public bool AllowInjectedKeys { get; set; } = false;
+
+        public KeyboardHook(Action onPredatorSensePressed, Action<int>? onPredatorNumberPressed = null, Action? onModeKeyPressed = null)
         {
             _onPredatorSensePressed = onPredatorSensePressed ?? throw new ArgumentNullException(nameof(onPredatorSensePressed));
             _onPredatorNumberPressed = onPredatorNumberPressed;
+            _onModeKeyPressed = onModeKeyPressed;
             _proc = HookCallback;
             _hookId = SetHook(_proc);
         }
@@ -56,7 +77,12 @@ namespace PredatorControlApp
 
         private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
         {
-            if (nCode >= 0)
+            if (nCode < 0 || lParam == IntPtr.Zero)
+            {
+                return CallNextHookEx(_hookId, nCode, wParam, lParam);
+            }
+
+            try
             {
                 bool isKeyDown = wParam == (IntPtr)WM_KEYDOWN || wParam == (IntPtr)WM_SYSKEYDOWN;
                 bool isKeyUp = wParam == (IntPtr)WM_KEYUP || wParam == (IntPtr)WM_SYSKEYUP;
@@ -64,6 +90,41 @@ namespace PredatorControlApp
                 if (isKeyDown || isKeyUp)
                 {
                     var hookStruct = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
+
+                    // Check LLKHF_INJECTED and LLKHF_LOWER_IL_INJECTED to prevent synthetic spoofing
+                    bool isInjected = (hookStruct.flags & LLKHF_INJECTED) != 0 ||
+                                      (hookStruct.flags & LLKHF_LOWER_IL_INJECTED) != 0;
+
+                    if (isInjected && !AllowInjectedKeys)
+                    {
+                        return CallNextHookEx(_hookId, nCode, wParam, lParam);
+                    }
+
+                    bool isModeKey = hookStruct.scanCode == SC_MODE || hookStruct.scanCode == SC_MODE_ALT ||
+                                     (hookStruct.vkCode >= 0x82 && hookStruct.vkCode <= 0x87) || // VK_F19..VK_F24
+                                     hookStruct.vkCode == 0x7C; // VK_F13
+                    if (isModeKey)
+                    {
+                        if (isKeyDown)
+                        {
+                            long now = Environment.TickCount64;
+                            if (now - _lastModeKeyTick < 250)
+                            {
+                                return (IntPtr)1; // Debounced rapid spamming
+                            }
+                            _lastModeKeyTick = now;
+
+                            // Asynchronous dispatch: never execute arbitrary delegate code synchronously in LL hook thread!
+                            DispatchAsync(() =>
+                            {
+                                if (_onModeKeyPressed != null)
+                                    _onModeKeyPressed.Invoke();
+                                else
+                                    ModeKeyPressed?.Invoke();
+                            });
+                        }
+                        return (IntPtr)1; // Consume key
+                    }
 
                     bool isPredatorKey = hookStruct.scanCode == SC_PREDATOR;
 
@@ -81,7 +142,7 @@ namespace PredatorControlApp
                         {
                             if (!_predatorUsedInCombo && !_suppressPredatorReleaseAction)
                             {
-                                _onPredatorSensePressed();
+                                DispatchAsync(() => _onPredatorSensePressed());
                             }
                             _isPredatorKeyPressed = false;
                             _predatorUsedInCombo = false;
@@ -116,20 +177,40 @@ namespace PredatorControlApp
                                 _predatorUsedInCombo = true;
                                 _suppressPredatorReleaseAction = true;
                                 _activePredatorNumber = number;
-                                _onPredatorNumberPressed(number);
+                                int capturedNumber = number;
+                                DispatchAsync(() => _onPredatorNumberPressed(capturedNumber));
                             }
                         }
                         else if (isKeyUp && _activePredatorNumber == number)
                         {
                             _activePredatorNumber = null;
                         }
-                        return (IntPtr)1;
+                        return (IntPtr)1; // Consume key
                     }
-
-                    return CallNextHookEx(_hookId, nCode, wParam, lParam);
                 }
             }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"KeyboardHook callback exception: {ex.Message}");
+            }
+
             return CallNextHookEx(_hookId, nCode, wParam, lParam);
+        }
+
+        private static void DispatchAsync(Action action)
+        {
+            if (action == null) return;
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    action();
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"KeyboardHook async callback failure: {ex.Message}");
+                }
+            });
         }
 
         #region Win32 API Imports
@@ -169,6 +250,7 @@ namespace PredatorControlApp
                 UnhookWindowsHookEx(_hookId);
                 _hookId = IntPtr.Zero;
             }
+            GC.KeepAlive(_proc);
         }
     }
 }

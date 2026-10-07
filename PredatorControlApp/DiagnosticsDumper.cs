@@ -49,7 +49,6 @@ namespace PredatorControlApp
             sb.AppendLine($"Direct EC HID:          {caps.HasEcHid}");
             sb.AppendLine($"Operating Modes:        {string.Join(", ", caps.OperatingModes)}");
             sb.AppendLine($"CoolBoost Supported:    {caps.CoolBoost}");
-            sb.AppendLine($"DustDefender Supported: {caps.DustDefender}");
             sb.AppendLine($"Factory Fan Tables:     {caps.FanTable}");
             sb.AppendLine($"MUX Switch / GPU Mode:  {caps.GpuModeSwitch}");
             sb.AppendLine($"Power-Off USB Charging: {caps.UsbCharging}");

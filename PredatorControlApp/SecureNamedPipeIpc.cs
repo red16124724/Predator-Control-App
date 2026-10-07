@@ -4,7 +4,6 @@ using System.IO.Pipes;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -13,6 +12,7 @@ namespace PredatorControlApp
     public static class SecureNamedPipeIpc
     {
         public const string PipeName = "PredatorControlPipe";
+        private const int MaxMessageLength = 256;
 
         public static PipeSecurity CreatePipeSecurity()
         {
@@ -40,6 +40,8 @@ namespace PredatorControlApp
                 sec.AddAccessRule(new PipeAccessRule(currentUser, PipeAccessRights.FullControl, AccessControlType.Allow));
             }
             sec.AddAccessRule(new PipeAccessRule(authUsers, PipeAccessRights.ReadWrite | PipeAccessRights.Synchronize, AccessControlType.Allow));
+            // Deny CreateNewInstance for Authenticated Users to prevent pipe squatting / instance hijacking
+            sec.AddAccessRule(new PipeAccessRule(authUsers, PipeAccessRights.CreateNewInstance, AccessControlType.Deny));
 
             return sec;
         }
@@ -71,16 +73,25 @@ namespace PredatorControlApp
         {
             private readonly CancellationTokenSource _cts = new();
             private readonly Action<string> _onMessage;
+            private readonly string _pipeName;
             private bool _isDisposed;
+            private bool _started;
+            private readonly object _startLock = new();
 
-            public PipeServer(Action<string> onMessage)
+            public PipeServer(Action<string> onMessage, string? pipeName = null)
             {
-                _onMessage = onMessage;
+                _onMessage = onMessage ?? throw new ArgumentNullException(nameof(onMessage));
+                _pipeName = pipeName ?? PipeName;
             }
 
             public void Start()
             {
-                Task.Run(RunServerLoopAsync);
+                lock (_startLock)
+                {
+                    if (_isDisposed || _started) return;
+                    _started = true;
+                    Task.Run(RunServerLoopAsync);
+                }
             }
 
             private async Task RunServerLoopAsync()
@@ -90,22 +101,57 @@ namespace PredatorControlApp
                     try
                     {
                         using var pipe = NamedPipeServerStreamAcl.Create(
-                            PipeName, PipeDirection.InOut, NamedPipeServerStream.MaxAllowedServerInstances,
+                            _pipeName, PipeDirection.InOut, NamedPipeServerStream.MaxAllowedServerInstances,
                             PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 0, 0, CreatePipeSecurity());
 
                         await pipe.WaitForConnectionAsync(_cts.Token);
 
                         using var reader = new StreamReader(pipe, Encoding.UTF8);
-                        string? line = await reader.ReadLineAsync(_cts.Token);
-                        if (!string.IsNullOrEmpty(line))
+                        using var readCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+                        readCts.CancelAfter(2000);
+                        try
                         {
-                            _onMessage(line);
+                            // Bounded message reading to prevent unbounded memory allocation DoS attacks
+                            var sb = new StringBuilder();
+                            char[] charBuf = new char[1];
+                            while (sb.Length < MaxMessageLength)
+                            {
+                                int readCount = await reader.ReadAsync(charBuf.AsMemory(0, 1), readCts.Token);
+                                if (readCount <= 0) break;
+                                if (charBuf[0] == '\n') break;
+                                if (charBuf[0] != '\r') sb.Append(charBuf[0]);
+                            }
+
+                            string line = sb.ToString().Trim();
+                            if (!string.IsNullOrEmpty(line))
+                            {
+                                try { _onMessage(line); } catch { }
+                            }
+                        }
+                        catch (OperationCanceledException) when (!_cts.Token.IsCancellationRequested)
+                        {
+                            // Per-client read timeout; continue server loop to accept next connection
+                        }
+                        catch (IOException)
+                        {
+                            // Client disconnected abruptly or pipe broken; continue server loop
                         }
                     }
-                    catch (OperationCanceledException) { break; }
+                    catch (OperationCanceledException) when (_cts.Token.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        if (_cts.Token.IsCancellationRequested) break;
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        break;
+                    }
                     catch
                     {
-                        try { await Task.Delay(1000, _cts.Token); } catch { break; }
+                        try { await Task.Delay(200, _cts.Token); } catch { break; }
                     }
                 }
             }
@@ -114,16 +160,21 @@ namespace PredatorControlApp
             {
                 if (_isDisposed) return;
                 _isDisposed = true;
-                _cts.Cancel();
-                _cts.Dispose();
+                try { _cts.Cancel(); } catch { }
             }
         }
 
-        public static async Task<bool> SendMessageWithVerificationAsync(string message, int timeoutMs = 2000)
+        public static async Task<bool> SendMessageWithVerificationAsync(string message, int timeoutMs = 2000, string? pipeName = null)
         {
+            if (string.IsNullOrEmpty(message)) return false;
+            timeoutMs = Math.Max(100, timeoutMs);
+            string sanitizedMessage = message.Replace("\r", "").Replace("\n", " ");
+            string targetPipe = pipeName ?? PipeName;
+
             try
             {
-                using var pipe = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+                // Explicitly specify TokenImpersonationLevel.None to prevent server from impersonating elevated client token
+                using var pipe = new NamedPipeClientStream(".", targetPipe, PipeDirection.InOut, PipeOptions.Asynchronous, TokenImpersonationLevel.None);
                 using var cts = new CancellationTokenSource(timeoutMs);
 
                 await pipe.ConnectAsync(cts.Token);
@@ -135,7 +186,14 @@ namespace PredatorControlApp
                 }
 
                 using var writer = new StreamWriter(pipe, Encoding.UTF8) { AutoFlush = true };
-                await writer.WriteLineAsync(message);
+                await writer.WriteLineAsync(sanitizedMessage.AsMemory(), cts.Token);
+                await writer.FlushAsync(cts.Token);
+                try
+                {
+                    var drainTask = Task.Run(() => { try { pipe.WaitForPipeDrain(); } catch { } });
+                    await Task.WhenAny(drainTask, Task.Delay(1500, cts.Token));
+                }
+                catch { }
                 return true;
             }
             catch

@@ -1,7 +1,10 @@
 #pragma warning disable WFO1000 
 
+using System;
+using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.ComponentModel;
+using System.Windows.Forms;
 
 namespace PredatorControlApp
 {
@@ -10,7 +13,6 @@ namespace PredatorControlApp
         private bool _checked;
         private bool _isHovered;
 
-        
         private float _knobProgress;          
         private float _targetProgress;
         private readonly System.Windows.Forms.Timer _animTimer;
@@ -30,11 +32,25 @@ namespace PredatorControlApp
                 {
                     _checked = value;
                     _targetProgress = value ? 1f : 0f;
+                    if (!IsHandleCreated)
+                    {
+                        _knobProgress = _targetProgress;
+                    }
                     _animTimer.Start();
                     CheckedChanged?.Invoke(this, EventArgs.Empty);
                 }
             }
         }
+
+        public void SetCheckedImmediate(bool value)
+        {
+            _checked = value;
+            _targetProgress = value ? 1f : 0f;
+            _knobProgress = _targetProgress;
+            try { Invalidate(); } catch { }
+        }
+
+        private readonly Action _themeHandler;
 
         public PredatorSwitch()
         {
@@ -47,6 +63,15 @@ namespace PredatorControlApp
 
             _animTimer = new System.Windows.Forms.Timer { Interval = AnimIntervalMs };
             _animTimer.Tick += OnAnimTick;
+
+            _themeHandler = () =>
+            {
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    try { Invalidate(); } catch { }
+                }
+            };
+            ThemeManager.ThemeChanged += _themeHandler;
         }
 
         private void OnAnimTick(object? sender, EventArgs e)
@@ -101,23 +126,24 @@ namespace PredatorControlApp
         {
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.Clear(Parent?.BackColor ?? ThemeManager.CardBg);
 
             float t = _knobProgress; 
 
-            Color trackOff = Color.FromArgb(45, 45, 50);
-            Color trackOn = Color.FromArgb(0, 80, 65);
-            Color trackDisabled = Color.FromArgb(35, 35, 40);
+            Color trackOff = ThemeManager.ControlBg;
+            Color trackOn = ThemeManager.ControlActive;
+            Color trackDisabled = ThemeManager.ControlDisabled;
 
-            Color knobOff = Color.FromArgb(80, 80, 85);
-            Color knobOn = Color.FromArgb(0, 200, 160);
-            Color knobDisabled = Color.FromArgb(55, 55, 60);
+            Color knobOff = ThemeManager.TextSecondary;
+            Color knobOn = ThemeManager.Accent;
+            Color knobDisabled = ThemeManager.TextMuted;
 
             Color trackColor = Enabled ? LerpColor(trackOff, trackOn, t) : trackDisabled;
             Color knobColor = Enabled ? LerpColor(knobOff, knobOn, t) : knobDisabled;
 
             Color borderColor = Enabled
-                ? (_isHovered ? Color.FromArgb(90, 90, 100) : Color.FromArgb(70, 70, 75))
-                : Color.FromArgb(50, 50, 55);
+                ? (_isHovered ? ThemeManager.BorderHover : ThemeManager.ControlBorder)
+                : ThemeManager.BorderDisabled;
 
             using (var path = GetRoundedRectPath(new Rectangle(1, 1, Width - 3, Height - 3), Height / 2))
             {
@@ -195,7 +221,9 @@ namespace PredatorControlApp
         {
             if (disposing)
             {
+                ThemeManager.ThemeChanged -= _themeHandler;
                 _animTimer.Stop();
+                _animTimer.Tick -= OnAnimTick;
                 _animTimer.Dispose();
             }
             base.Dispose(disposing);

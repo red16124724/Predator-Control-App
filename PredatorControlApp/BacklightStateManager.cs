@@ -17,38 +17,46 @@ namespace PredatorControlApp
         public bool IsLidClosed { get { lock (_lock) { return _isLidClosed; } } private set { lock (_lock) { _isLidClosed = value; } } }
         public bool IsSleeping { get { lock (_lock) { return _isSleeping; } } private set { lock (_lock) { _isSleeping = value; } } }
         public bool? IsPluggedIn { get { lock (_lock) { return _isPluggedIn; } } private set { lock (_lock) { _isPluggedIn = value; } } }
+        public void SetPluggedInState(bool? pluggedIn) { lock (_lock) { _isPluggedIn = pluggedIn; } }
         public int SavedAcBrightness { get { lock (_lock) { return _savedAcBrightness; } } set { lock (_lock) { _savedAcBrightness = Math.Clamp(value, 0, 100); } } }
         public bool ManualBacklightOnBattery { get { lock (_lock) { return _manualBacklightOnBattery; } } set { lock (_lock) { _manualBacklightOnBattery = value; } } }
         public int ManualBatteryBrightness { get { lock (_lock) { return _manualBatteryBrightness; } } set { lock (_lock) { _manualBatteryBrightness = Math.Clamp(value, 0, 100); } } }
 
-        public bool IsOnBattery(PowerLineStatus lineStatus)
+        public bool IsOnBattery(PowerLineStatus lineStatus, BatteryChargeStatus chargeStatus = 0)
         {
             lock (_lock)
             {
-                if (lineStatus == PowerLineStatus.Offline)
-                    return true;
+                if ((chargeStatus & BatteryChargeStatus.Charging) != 0 || (chargeStatus & BatteryChargeStatus.NoSystemBattery) != 0)
+                    return false;
                 if (lineStatus == PowerLineStatus.Online)
                     return false;
+                if (lineStatus == PowerLineStatus.Offline)
+                    return true;
+                if (_isPluggedIn == true)
+                    return false;
+                if (_isPluggedIn == false)
+                    return true;
 
                 // PowerLineStatus.Unknown: during sleep/wake transition, default to battery unless confirmed plugged in
                 return _isPluggedIn != true;
             }
         }
 
-        public void OnLidChanged(bool isOpen, PowerLineStatus lineStatus, out bool shouldTurnOff, out int targetBrightness)
+        public void OnLidChanged(bool isOpen, PowerLineStatus lineStatus, out bool shouldTurnOff, out int targetBrightness, BatteryChargeStatus chargeStatus = 0)
         {
             lock (_lock)
             {
                 _isLidClosed = !isOpen;
 
-                if (lineStatus == PowerLineStatus.Online)
+                bool isCharging = (chargeStatus & BatteryChargeStatus.Charging) != 0;
+                if (lineStatus == PowerLineStatus.Online || isCharging)
                     _isPluggedIn = true;
                 else if (lineStatus == PowerLineStatus.Offline)
                     _isPluggedIn = false;
 
-                if (!isOpen)
+                if (!isOpen || _isSleeping)
                 {
-                    // Lid closed: keyboard and logo lighting MUST ALWAYS BE OFF
+                    // Lid closed or sleeping: keyboard and logo lighting MUST ALWAYS BE OFF
                     _manualBacklightOnBattery = false;
                     _manualBatteryBrightness = 0;
                     shouldTurnOff = true;
@@ -57,7 +65,7 @@ namespace PredatorControlApp
                 else
                 {
                     // When lid is opened on battery, backlight MUST be off by default unless manually turned on
-                    bool onBatt = IsOnBattery(lineStatus);
+                    bool onBatt = IsOnBattery(lineStatus, chargeStatus);
                     if (onBatt)
                     {
                         _manualBacklightOnBattery = false;
@@ -86,18 +94,28 @@ namespace PredatorControlApp
             }
         }
 
-        public void OnResume(PowerLineStatus lineStatus, out bool shouldTurnOff, out int targetBrightness)
+        public void OnResume(PowerLineStatus lineStatus, out bool shouldTurnOff, out int targetBrightness, BatteryChargeStatus chargeStatus = 0)
         {
             lock (_lock)
             {
                 _isSleeping = false;
 
-                if (lineStatus == PowerLineStatus.Online)
+                bool isCharging = (chargeStatus & BatteryChargeStatus.Charging) != 0;
+                if (lineStatus == PowerLineStatus.Online || isCharging)
                     _isPluggedIn = true;
                 else if (lineStatus == PowerLineStatus.Offline)
                     _isPluggedIn = false;
 
-                bool onBatt = _isLidClosed || IsOnBattery(lineStatus);
+                if (_isLidClosed)
+                {
+                    _manualBacklightOnBattery = false;
+                    _manualBatteryBrightness = 0;
+                    shouldTurnOff = true;
+                    targetBrightness = 0;
+                    return;
+                }
+
+                bool onBatt = IsOnBattery(lineStatus, chargeStatus);
                 if (onBatt)
                 {
                     _manualBacklightOnBattery = false;
@@ -118,6 +136,13 @@ namespace PredatorControlApp
             lock (_lock)
             {
                 _isPluggedIn = pluggedIn;
+
+                if (_isLidClosed || _isSleeping)
+                {
+                    shouldTurnOff = true;
+                    targetBrightness = 0;
+                    return;
+                }
 
                 if (pluggedIn)
                 {

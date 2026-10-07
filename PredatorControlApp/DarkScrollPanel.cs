@@ -1,5 +1,8 @@
-using System.Runtime.Versioning;
+using System;
+using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Runtime.Versioning;
+using System.Windows.Forms;
 
 namespace PredatorControlApp
 {
@@ -11,13 +14,25 @@ namespace PredatorControlApp
         public static int NativeBarWidth => SystemInformation.VerticalScrollBarWidth;
 
         private float _dpi = 1f;
-        private readonly SolidBrush _trackBrush = new(Color.FromArgb(32, 32, 36));
-        private readonly SolidBrush _thumbBrush = new(Color.FromArgb(75, 78, 85));
+
+        private readonly Action _themeHandler;
 
         public DarkScrollPanel()
         {
             AutoScroll = true;
+            ResizeRedraw = true;
             SetStyle(ControlStyles.OptimizedDoubleBuffer, true);
+
+            _themeHandler = () =>
+            {
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    BackColor = ThemeManager.FormBg;
+                    Invalidate();
+                    InvalidateScrollBar();
+                }
+            };
+            ThemeManager.ThemeChanged += _themeHandler;
         }
 
         public void SetDpiScale(float dpi) => _dpi = dpi <= 0 ? 1f : dpi;
@@ -105,26 +120,25 @@ namespace PredatorControlApp
 
         protected override void OnMouseUp(MouseEventArgs e)
         {
-            _dragging = false;
             base.OnMouseUp(e);
+            _dragging = false;
         }
 
         private void ScrollThumbTo(int mouseY)
         {
-            int viewH = ClientSize.Height;
-            int contentH = DisplayRectangle.Height;
-            int thumbH = ThumbRect().Height;
-            int travel = viewH - thumbH;
-            if (travel <= 0 || contentH <= viewH) return;
+            var content = DisplayRectangle;
+            int viewH = ClientSize.Height, contentH = content.Height;
+            if (viewH <= 0 || contentH <= viewH) return;
 
-            float frac = Math.Clamp((mouseY - _dragOffset) / (float)travel, 0f, 1f);
-            AutoScrollPosition = new Point(-AutoScrollPosition.X, (int)(frac * (contentH - viewH)));
-            InvalidateScrollBar();
-        }
+            var thumb = ThumbRect();
+            int maxThumbY = viewH - thumb.Height;
+            if (maxThumbY <= 0) return;
 
-        protected override void OnScroll(ScrollEventArgs se)
-        {
-            base.OnScroll(se);
+            int targetThumbY = Math.Clamp(mouseY - _dragOffset, 0, maxThumbY);
+            float ratio = (float)targetThumbY / maxThumbY;
+            int targetScroll = (int)(ratio * (contentH - viewH));
+
+            AutoScrollPosition = new Point(-AutoScrollPosition.X, targetScroll);
             InvalidateScrollBar();
         }
 
@@ -149,7 +163,12 @@ namespace PredatorControlApp
 
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.FillRectangle(_trackBrush, rect.X - S(1), 0, rect.Width + S(2), ClientSize.Height);
+
+            Color trackColor = ThemeManager.IsDarkThemeActive ? Color.FromArgb(24, 27, 36) : Color.FromArgb(235, 237, 242);
+            Color thumbColor = ThemeManager.IsDarkThemeActive ? Color.FromArgb(65, 72, 92) : Color.FromArgb(180, 186, 200);
+
+            using (var trackBrush = new SolidBrush(trackColor))
+                g.FillRectangle(trackBrush, rect.X - S(1), 0, rect.Width + S(2), ClientSize.Height);
 
             int r = Math.Max(1, rect.Width / 2);
             using var path = new GraphicsPath();
@@ -158,16 +177,17 @@ namespace PredatorControlApp
             path.AddArc(rect.Right - r * 2, rect.Bottom - r * 2, r * 2, r * 2, 0, 90);
             path.AddArc(rect.X, rect.Bottom - r * 2, r * 2, r * 2, 90, 90);
             path.CloseFigure();
-            g.FillPath(_thumbBrush, path);
+
+            using (var thumbBrush = new SolidBrush(thumbColor))
+                g.FillPath(thumbBrush, path);
         }
 
         protected override void Dispose(bool disposing)
         {
             if (disposing)
             {
+                ThemeManager.ThemeChanged -= _themeHandler;
                 Application.RemoveMessageFilter(this);
-                _trackBrush.Dispose();
-                _thumbBrush.Dispose();
             }
             base.Dispose(disposing);
         }

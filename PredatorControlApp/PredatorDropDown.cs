@@ -1,7 +1,11 @@
+using System;
+using System.Collections.Generic;
+using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using System.ComponentModel;
 using System.Runtime.Versioning;
+using System.Windows.Forms;
 
 namespace PredatorControlApp
 {
@@ -17,15 +21,17 @@ namespace PredatorControlApp
         private Form? _popup;
         private ListBox? _listBox;
         private int _hoverIndex = -1;
+        private static readonly Font s_defaultFont = new("Segoe UI", 9.25f, FontStyle.Regular);
+        private readonly Action _themeHandler;
 
-        private static readonly Color BgNormal = Color.FromArgb(37, 37, 40);
-        private static readonly Color BgHover = Color.FromArgb(48, 48, 52);
-        private static readonly Color BorderNormal = Color.FromArgb(60, 60, 66);
-        private static readonly Color BorderHover = Color.FromArgb(80, 80, 88);
-        private static readonly Color Accent = Color.FromArgb(0, 200, 160);
-        private static readonly Color TextNormal = Color.FromArgb(170, 170, 175);
-        private static readonly Color DropBg = Color.FromArgb(28, 28, 30);
-        private static readonly Color DropHover = Color.FromArgb(48, 48, 52);
+        private static Color BgNormal => ThemeManager.ControlBg;
+        private static Color BgHover => ThemeManager.ControlHover;
+        private static Color BorderNormal => ThemeManager.ControlBorder;
+        private static Color BorderHover => ThemeManager.BorderHover;
+        private static Color Accent => ThemeManager.Accent;
+        private static Color TextNormal => ThemeManager.TextPrimary;
+        private static Color DropBg => ThemeManager.CardBg;
+        private static Color DropHover => ThemeManager.ControlHover;
 
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public int SelectedIndex
@@ -48,6 +54,15 @@ namespace PredatorControlApp
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public List<string> Items => _items;
 
+        private bool _useMnemonic = false;
+
+        [DefaultValue(false)]
+        public bool UseMnemonic
+        {
+            get => _useMnemonic;
+            set { _useMnemonic = value; Invalidate(); }
+        }
+
         public event EventHandler? SelectedIndexChanged;
 
         public PredatorDropDown()
@@ -58,9 +73,19 @@ namespace PredatorControlApp
                 ControlStyles.OptimizedDoubleBuffer |
                 ControlStyles.ResizeRedraw, true);
 
-            Font = new Font("Segoe UI", 9.25f, FontStyle.Regular);
+            Font = s_defaultFont;
             Size = new Size(180, 34);
             Cursor = Cursors.Hand;
+
+            _themeHandler = () =>
+            {
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    if (_isOpen) ClosePopup();
+                    try { Invalidate(); } catch { }
+                }
+            };
+            ThemeManager.ThemeChanged += _themeHandler;
         }
 
         private static GraphicsPath RoundedRect(Rectangle bounds, int radius)
@@ -80,7 +105,7 @@ namespace PredatorControlApp
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-            g.Clear(Parent?.BackColor ?? Color.FromArgb(30, 30, 30));
+            g.Clear(Parent?.BackColor ?? ThemeManager.CardBg);
 
             var rect = new Rectangle(1, 1, Width - 3, Height - 3);
             using var path = RoundedRect(rect, 6);
@@ -97,12 +122,13 @@ namespace PredatorControlApp
             string displayText = SelectedText;
             if (string.IsNullOrEmpty(displayText)) displayText = "Select...";
             var textRect = new Rectangle(12, 0, Width - 36, Height);
-            TextRenderer.DrawText(g, displayText, Font, textRect, TextNormal,
-                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            var textFlags = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis;
+            if (!_useMnemonic) textFlags |= TextFormatFlags.NoPrefix;
+            TextRenderer.DrawText(g, displayText, Font, textRect, TextNormal, textFlags);
 
             int arrowX = Width - 22;
             int arrowY = Height / 2 - 2;
-            using var arrowPen = new Pen(Color.FromArgb(140, 140, 160), 1.5f);
+            using var arrowPen = new Pen(ThemeManager.TextSecondary, 1.5f);
             arrowPen.StartCap = LineCap.Round;
             arrowPen.EndCap = LineCap.Round;
             g.DrawLine(arrowPen, arrowX, arrowY, arrowX + 5, arrowY + 4);
@@ -157,7 +183,7 @@ namespace PredatorControlApp
             };
 
             foreach (var item in _items) listBox.Items.Add(item);
-            if (_selectedIndex >= 0) listBox.SelectedIndex = _selectedIndex;
+            if (_selectedIndex >= 0 && _selectedIndex < listBox.Items.Count) listBox.SelectedIndex = _selectedIndex;
 
             listBox.DrawItem += ListBox_DrawItem;
             listBox.MouseMove += ListBox_MouseMove;
@@ -190,6 +216,11 @@ namespace PredatorControlApp
 
             popup.Controls.Add(listBox);
             popup.Deactivate += (s, e) => ClosePopup();
+            popup.Paint += (s, e) =>
+            {
+                using var pen = new Pen(ThemeManager.CardBorder, 1f);
+                e.Graphics.DrawRectangle(pen, 0, 0, popup.Width - 1, popup.Height - 1);
+            };
 
             _popup = popup;
             _listBox = listBox;
@@ -219,8 +250,15 @@ namespace PredatorControlApp
                 Invalidate();
 
                 var popup = _popup;
+                var lb = _listBox;
                 _popup = null;
                 _listBox = null;
+
+                if (lb != null)
+                {
+                    lb.DrawItem -= ListBox_DrawItem;
+                    lb.MouseMove -= ListBox_MouseMove;
+                }
 
                 if (popup != null)
                 {
@@ -247,7 +285,7 @@ namespace PredatorControlApp
 
         private void ListBox_DrawItem(object? sender, DrawItemEventArgs e)
         {
-            if (e.Index < 0) return;
+            if (e.Index < 0 || e.Index >= _items.Count) return;
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
@@ -263,8 +301,9 @@ namespace PredatorControlApp
 
             string text = _items[e.Index];
             var textRect = new Rectangle(e.Bounds.X + 12, e.Bounds.Y, e.Bounds.Width - 24, e.Bounds.Height);
-            TextRenderer.DrawText(g, text, Font, textRect, textCol,
-                TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+            var itemFlags = TextFormatFlags.Left | TextFormatFlags.VerticalCenter;
+            if (!_useMnemonic) itemFlags |= TextFormatFlags.NoPrefix;
+            TextRenderer.DrawText(g, text, Font, textRect, textCol, itemFlags);
 
             if (isSelected)
             {
@@ -280,7 +319,11 @@ namespace PredatorControlApp
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) ClosePopup();
+            if (disposing)
+            {
+                ThemeManager.ThemeChanged -= _themeHandler;
+                ClosePopup();
+            }
             base.Dispose(disposing);
         }
     }

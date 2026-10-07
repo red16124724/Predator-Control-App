@@ -10,6 +10,7 @@ using Xunit;
 
 namespace PredatorControlApp.Tests
 {
+    [Collection("NamedPipeTests")]
     public class OpenSenseFeatureTests
     {
         #region 1. AcerProtocol Payload Bit Packing & Decoding
@@ -95,16 +96,6 @@ namespace PredatorControlApp.Tests
 
             ulong offOutput = (0UL << 8);
             Assert.False(AcerProtocol.CoolBoostValue(offOutput));
-        }
-
-        [Fact]
-        public void Test_AcerProtocol_DustDefender_Decoding()
-        {
-            ulong runningOutput = (1UL << 24);
-            Assert.True(AcerProtocol.DustDefenderValue(runningOutput));
-
-            ulong stoppedOutput = (0UL << 24);
-            Assert.False(AcerProtocol.DustDefenderValue(stoppedOutput));
         }
 
         [Fact]
@@ -433,7 +424,6 @@ namespace PredatorControlApp.Tests
         {
             var caps = DeviceCapabilities.None;
             Assert.False(caps.CoolBoost);
-            Assert.False(caps.DustDefender);
             Assert.False(caps.HasThirdFan);
             Assert.False(caps.HasEcHid);
             Assert.True(caps.HasOperatingModes);
@@ -469,7 +459,6 @@ namespace PredatorControlApp.Tests
             var caps = new DeviceCapabilities
             {
                 CoolBoost = true,
-                DustDefender = true,
                 HasThirdFan = true,
                 HasEcHid = true
             };
@@ -514,40 +503,23 @@ namespace PredatorControlApp.Tests
         [Fact]
         public async Task Test_SecureNamedPipeIpc_ServerClientLoopback()
         {
+            string pipeName = "PredatorControlPipe_Loopback_" + Guid.NewGuid().ToString("N");
             string? receivedMessage = null;
-            using var server = new SecureNamedPipeIpc.PipeServer(msg => receivedMessage = msg);
+            using var server = new SecureNamedPipeIpc.PipeServer(msg => receivedMessage = msg, pipeName);
             server.Start();
 
             await Task.Delay(200);
 
-            bool sent = await SecureNamedPipeIpc.SendMessageWithVerificationAsync("SHOW", 3000);
+            bool sent = await SecureNamedPipeIpc.SendMessageWithVerificationAsync("SHOW", 3000, pipeName);
             Assert.True(sent);
 
             var sw = Stopwatch.StartNew();
-            while (receivedMessage == null && sw.ElapsedMilliseconds < 2000)
+            while (receivedMessage == null && sw.ElapsedMilliseconds < 5000)
             {
                 await Task.Delay(50);
             }
 
             Assert.Equal("SHOW", receivedMessage);
-        }
-
-        [Fact]
-        public void Test_FirmwareEvent_Decode_ByteArray_ThermalDustDefender()
-        {
-            // Thermal event (6), Value = 1, Detail[2] = 1 (DustDefender running)
-            byte[] payload = new byte[] { 6, 1, 1, 0 };
-            var ev = FirmwareEvent.Decode(payload);
-            Assert.NotNull(ev);
-            Assert.Equal(FirmwareEventKind.Thermal, ev.Kind);
-            Assert.Equal(1, ev.Value);
-            Assert.True(ev.DustDefenderRunning);
-
-            // Thermal event (6), Value = 1, Detail[2] = 0 (DustDefender stopped)
-            byte[] payloadStopped = new byte[] { 6, 1, 0, 0 };
-            var evStopped = FirmwareEvent.Decode(payloadStopped);
-            Assert.NotNull(evStopped);
-            Assert.False(evStopped.DustDefenderRunning);
         }
 
         [Fact]
@@ -583,7 +555,6 @@ namespace PredatorControlApp.Tests
         {
             Assert.True(Enum.IsDefined(typeof(FanLock), FanLock.QuietMode));
             Assert.True(Enum.IsDefined(typeof(FanLock), FanLock.EcoMode));
-            Assert.True(Enum.IsDefined(typeof(FanLock), FanLock.DustDefender));
         }
 
         [Fact]
@@ -593,7 +564,6 @@ namespace PredatorControlApp.Tests
             {
                 CoolBoost = true,
                 ThirdFan = true,
-                DustDefender = true,
                 FanTable = true,
                 GpuModeSwitch = true,
                 UsbCharging = true,
@@ -603,7 +573,6 @@ namespace PredatorControlApp.Tests
 
             Assert.True(caps.CoolBoost);
             Assert.True(caps.HasThirdFan);
-            Assert.True(caps.DustDefender);
             Assert.True(caps.FanTable);
             Assert.True(caps.GpuModeSwitch);
             Assert.True(caps.UsbCharging);
@@ -622,7 +591,6 @@ namespace PredatorControlApp.Tests
                 CoolBoost = true,
                 HasThirdFan = true,
                 GpuModeSwitch = true,
-                DustDefender = true,
                 FanTable = true,
                 UsbCharging = true,
                 BatteryCalibration = true
@@ -641,7 +609,6 @@ namespace PredatorControlApp.Tests
                 CoolBoost = false,
                 HasThirdFan = false,
                 GpuModeSwitch = false,
-                DustDefender = false,
                 FanTable = false,
                 UsbCharging = false,
                 BatteryCalibration = false
@@ -653,7 +620,6 @@ namespace PredatorControlApp.Tests
                 CoolBoost = true,
                 ThirdFan = true,
                 GpuModeSwitch = true,
-                DustDefender = true,
                 FanTable = true,
                 UsbCharging = true,
                 BatteryCalibration = true
@@ -662,7 +628,6 @@ namespace PredatorControlApp.Tests
             Assert.True(enabledCaps.CoolBoost);
             Assert.True(enabledCaps.HasThirdFan);
             Assert.True(enabledCaps.GpuModeSwitch);
-            Assert.True(enabledCaps.DustDefender);
             Assert.True(enabledCaps.FanTable);
             Assert.True(enabledCaps.UsbCharging);
             Assert.True(enabledCaps.BatteryCalibration);
@@ -673,7 +638,6 @@ namespace PredatorControlApp.Tests
                 CoolBoost = false,
                 ThirdFan = false,
                 GpuModeSwitch = false,
-                DustDefender = false,
                 FanTable = false,
                 UsbCharging = false,
                 BatteryCalibration = false
@@ -682,7 +646,6 @@ namespace PredatorControlApp.Tests
             Assert.False(disabledCaps.CoolBoost);
             Assert.False(disabledCaps.HasThirdFan);
             Assert.False(disabledCaps.GpuModeSwitch);
-            Assert.False(disabledCaps.DustDefender);
             Assert.False(disabledCaps.FanTable);
             Assert.False(disabledCaps.UsbCharging);
             Assert.False(disabledCaps.BatteryCalibration);

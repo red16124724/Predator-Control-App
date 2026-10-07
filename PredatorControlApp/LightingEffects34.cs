@@ -58,33 +58,81 @@ namespace PredatorControlApp
 
         private static CancellationTokenSource? _softwareAnimCts;
         private static readonly object _animLock = new();
+        private static int _currentAnimationGeneration;
+
+        public static bool IsSoftwareAnimationRunning
+        {
+            get
+            {
+                lock (_animLock)
+                {
+                    return _softwareAnimCts != null && !_softwareAnimCts.IsCancellationRequested;
+                }
+            }
+        }
 
         public static void StopSoftwareAnimation()
         {
             lock (_animLock)
             {
-                _softwareAnimCts?.Cancel();
-                _softwareAnimCts?.Dispose();
-                _softwareAnimCts = null;
+                Interlocked.Increment(ref _currentAnimationGeneration);
+                if (_softwareAnimCts != null)
+                {
+                    try { _softwareAnimCts.Cancel(); } catch { }
+                    _softwareAnimCts = null;
+                }
             }
         }
 
         public static void ApplyEffect(
             int effectIndex, WmiController wmi,
-            byte r, byte g, byte b, byte brightness, byte speed, byte direction,
+            Color color, byte brightness, byte speed, byte direction = 0,
             OperatingMode currentPowerMode = OperatingMode.Balanced)
         {
+            float alphaScale = Math.Clamp(color.A, (byte)0, (byte)255) / 255f;
+            byte r = (byte)Math.Clamp(Math.Round(color.R * alphaScale), 0, 255);
+            byte g = (byte)Math.Clamp(Math.Round(color.G * alphaScale), 0, 255);
+            byte b = (byte)Math.Clamp(Math.Round(color.B * alphaScale), 0, 255);
+            byte effectiveBrightness = (byte)Math.Clamp(Math.Round(brightness * alphaScale), 0, 100);
+            ApplyEffect(effectIndex, wmi, r, g, b, effectiveBrightness, speed, direction, currentPowerMode);
+        }
+
+
+        public static void ApplyEffect(
+            int effectIndex, WmiController wmi,
+            byte r, byte g, byte b, byte brightness, byte speed, byte direction = 0,
+            OperatingMode currentPowerMode = OperatingMode.Balanced)
+        {
+            // Clamp inputs to safe boundaries
+            effectIndex = Math.Clamp(effectIndex, 0, 33);
+            brightness = Math.Clamp(brightness, (byte)0, (byte)100);
+            speed = Math.Clamp(speed, (byte)1, (byte)100);
+            direction = (byte)(direction != 0 ? 1 : 0);
+
+            // Default color fallback so animations are never pitch black/invisible
+            if (r == 0 && g == 0 && b == 0)
+            {
+                r = 0; g = 150; b = 255;
+            }
+
             StopSoftwareAnimation();
+
+            if (brightness == 0)
+            {
+                wmi.TurnOffBacklight();
+                return;
+            }
 
             if (effectIndex <= 7)
             {
                 // Native hardware effect supported directly by EC / WMI
-                wmi.SetRgbMode(effectIndex, r, g, b, brightness, speed, direction);
+                byte hwSpeed = (byte)Math.Clamp(speed <= 9 ? speed : Math.Round(speed * 9.0 / 100.0), 1, 9);
+                wmi.SetRgbMode(effectIndex, r, g, b, brightness, hwSpeed, (byte)direction);
                 return;
             }
 
             // Advanced effects (8..33)
-            var effect = (LightingEffect34)Math.Clamp(effectIndex, 0, 33);
+            var effect = (LightingEffect34)effectIndex;
             if (effect == LightingEffect34.FollowOperatingMode)
             {
                 var modeColor = currentPowerMode switch
@@ -102,22 +150,24 @@ namespace PredatorControlApp
             // Software-driven animated effects across 4 zones
             lock (_animLock)
             {
-                _softwareAnimCts = new CancellationTokenSource();
-                var token = _softwareAnimCts.Token;
+                int generation = ++_currentAnimationGeneration;
+                var cts = new CancellationTokenSource();
+                _softwareAnimCts = cts;
+                var token = cts.Token;
 
                 Task.Run(async () =>
                 {
                     int step = 0;
-                    while (!token.IsCancellationRequested)
+                    while (!token.IsCancellationRequested && generation == Volatile.Read(ref _currentAnimationGeneration))
                     {
                         try
                         {
-                            ApplyAnimationFrame(effect, wmi, step++, r, g, b, brightness, speed);
-                            int delayMs = Math.Max(50, 160 - (speed * 10));
+                            ApplyAnimationFrame(effect, wmi, step++, r, g, b, brightness, speed, token, generation);
+                            int delayMs = Math.Max(125, 200 - ((speed <= 9 ? speed * 10 : speed) * 8 / 10));
                             await Task.Delay(delayMs, token);
                         }
                         catch (OperationCanceledException) { break; }
-                        catch { }
+                        catch { break; }
                     }
                 }, token);
             }
@@ -125,9 +175,17 @@ namespace PredatorControlApp
 
         private static void ApplyAnimationFrame(
             LightingEffect34 effect, WmiController wmi, int step,
-            byte baseR, byte baseG, byte baseB, byte brightness, byte speed)
+            byte baseR, byte baseG, byte baseB, byte brightness, byte speed,
+            CancellationToken token, int generation)
         {
-            double scale = brightness / 100.0;
+            if (token.IsCancellationRequested || generation != Volatile.Read(ref _currentAnimationGeneration))
+                return;
+
+            float scale = Math.Clamp(brightness, (byte)0, (byte)100) / 100f;
+            byte scaleR(byte c) => (byte)Math.Clamp(Math.Round(c * scale), 0, 255);
+            byte scaleG(byte c) => (byte)Math.Clamp(Math.Round(c * scale), 0, 255);
+            byte scaleB(byte c) => (byte)Math.Clamp(Math.Round(c * scale), 0, 255);
+
             switch (effect)
             {
                 case LightingEffect34.Snake:
@@ -136,8 +194,9 @@ namespace PredatorControlApp
                     int activeZone = (step % 8) < 4 ? (step % 4) : (3 - (step % 4));
                     for (int z = 1; z <= 4; z++)
                     {
+                        if (token.IsCancellationRequested || generation != Volatile.Read(ref _currentAnimationGeneration)) return;
                         if (z == activeZone + 1)
-                            wmi.SetZoneColor(z, (byte)(baseR * scale), (byte)(baseG * scale), (byte)(baseB * scale));
+                            wmi.SetZoneColor(z, scaleR(baseR), scaleG(baseG), scaleB(baseB));
                         else
                             wmi.SetZoneColor(z, 0, 0, 0);
                     }
@@ -148,7 +207,8 @@ namespace PredatorControlApp
                 case LightingEffect34.LightShow:
                     for (int z = 1; z <= 4; z++)
                     {
-                        double hue = ((step * 15) + (z * 60)) % 360;
+                        if (token.IsCancellationRequested || generation != Volatile.Read(ref _currentAnimationGeneration)) return;
+                        double hue = (((step * 15) + (z * 60)) % 360 + 360) % 360;
                         var col = ColorFromHsv(hue, 1.0, scale);
                         wmi.SetZoneColor(z, col.R, col.G, col.B);
                     }
@@ -158,28 +218,39 @@ namespace PredatorControlApp
                 case LightingEffect34.Ripple:
                 case LightingEffect34.Blasting:
                     double pulse = Math.Abs(Math.Sin(step * 0.15));
-                    byte pR = (byte)(baseR * pulse * scale);
-                    byte pG = (byte)(baseG * pulse * scale);
-                    byte pB = (byte)(baseB * pulse * scale);
+                    byte pR = scaleR((byte)(baseR * pulse));
+                    byte pG = scaleG((byte)(baseG * pulse));
+                    byte pB = scaleB((byte)(baseB * pulse));
                     for (int z = 1; z <= 4; z++)
+                    {
+                        if (token.IsCancellationRequested || generation != Volatile.Read(ref _currentAnimationGeneration)) return;
                         wmi.SetZoneColor(z, pR, pG, pB);
+                    }
                     break;
 
                 default:
                     // Color shifting between primary and complementary
                     double phase = (Math.Sin(step * 0.1) + 1.0) / 2.0;
-                    byte sR = (byte)(baseR * phase * scale);
-                    byte sG = (byte)(baseG * (1.0 - phase) * scale);
-                    byte sB = (byte)(baseB * phase * scale);
+                    byte sR = scaleR((byte)(baseR * phase));
+                    byte sG = scaleG((byte)(baseG * (1.0 - phase)));
+                    byte sB = scaleB((byte)(baseB * phase));
                     for (int z = 1; z <= 4; z++)
+                    {
+                        if (token.IsCancellationRequested || generation != Volatile.Read(ref _currentAnimationGeneration)) return;
                         wmi.SetZoneColor(z, sR, sG, sB);
+                    }
                     break;
             }
         }
 
         private static Color ColorFromHsv(double hue, double saturation, double value)
         {
+            hue = ((hue % 360) + 360) % 360;
+            saturation = Math.Clamp(saturation, 0.0, 1.0);
+            value = Math.Clamp(value, 0.0, 1.0);
+
             int hi = Convert.ToInt32(Math.Floor(hue / 60)) % 6;
+            if (hi < 0) hi = (hi + 6) % 6;
             double f = hue / 60 - Math.Floor(hue / 60);
 
             value = value * 255;

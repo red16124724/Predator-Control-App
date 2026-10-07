@@ -37,8 +37,8 @@ namespace PredatorControlApp
     public enum FanBehavior : byte
     {
         Auto = 1,
-        Custom = 2,
-        Max = 3
+        Max = 2,
+        Custom = 3
     }
 
     public enum FanTable : byte
@@ -60,16 +60,11 @@ namespace PredatorControlApp
 
     public enum GpuMode : byte
     {
+        Auto = 0,
+        iGpuOnly = 1,
         Hybrid = 1,
+        dGpuOnly = 2,
         Discrete = 2
-    }
-
-    public enum DustDefenderStart
-    {
-        Started,
-        Busy,
-        Failed,
-        Running
     }
 
     public enum BatteryFunction : byte
@@ -104,8 +99,7 @@ namespace PredatorControlApp
     public enum FanLock
     {
         QuietMode,
-        EcoMode,
-        DustDefender
+        EcoMode
     }
 
     public enum FanId
@@ -134,11 +128,13 @@ namespace PredatorControlApp
 
     public enum EcHidStatus : byte
     {
-        Version = 1,
-        Adapter = 2,
-        ModeLimit = 3,
-        BatteryBoost = 4,
-        UsbCAdapter = 5
+        Version = 0,
+        BatteryBoost = 2,
+        Adapter = 3,
+        OverclockProfiles = 4,
+        ModeCapability = 5,
+        ModeLimit = 6,
+        UsbCAdapter = 7
     }
 
     #endregion
@@ -162,15 +158,6 @@ namespace PredatorControlApp
 
     public sealed record FirmwareEvent(FirmwareEventKind Kind, byte Value, byte[] Detail)
     {
-        public bool? DustDefenderRunning
-        {
-            get
-            {
-                if (Kind != FirmwareEventKind.Thermal || Value != 1 || Detail.Length <= 2) return null;
-                return Detail[2] == 1;
-            }
-        }
-
         public static FirmwareEvent? Decode(byte[]? detail)
         {
             if (detail == null || detail.Length == 0) return null;
@@ -182,15 +169,15 @@ namespace PredatorControlApp
 
     public readonly record struct EcHidVersion(byte Major, byte Minor)
     {
-        public bool EchoesStatusType => Major > 1 || (Major == 1 && Minor >= 2);
+        public bool EchoesStatusType => Major > 0 || Minor >= 6;
     }
 
-    public sealed record EcHidReply(ushort Command, ushort Status, byte[] Data)
+    public sealed record EcHidReply(ushort Status, ushort Command, byte[] Data)
     {
         public bool Done => Status == 0xE000;
         public bool Final => Done || Status == 0xE001;
-        public byte Byte(int offset) => offset < Data.Length ? Data[offset] : (byte)0;
-        public ushort Word(int offset) => offset + 1 < Data.Length ? BinaryPrimitives.ReadUInt16LittleEndian(Data.AsSpan(offset)) : (ushort)0;
+        public byte Byte(int offset) => (Data != null && (uint)offset < (uint)Data.Length) ? Data[offset] : (byte)0;
+        public ushort Word(int offset) => (Data != null && offset >= 0 && offset <= Data.Length - 2) ? BinaryPrimitives.ReadUInt16LittleEndian(Data.AsSpan(offset)) : (ushort)0;
     }
 
     public sealed record FanChannel(FanId Id, string Name, FanChip Chip, SensorId RpmSensor, int? GroupBit = null, byte? SpeedId = null)
@@ -201,11 +188,11 @@ namespace PredatorControlApp
         public static readonly FanChannel Gpu = new(FanId.Gpu, "GPU", FanChip.Gpu, SensorId.GpuFanSpeed, 3, 4);
         public static readonly FanChannel Gpu2 = new(FanId.Gpu2, "GPU 2", FanChip.Gpu, SensorId.Gpu2FanSpeed, 4, 5);
         public static readonly FanChannel System = new(FanId.System, "System", FanChip.System, SensorId.SystemFanSpeed, 1, 2);
-        public static readonly FanChannel System2 = new(FanId.System2, "System 2", FanChip.System, SensorId.System2FanSpeed, 2, 3);
+        public static readonly FanChannel System2 = new(FanId.System2, "System 2", FanChip.System, SensorId.System2FanSpeed);
 
         public static readonly IReadOnlyList<FanChannel> Known = new[] { Cpu, Gpu, Gpu2, System, System2 };
 
-        public static FanChannel Get(FanId id) => Known.First(f => f.Id == id);
+        public static FanChannel Get(FanId id) => Known.FirstOrDefault(f => f.Id == id) ?? Cpu;
     }
 
     #endregion
@@ -221,13 +208,29 @@ namespace PredatorControlApp
 
         public const uint SupportedSensorsQuery = 0u;
         public const uint CoolBoostGetInput = 519u;
-        public const uint DustDefenderQuery = 263u;
-        public const uint DustDefenderStatusQuery = 775u;
-        public const ulong DustDefenderStartInput = 263uL;
-        public const byte DustDefenderBusy = 229;
         public const uint UsbChargingQuery = 4u;
         public const int DefaultUsbChargingFloor = 30;
         public const uint BatteryStatusQuery = 2u;
+
+        public static byte WmiModeToEcMode(byte wmiMode, int modeCount = 5) => wmiMode switch
+        {
+            0x05 => 0,                      // Turbo: highest
+            0x04 => (byte)(modeCount >= 4 ? 1 : 0), // Performance
+            0x01 => (byte)(modeCount >= 4 ? 2 : 1), // Balanced
+            0x00 => (byte)(modeCount >= 4 ? 3 : 2), // Quiet
+            0x06 => (byte)Math.Max(0, modeCount - 1),  // Eco: lowest
+            _ => 1
+        };
+
+        public static byte EcModeToWmiMode(byte ecMode) => ecMode switch
+        {
+            0 => 0x05, // Turbo
+            1 => 0x04, // Performance
+            2 => 0x01, // Balanced
+            3 => 0x00, // Quiet
+            4 => 0x06, // Eco
+            _ => 0x01
+        };
 
         public static readonly int[] UsbChargingFloors = { 10, 20, 30 };
         private static readonly string[] FanTableModels = { "AN515-46", "AN515-47", "AN515-58", "AN517-42", "AN517-43", "AN517-55" };
@@ -244,7 +247,8 @@ namespace PredatorControlApp
             var list = new List<SensorId>();
             foreach (SensorId id in Enum.GetValues<SensorId>())
             {
-                if ((mask & (1UL << ((int)id - 1))) != 0)
+                int bit = (int)id - 1;
+                if (bit >= 0 && bit < 64 && (mask & (1UL << bit)) != 0)
                     list.Add(id);
             }
             return list;
@@ -290,8 +294,6 @@ namespace PredatorControlApp
 
         public static ulong CoolBoostSetInput(bool on) => 7UL | ((ulong)(on ? 1 : 0) << 16);
         public static bool CoolBoostValue(ulong output) => ((output >> 8) & 0xFF) == 1;
-
-        public static bool DustDefenderValue(ulong output) => ((output >> 24) & 0xFF) == 1;
 
         public static ulong UsbChargingInput(bool on, int floor)
         {
@@ -461,10 +463,12 @@ namespace PredatorControlApp
                         var bqi = new BATTERY_QUERY_INFORMATION { BatteryTag = tag, InformationLevel = 0, AtRate = 0 };
                         int bqiSize = Marshal.SizeOf<BATTERY_QUERY_INFORMATION>();
                         int biSize = Marshal.SizeOf<BATTERY_INFORMATION>();
-                        IntPtr pBqi = Marshal.AllocHGlobal(bqiSize);
-                        IntPtr pBi = Marshal.AllocHGlobal(biSize);
+                        IntPtr pBqi = IntPtr.Zero;
+                        IntPtr pBi = IntPtr.Zero;
                         try
                         {
+                            pBqi = Marshal.AllocHGlobal(bqiSize);
+                            pBi = Marshal.AllocHGlobal(biSize);
                             Marshal.StructureToPtr(bqi, pBqi, false);
                             if (DeviceIoControl(handle, IOCTL_BATTERY_QUERY_INFORMATION, pBqi, (uint)bqiSize, pBi, (uint)biSize, out returned, IntPtr.Zero) && returned > 0)
                             {
@@ -488,8 +492,8 @@ namespace PredatorControlApp
                         }
                         finally
                         {
-                            Marshal.FreeHGlobal(pBqi);
-                            Marshal.FreeHGlobal(pBi);
+                            if (pBqi != IntPtr.Zero) Marshal.FreeHGlobal(pBqi);
+                            if (pBi != IntPtr.Zero) Marshal.FreeHGlobal(pBi);
                         }
                     }
                     finally
@@ -506,21 +510,24 @@ namespace PredatorControlApp
         {
             var bqi = new BATTERY_QUERY_INFORMATION { BatteryTag = tag, InformationLevel = level };
             int bqiSize = Marshal.SizeOf<BATTERY_QUERY_INFORMATION>();
-            IntPtr pBqi = Marshal.AllocHGlobal(bqiSize);
-            IntPtr pOut = Marshal.AllocHGlobal(256);
+            IntPtr pBqi = IntPtr.Zero;
+            IntPtr pOut = IntPtr.Zero;
             try
             {
+                pBqi = Marshal.AllocHGlobal(bqiSize);
+                pOut = Marshal.AllocHGlobal(256);
                 Marshal.StructureToPtr(bqi, pBqi, false);
                 if (DeviceIoControl(handle, IOCTL_BATTERY_QUERY_INFORMATION, pBqi, (uint)bqiSize, pOut, 256, out uint returned, IntPtr.Zero) && returned > 0)
                 {
-                    return Marshal.PtrToStringUni(pOut)?.Trim('\0', ' ');
+                    int charCount = Math.Min((int)(returned / 2), 128);
+                    return Marshal.PtrToStringUni(pOut, charCount)?.Trim('\0', ' ');
                 }
             }
             catch { }
             finally
             {
-                Marshal.FreeHGlobal(pBqi);
-                Marshal.FreeHGlobal(pOut);
+                if (pBqi != IntPtr.Zero) Marshal.FreeHGlobal(pBqi);
+                if (pOut != IntPtr.Zero) Marshal.FreeHGlobal(pOut);
             }
             return null;
         }
@@ -539,7 +546,7 @@ namespace PredatorControlApp
                 while (SetupDiEnumDeviceInterfaces(hDevInfo, IntPtr.Zero, ref guid, index++, ref did))
                 {
                     SetupDiGetDeviceInterfaceDetail(hDevInfo, ref did, IntPtr.Zero, 0, out uint requiredSize, IntPtr.Zero);
-                    if (requiredSize == 0) continue;
+                    if (requiredSize <= 4) continue;
 
                     IntPtr pDetail = Marshal.AllocHGlobal((int)requiredSize);
                     try
@@ -595,7 +602,7 @@ namespace PredatorControlApp
             {
                 uint rsmb = 0x52534D42; // 'RSMB'
                 uint size = GetSystemFirmwareTable(rsmb, 0, IntPtr.Zero, 0);
-                if (size == 0) return Empty;
+                if (size < 8) return Empty;
 
                 byte[] buf = new byte[size];
                 GCHandle pin = GCHandle.Alloc(buf, GCHandleType.Pinned);
@@ -664,11 +671,15 @@ namespace PredatorControlApp
             try
             {
                 using var searcher = new ManagementObjectSearcher("SELECT Manufacturer, Model FROM Win32_ComputerSystem");
-                foreach (var obj in searcher.Get())
+                using var coll = searcher.Get();
+                foreach (ManagementObject obj in coll)
                 {
-                    string mfg = obj["Manufacturer"]?.ToString() ?? "";
-                    string model = obj["Model"]?.ToString() ?? "";
-                    return $"{mfg} {model}".Trim();
+                    using (obj)
+                    {
+                        string mfg = obj["Manufacturer"]?.ToString() ?? "";
+                        string model = obj["Model"]?.ToString() ?? "";
+                        return $"{mfg} {model}".Trim();
+                    }
                 }
             }
             catch { }
@@ -680,9 +691,13 @@ namespace PredatorControlApp
             try
             {
                 using var searcher = new ManagementObjectSearcher("SELECT SMBIOSBIOSVersion FROM Win32_BIOS");
-                foreach (var obj in searcher.Get())
+                using var coll = searcher.Get();
+                foreach (ManagementObject obj in coll)
                 {
-                    return obj["SMBIOSBIOSVersion"]?.ToString() ?? "Unknown";
+                    using (obj)
+                    {
+                        return obj["SMBIOSBIOSVersion"]?.ToString() ?? "Unknown";
+                    }
                 }
             }
             catch { }
@@ -694,10 +709,14 @@ namespace PredatorControlApp
             try
             {
                 using var searcher = new ManagementObjectSearcher("SELECT SerialNumber FROM Win32_BIOS");
-                foreach (var obj in searcher.Get())
+                using var coll = searcher.Get();
+                foreach (ManagementObject obj in coll)
                 {
-                    string sn = obj["SerialNumber"]?.ToString()?.Trim() ?? "";
-                    if (!string.IsNullOrEmpty(sn)) return sn;
+                    using (obj)
+                    {
+                        string sn = obj["SerialNumber"]?.ToString()?.Trim() ?? "";
+                        if (!string.IsNullOrEmpty(sn)) return sn;
+                    }
                 }
             }
             catch { }
@@ -737,9 +756,13 @@ namespace PredatorControlApp
 
         private SafeFileHandle? _deviceHandle;
         private Mutex? _globalLock;
+        private int _reportLength = ReportLength;
+        private readonly object _localLock = new();
+        private bool _disposed;
 
         public bool IsOpen => _deviceHandle != null && !_deviceHandle.IsInvalid;
         public EcHidVersion? Version { get; private set; }
+        public int ReportLengthActual => _reportLength;
 
         public static EcHidDevice? TryOpen()
         {
@@ -748,12 +771,34 @@ namespace PredatorControlApp
                 var paths = FindDevicePaths();
                 foreach (var path in paths)
                 {
-                    var handle = CreateFile(path, 0xC0000000, 3, IntPtr.Zero, 3, 0x40000000, IntPtr.Zero);
+                    var handle = CreateFile(path, 0xC0000000, 7, IntPtr.Zero, 3, 0, IntPtr.Zero);
+                    if (handle.IsInvalid)
+                    {
+                        handle.Dispose();
+                        handle = CreateFile(path, 0, 7, IntPtr.Zero, 3, 0, IntPtr.Zero);
+                    }
                     if (!handle.IsInvalid)
                     {
+                        int repLen = ReportLength;
+                        if (HidD_GetPreparsedData(handle, out IntPtr pData))
+                        {
+                            try
+                            {
+                                var caps = new HIDP_CAPS();
+                                if (HidP_GetCaps(pData, ref caps) >= 0 && caps.FeatureReportByteLength > 0)
+                                {
+                                    repLen = caps.FeatureReportByteLength;
+                                }
+                            }
+                            finally
+                            {
+                                HidD_FreePreparsedData(pData);
+                            }
+                        }
+
                         Mutex? mtx = null;
                         try { mtx = new Mutex(false, MutexName); } catch { }
-                        var dev = new EcHidDevice { _deviceHandle = handle, _globalLock = mtx };
+                        var dev = new EcHidDevice { _deviceHandle = handle, _globalLock = mtx, _reportLength = repLen };
                         if (dev.ReadVersion() != null) return dev;
                         dev.Dispose();
                     }
@@ -814,44 +859,123 @@ namespace PredatorControlApp
             return rep != null && rep.Done && rep.Command == (ushort)EcHidCommand.Device;
         }
 
-        public EcHidReply? Exchange(byte[] request)
+        private bool Reopen()
         {
-            if (_deviceHandle == null || _deviceHandle.IsInvalid) return null;
-            bool lockTaken = false;
+            if (_disposed) return false;
             try
             {
-                if (_globalLock != null) lockTaken = _globalLock.WaitOne(500);
-
-                if (!SetFeature(_deviceHandle, request)) return null;
-                Thread.Sleep(20);
-
-                byte[] replyBuf = new byte[ReportLength];
-                replyBuf[0] = ReportId;
-                if (!GetFeature(_deviceHandle, replyBuf)) return null;
-
-                if (replyBuf.Length >= 6 && replyBuf[0] == ReportId)
+                _deviceHandle?.Dispose();
+                _deviceHandle = null;
+                var paths = FindDevicePaths();
+                foreach (var path in paths)
                 {
-                    byte[] data = replyBuf.AsSpan(1).ToArray();
-                    return new EcHidReply(BinaryPrimitives.ReadUInt16LittleEndian(data), BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(2)), data);
+                    var handle = CreateFile(path, 0xC0000000, 7, IntPtr.Zero, 3, 0, IntPtr.Zero);
+                    if (handle.IsInvalid)
+                    {
+                        handle.Dispose();
+                        handle = CreateFile(path, 0, 7, IntPtr.Zero, 3, 0, IntPtr.Zero);
+                    }
+                    if (!handle.IsInvalid)
+                    {
+                        int repLen = ReportLength;
+                        if (HidD_GetPreparsedData(handle, out IntPtr pData))
+                        {
+                            try
+                            {
+                                var caps = new HIDP_CAPS();
+                                if (HidP_GetCaps(pData, ref caps) >= 0 && caps.FeatureReportByteLength > 0)
+                                {
+                                    repLen = caps.FeatureReportByteLength;
+                                }
+                            }
+                            finally
+                            {
+                                HidD_FreePreparsedData(pData);
+                            }
+                        }
+                        _deviceHandle = handle;
+                        _reportLength = repLen;
+                        return true;
+                    }
                 }
             }
             catch { }
-            finally
-            {
-                if (lockTaken) _globalLock?.ReleaseMutex();
-            }
-            return null;
+            return false;
         }
 
-        private static byte[] BuildRequest(EcHidCommand cmd, byte func, params byte[] data)
+        public EcHidReply? Exchange(byte[] request)
         {
-            byte[] buf = new byte[ReportLength];
+            if (_disposed) return null;
+            lock (_localLock)
+            {
+                if (_disposed) return null;
+                for (int attempt = 0; attempt < 3; attempt++)
+                {
+                    if (attempt > 0) Thread.Sleep(20);
+
+                    if (_deviceHandle == null || _deviceHandle.IsInvalid)
+                    {
+                        if (!Reopen()) continue;
+                    }
+
+                    bool lockTaken = false;
+                    try
+                    {
+                        if (_globalLock != null)
+                        {
+                            try { lockTaken = _globalLock.WaitOne(500); }
+                            catch (AbandonedMutexException) { lockTaken = true; }
+                        }
+                        if (_globalLock != null && !lockTaken) continue;
+
+                        if (!SetFeature(_deviceHandle!, request))
+                        {
+                            Reopen();
+                            continue;
+                        }
+                        Thread.Sleep(20);
+
+                        byte[] replyBuf = new byte[_reportLength];
+                        replyBuf[0] = ReportId;
+                        if (!GetFeature(_deviceHandle!, replyBuf))
+                        {
+                            Reopen();
+                            continue;
+                        }
+
+                        if (replyBuf.Length >= 6 && replyBuf[0] == ReportId)
+                        {
+                            byte[] data = replyBuf.AsSpan(1).ToArray();
+                            return new EcHidReply(BinaryPrimitives.ReadUInt16LittleEndian(data), BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(2)), data);
+                        }
+                    }
+                    catch { }
+                    finally
+                    {
+                        if (lockTaken)
+                        {
+                            try { _globalLock?.ReleaseMutex(); } catch { }
+                        }
+                    }
+                }
+                return null;
+            }
+        }
+
+        private byte[] BuildRequest(EcHidCommand cmd, byte func, params byte[] data)
+        {
+            int dataLen = data?.Length ?? 0;
+            int repLen = Math.Max(_reportLength, 6 + dataLen);
+            byte[] buf = new byte[repLen];
             buf[0] = ReportId;
             BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(1), RequestHeader);
             BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(3), (ushort)cmd);
             buf[5] = func;
             if (data != null && data.Length > 0)
-                data.CopyTo(buf.AsSpan(6));
+            {
+                int copyLen = Math.Min(data.Length, buf.Length - 6);
+                data.AsSpan(0, copyLen).CopyTo(buf.AsSpan(6));
+            }
             return buf;
         }
 
@@ -935,10 +1059,11 @@ namespace PredatorControlApp
 
         private static List<string> FindDevicePaths()
         {
-            var matches = new List<string>();
+            var exactMatches = new List<string>();
+            var candidateMatches = new List<string>();
             HidD_GetHidGuid(out Guid hidGuid);
             IntPtr hDevInfo = SetupDiGetClassDevs(ref hidGuid, IntPtr.Zero, IntPtr.Zero, 0x12);
-            if (hDevInfo == (IntPtr)(-1)) return matches;
+            if (hDevInfo == (IntPtr)(-1)) return exactMatches;
 
             try
             {
@@ -947,7 +1072,7 @@ namespace PredatorControlApp
                 while (SetupDiEnumDeviceInterfaces(hDevInfo, IntPtr.Zero, ref hidGuid, index++, ref did))
                 {
                     SetupDiGetDeviceInterfaceDetail(hDevInfo, ref did, IntPtr.Zero, 0, out uint reqSize, IntPtr.Zero);
-                    if (reqSize == 0) continue;
+                    if (reqSize <= 4) continue;
 
                     IntPtr pDetail = Marshal.AllocHGlobal((int)reqSize);
                     try
@@ -959,7 +1084,7 @@ namespace PredatorControlApp
                             string? path = Marshal.PtrToStringAuto(pPath);
                             if (!string.IsNullOrEmpty(path))
                             {
-                                using var dev = CreateFile(path, 0, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);
+                                using var dev = CreateFile(path, 0, 7, IntPtr.Zero, 3, 0, IntPtr.Zero);
                                 if (!dev.IsInvalid)
                                 {
                                     var attr = new HIDD_ATTRIBUTES { Size = Marshal.SizeOf<HIDD_ATTRIBUTES>() };
@@ -967,7 +1092,8 @@ namespace PredatorControlApp
                                     {
                                         if (attr.VendorID == VendorId && attr.ProductID == ProductId)
                                         {
-                                            bool matchesUsage = true;
+                                            bool isExact = false;
+                                            bool isCandidate = false;
                                             if (HidD_GetPreparsedData(dev, out IntPtr pData))
                                             {
                                                 try
@@ -975,7 +1101,14 @@ namespace PredatorControlApp
                                                     var caps = new HIDP_CAPS();
                                                     if (HidP_GetCaps(pData, ref caps) >= 0)
                                                     {
-                                                        matchesUsage = (caps.UsagePage == UsagePage && caps.Usage == Usage);
+                                                        if (caps.UsagePage == UsagePage && caps.Usage == Usage)
+                                                        {
+                                                            isExact = true;
+                                                        }
+                                                        else if (caps.FeatureReportByteLength > 0 || caps.UsagePage >= 0xFF00)
+                                                        {
+                                                            isCandidate = true;
+                                                        }
                                                     }
                                                 }
                                                 finally
@@ -984,8 +1117,10 @@ namespace PredatorControlApp
                                                 }
                                             }
 
-                                            if (matchesUsage)
-                                                matches.Add(path);
+                                            if (isExact)
+                                                exactMatches.Add(path);
+                                            else if (isCandidate)
+                                                candidateMatches.Add(path);
                                         }
                                     }
                                 }
@@ -996,7 +1131,8 @@ namespace PredatorControlApp
                 }
             }
             finally { SetupDiDestroyDeviceInfoList(hDevInfo); }
-            return matches;
+            exactMatches.AddRange(candidateMatches);
+            return exactMatches;
         }
 
         private static bool SetFeature(SafeFileHandle h, byte[] buf) => HidD_SetFeature(h, buf, buf.Length);
@@ -1004,10 +1140,21 @@ namespace PredatorControlApp
 
         public void Dispose()
         {
-            try { _deviceHandle?.Dispose(); } catch { }
-            _deviceHandle = null;
-            try { _globalLock?.Dispose(); } catch { }
-            _globalLock = null;
+            lock (_localLock)
+            {
+                if (_disposed) return;
+                _disposed = true;
+                try { _deviceHandle?.Dispose(); } catch { }
+                _deviceHandle = null;
+                try { _globalLock?.Dispose(); } catch { }
+                _globalLock = null;
+            }
+            GC.SuppressFinalize(this);
+        }
+
+        ~EcHidDevice()
+        {
+            Dispose();
         }
     }
 
@@ -1020,6 +1167,9 @@ namespace PredatorControlApp
     {
         private const uint CR_SUCCESS = 0;
         private static readonly Guid GUID_DEVCLASS_DISPLAY = new("4d36e968-e325-11ce-bfc1-08002be10318");
+        private static uint _cachedDevInst = 0;
+        private static DateTime _lastDevInstCheck = DateTime.MinValue;
+        private static readonly object _gpuPowerLock = new();
 
         [StructLayout(LayoutKind.Sequential)]
         private struct DEVPROPKEY
@@ -1062,8 +1212,29 @@ namespace PredatorControlApp
 
         public static bool IsGpuAsleep()
         {
-            try
+            lock (_gpuPowerLock)
             {
+                try
+                {
+                    if (_cachedDevInst != 0 && (DateTime.UtcNow - _lastDevInstCheck).TotalSeconds < 60)
+                    {
+                        int size = Marshal.SizeOf<CM_POWER_DATA>();
+                    IntPtr pData = Marshal.AllocHGlobal(size);
+                    try
+                    {
+                        uint bufSize = (uint)size;
+                        var propKey = PKEY_Device_PowerData;
+                        if (CM_Get_DevNode_Property(_cachedDevInst, ref propKey, out _, pData, ref bufSize, 0) == CR_SUCCESS)
+                        {
+                            var pd = Marshal.PtrToStructure<CM_POWER_DATA>(pData);
+                            return pd.PD_MostRecentPowerState >= 2;
+                        }
+                    }
+                    finally { Marshal.FreeHGlobal(pData); }
+                    _cachedDevInst = 0;
+                }
+
+                _lastDevInstCheck = DateTime.UtcNow;
                 string filter = GUID_DEVCLASS_DISPLAY.ToString("B");
                 if (CM_Get_Device_ID_List_Size(out uint len, filter, 0x300) != CR_SUCCESS || len == 0)
                     return false;
@@ -1076,28 +1247,27 @@ namespace PredatorControlApp
 
                     string raw = Marshal.PtrToStringUni(pBuf, (int)len);
                     var ids = raw.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+                    string? targetId = ids.FirstOrDefault(id => id.Contains("VEN_10DE", StringComparison.OrdinalIgnoreCase))
+                        ?? ids.FirstOrDefault(id => id.Contains("VEN_1002", StringComparison.OrdinalIgnoreCase) && !id.Contains("DEV_1638", StringComparison.OrdinalIgnoreCase));
 
-                    foreach (var id in ids)
+                    if (!string.IsNullOrEmpty(targetId))
                     {
-                        if (id.Contains("VEN_10DE", StringComparison.OrdinalIgnoreCase) ||
-                            (id.Contains("VEN_1002", StringComparison.OrdinalIgnoreCase) && !id.Contains("DEV_1638", StringComparison.OrdinalIgnoreCase)))
+                        if (CM_Locate_DevNode(out uint devInst, targetId, 0) == CR_SUCCESS)
                         {
-                            if (CM_Locate_DevNode(out uint devInst, id, 0) == CR_SUCCESS)
+                            _cachedDevInst = devInst;
+                            int size = Marshal.SizeOf<CM_POWER_DATA>();
+                            IntPtr pData = Marshal.AllocHGlobal(size);
+                            try
                             {
-                                int size = Marshal.SizeOf<CM_POWER_DATA>();
-                                IntPtr pData = Marshal.AllocHGlobal(size);
-                                try
+                                uint bufSize = (uint)size;
+                                var propKey = PKEY_Device_PowerData;
+                                if (CM_Get_DevNode_Property(devInst, ref propKey, out _, pData, ref bufSize, 0) == CR_SUCCESS)
                                 {
-                                    uint bufSize = (uint)size;
-                                    var propKey = PKEY_Device_PowerData;
-                                    if (CM_Get_DevNode_Property(devInst, ref propKey, out _, pData, ref bufSize, 0) == CR_SUCCESS)
-                                    {
-                                        var pd = Marshal.PtrToStructure<CM_POWER_DATA>(pData);
-                                        return pd.PD_MostRecentPowerState >= 2;
-                                    }
+                                    var pd = Marshal.PtrToStructure<CM_POWER_DATA>(pData);
+                                    return pd.PD_MostRecentPowerState >= 2;
                                 }
-                                finally { Marshal.FreeHGlobal(pData); }
                             }
+                            finally { Marshal.FreeHGlobal(pData); }
                         }
                     }
                 }
@@ -1105,6 +1275,7 @@ namespace PredatorControlApp
             }
             catch { }
             return false;
+            }
         }
     }
 

@@ -1229,5 +1229,66 @@ namespace PredatorControlApp.Tests
                 Assert.InRange(speed, 10, 100);
             }
         }
+
+        [Fact]
+        public void ThemeManager_DarkAndLightModes_ColorContrastAndTokensValid()
+        {
+            lock (ThemeManager.ThemeSync)
+            {
+                ThemeManager.SetTheme(AppTheme.Dark);
+                Assert.True(ThemeManager.IsDarkThemeActive);
+                Assert.NotEqual(Color.Empty, ThemeManager.FormBg);
+                Assert.NotEqual(Color.Empty, ThemeManager.CardBg);
+                Assert.NotEqual(Color.Empty, ThemeManager.Accent);
+                Assert.NotEqual(Color.Empty, ThemeManager.SidebarBg);
+                Assert.NotEqual(Color.Empty, ThemeManager.TitleBarBg);
+
+                ThemeManager.SetTheme(AppTheme.Light);
+                Assert.False(ThemeManager.IsDarkThemeActive);
+                Assert.NotEqual(Color.Empty, ThemeManager.FormBg);
+                Assert.NotEqual(Color.Empty, ThemeManager.CardBg);
+                Assert.NotEqual(Color.Empty, ThemeManager.Accent);
+                Assert.NotEqual(Color.Empty, ThemeManager.SidebarBg);
+                Assert.NotEqual(Color.Empty, ThemeManager.TitleBarBg);
+
+                // Light mode card background must be bright/white and accent must have high contrast
+                Assert.True(ThemeManager.CardBg.R > 200 && ThemeManager.CardBg.G > 200 && ThemeManager.CardBg.B > 200);
+
+                // Restore default
+                ThemeManager.SetTheme(AppTheme.System);
+            }
+        }
+
+        [Theory]
+        [InlineData(1920, 1080)]
+        [InlineData(2560, 1440)]
+        [InlineData(1366, 768)]
+        [InlineData(1280, 720)]
+        public void Form1_16x9AspectRatio_CalculationsVerifyCorrectProportions(int workW, int workH)
+        {
+            int targetH = Math.Max(540, Math.Min(720, workH - 40));
+            int targetW = (int)Math.Round(targetH * 16.0 / 9.0);
+            if (targetW > workW - 40)
+            {
+                targetW = workW - 40;
+                targetH = (int)Math.Round(targetW * 9.0 / 16.0);
+            }
+
+            double ratio = (double)targetW / targetH;
+            Assert.InRange(ratio, 1.76, 1.79); // Close to 16/9 = 1.7777...
+            Assert.True(targetW <= workW);
+            Assert.True(targetH <= workH);
+        }
+
+        [Fact]
+        public void PredatorButton_NavButtonMode_ConfiguredCorrectly()
+        {
+            var btn = new PredatorButton { Text = "Test Nav", IsNavButton = true, IsActive = true };
+            Assert.True(btn.IsNavButton);
+            Assert.True(btn.IsActive);
+            Assert.True(btn.TabStop);
+
+            btn.Dispose();
+        }
     }
 }

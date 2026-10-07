@@ -25,7 +25,6 @@ namespace PredatorControlApp
 
         public bool CoolBoost { get; init; }
         public bool FirmwareCoolBoost { get; init; }
-        public bool DustDefender { get; init; }
         public bool FanTable { get; init; }
         public bool GpuModeSwitch { get; init; }
         public bool UsbCharging { get; init; }
@@ -48,7 +47,6 @@ namespace PredatorControlApp
         public bool? OperatingModes { get; init; }
         public bool? GpuModeSwitch { get; init; }
         public bool? ThirdFan { get; init; }
-        public bool? DustDefender { get; init; }
         public bool? FanTable { get; init; }
         public bool? UsbCharging { get; init; }
         public bool? BatteryCalibration { get; init; }
@@ -61,7 +59,6 @@ namespace PredatorControlApp
             OperatingModes = true,
             GpuModeSwitch = true,
             ThirdFan = true,
-            DustDefender = true,
             FanTable = true,
             UsbCharging = true,
             BatteryCalibration = true,
@@ -84,7 +81,6 @@ namespace PredatorControlApp
                         OperatingModes = ReadBool(key, "OperatingModes"),
                         GpuModeSwitch = ReadBool(key, "GpuModeSwitch"),
                         ThirdFan = ReadBool(key, "ThirdFan"),
-                        DustDefender = ReadBool(key, "DustDefender"),
                         FanTable = ReadBool(key, "FanTable"),
                         UsbCharging = ReadBool(key, "UsbCharging"),
                         BatteryCalibration = ReadBool(key, "BatteryCalibration"),
@@ -108,7 +104,6 @@ namespace PredatorControlApp
                     WriteBool(key, "OperatingModes", OperatingModes);
                     WriteBool(key, "GpuModeSwitch", GpuModeSwitch);
                     WriteBool(key, "ThirdFan", ThirdFan);
-                    WriteBool(key, "DustDefender", DustDefender);
                     WriteBool(key, "FanTable", FanTable);
                     WriteBool(key, "UsbCharging", UsbCharging);
                     WriteBool(key, "BatteryCalibration", BatteryCalibration);
@@ -153,7 +148,6 @@ namespace PredatorControlApp
                 OperatingModes = opModes,
                 CoolBoost = CoolBoost ?? caps.CoolBoost,
                 GpuModeSwitch = GpuModeSwitch ?? caps.GpuModeSwitch,
-                DustDefender = DustDefender ?? caps.DustDefender,
                 FanTable = FanTable ?? caps.FanTable,
                 UsbCharging = UsbCharging ?? caps.UsbCharging,
                 BatteryCalibration = BatteryCalibration ?? caps.BatteryCalibration,
@@ -208,14 +202,17 @@ namespace PredatorControlApp
             int sysRpm = wmi.GetSensorReading((ulong)SensorId.SystemFanSpeed);
             if (sysRpm == 0) sysRpm = wmi.GetSensorReading((ulong)SensorId.System2FanSpeed);
             if (sysRpm == 0) sysRpm = wmi.GetGamingFanSpeed(2);
-            if (sysRpm > 0 || wmi.GetSensorReading((ulong)SensorId.SystemTemperature) > 0 || wmi.GetSensorReading((ulong)SensorId.System2Temperature) > 0)
+
+            bool hasThirdFan = sysRpm > 0 || wmi.GetGamingFanSpeed(2) > 0 || smbios.Gaming(0x05) == 1;
+            if (hasThirdFan)
+            {
                 sensors.Add(SensorId.SystemFanSpeed);
+            }
 
             sb.AppendLine($"Sensors Detected: {string.Join(", ", sensors)}");
 
             // Fans
             var fans = new List<FanChannel> { FanChannel.Cpu, FanChannel.Gpu };
-            bool hasThirdFan = sensors.Contains(SensorId.SystemFanSpeed) || smbios.Gaming(0x05) == 1;
             if (hasThirdFan) fans.Add(FanChannel.System);
             sb.AppendLine($"Fans Detected: {string.Join(", ", fans.Select(f => f.Name))}");
 
@@ -230,12 +227,8 @@ namespace PredatorControlApp
             };
 
             // CoolBoost
-            bool coolBoost = wmi.GetCoolBoost() ?? true;
+            bool coolBoost = wmi.GetCoolBoost() != null;
             sb.AppendLine($"CoolBoost Support: {coolBoost}");
-
-            // DustDefender
-            bool dustDefender = wmi.GetDustDefenderRunning() != null || AcerProtocol.UsesFanTable(model);
-            sb.AppendLine($"DustDefender Support: {dustDefender}");
 
             // Fan Table
             bool fanTable = AcerProtocol.UsesFanTable(model) || wmi.GetFanTable() != null;
@@ -246,16 +239,16 @@ namespace PredatorControlApp
             sb.AppendLine($"MUX / GPU Mode Switch: {gpuModeSwitch}");
 
             // USB Charging
-            bool usbCharging = wmi.GetUsbCharging() != null || true;
+            bool usbCharging = wmi.GetUsbCharging() != null;
             sb.AppendLine($"Power-Off USB Charging: {usbCharging}");
 
             // Battery Control & Calibration
             bool batteryHealth = wmi.IsBatteryControlSupported() || WindowsBattery.Read() != null;
-            bool batteryCalibration = wmi.IsBatteryCalibrationSupported() || batteryHealth;
+            bool batteryCalibration = wmi.IsBatteryCalibrationSupported();
             sb.AppendLine($"Battery Control: {batteryHealth}, Hardware Calibration: {batteryCalibration}");
 
             // Mode key
-            bool modeKey = smbios.HasHotkey(7) || smbios.Gaming(7) == 1 || true;
+            bool modeKey = smbios.HasHotkey(7) || smbios.Gaming(7) == 1;
             sb.AppendLine($"Physical Mode Key: {modeKey}");
 
             var rawCaps = new DeviceCapabilities
@@ -266,7 +259,6 @@ namespace PredatorControlApp
                 FirmwareOperatingModes = opModes,
                 CoolBoost = coolBoost,
                 FirmwareCoolBoost = coolBoost,
-                DustDefender = dustDefender,
                 FanTable = fanTable,
                 GpuModeSwitch = gpuModeSwitch,
                 UsbCharging = usbCharging,
@@ -278,8 +270,8 @@ namespace PredatorControlApp
                 Diagnostics = sb.ToString()
             };
 
-            var overrides = CapabilityOverrides.LoadFromRegistry();
-            return overrides.Apply(rawCaps);
+            // Remove forced override settings: scan device and only show features physically present
+            return rawCaps;
         }
     }
 }
