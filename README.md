@@ -145,6 +145,18 @@ Predator Control App is built with a **strict offline-first privacy architecture
 - 🔒 **Secure On-Demand Updates Only**: The app only connects to GitHub when you explicitly click the "Check for Updates" button.
 - 🛡️ **SHA-256 Checksum Verification**: Every download is verified against published cryptographic hashes to protect against tampering.
 
+
+
+<img width="2510" height="1384" alt="image" src="https://github.com/user-attachments/assets/9b314410-fec7-4ceb-af88-52d6e8d0823e" />
+
+<img width="2532" height="1412" alt="image" src="https://github.com/user-attachments/assets/fc7a9cea-63e5-4ee6-b2d1-7419d344c0fe" />
+
+<img width="2544" height="1406" alt="image" src="https://github.com/user-attachments/assets/69df58b8-ca2e-42c3-9640-29fe1a7a6067" />
+
+<img width="2550" height="1380" alt="image" src="https://github.com/user-attachments/assets/f64809f2-a455-44d7-9517-b854bb4bc6ed" />
+
+<img width="2554" height="1414" alt="image" src="https://github.com/user-attachments/assets/534930c6-3f12-4006-82a0-7ee3d3ae1602" />
+
 ---
 
 ## 🧹 How to Safely Disable PredatorSense (Optional)
