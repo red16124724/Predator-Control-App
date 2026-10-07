@@ -19,7 +19,6 @@ A major release bringing 16:9 adaptive maximization, 26+ advanced Acer Predator 
 - **MUX Switch / GPU Working Mode**: Directly connected to Acer BIOS. Effortlessly toggle between **Hybrid (Nvidia Optimus)** for maximum battery life and **Discrete GPU** for uncompromised gaming FPS (requires standard reboot to apply).
 - **GPU Sleep / D3Cold Awareness**: Instant visual indicator in the UI showing when the dedicated Nvidia GPU is in low-power deep sleep (D3Cold).
 - **3rd Fan / System Fan Control**: Full support and speed monitoring for modern Predator laptops equipped with 3 fans (CPU, GPU, and System/Chassis).
-- **Acer DustDefender**: Integrated automated reverse spin fan cycle to clear accumulated dust and debris from cooling fins.
 - **Acer CoolBoost Hardware Toggle**: Direct hardware toggle to unlock elevated fan ceiling curves during intense workloads with persistent state retention.
 - **Factory OEM Fan Lookup Tables**: Accurately mapped Acer factory fan lookup tables for native hardware RPM-to-percentage scaling.
 - **Interactive Graphical Fan Curve Editor**: Full custom visual fan curve editor with support for multi-point curves, persistent settings, and deep-cloned points.
