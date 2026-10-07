@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 A major release bringing 16:9 adaptive maximization, 26+ advanced Acer Predator hardware controls, accurate high-RPM telemetry, full custom fan curve persistence, CoolBoost support, 34 keyboard RGB lighting modes, zero-dependency standalone distribution, and deep defensive stability hardening.
 
 ### 🌟 Added
+- **Modern UI Redesign**: Transitioned from the legacy vertical-strip layout to a modern widescreen dashboard with organized cards, clean telemetry gauges, and crisp high-DPI scaling.
 - **16:9 Maximize Mode**: Added a dedicated top-right maximize caption button and double-click titlebar maximize/restore. Automatically calculates and scales the application window to the largest possible 16:9 aspect ratio centered on the active display.
 - **Direct Embedded Controller (EC) HID Protocol**: Communicates directly with laptop EC hardware for instantaneous response with seamless, transparent fallback to Acer WMI.
 - **MUX Switch / GPU Working Mode**: Directly connected to Acer BIOS. Effortlessly toggle between **Hybrid (Nvidia Optimus)** for maximum battery life and **Discrete GPU** for uncompromised gaming FPS (requires standard reboot to apply).
