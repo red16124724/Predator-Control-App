@@ -195,5 +195,49 @@ namespace PredatorControlApp
             catch { }
             return list;
         }
+
+        public static void SaveCalibrationState(long utcTicks, int phase, int lastKnownPercent, bool preChargeLimitEnabled)
+        {
+            try
+            {
+                using var hkcu = CreateSafeSubKey(Registry.CurrentUser, BaseKeyPath);
+                if (hkcu != null)
+                {
+                    hkcu.SetValue("LastBatteryCalibrationUtcTicks", Math.Max(0, utcTicks), RegistryValueKind.QWord);
+                    hkcu.SetValue("BatteryCalibrationPhase", Math.Clamp(phase, 0, 2), RegistryValueKind.DWord);
+                    hkcu.SetValue("CalibrationLastKnownPercent", lastKnownPercent < 0 ? -1 : Math.Clamp(lastKnownPercent, 0, 100), RegistryValueKind.DWord);
+                    hkcu.SetValue("CalibrationPreChargeLimitEnabled", preChargeLimitEnabled ? 1 : 0, RegistryValueKind.DWord);
+                    hkcu.Flush();
+                }
+            }
+            catch { }
+        }
+
+        public static void LoadCalibrationState(AppSettings settings)
+        {
+            if (settings == null) return;
+            try
+            {
+                using var hkcu = OpenSafeSubKey(Registry.CurrentUser, BaseKeyPath);
+                if (hkcu != null)
+                {
+                    if (hkcu.GetValue("LastBatteryCalibrationUtcTicks") is long ticks)
+                        settings.LastBatteryCalibrationUtcTicks = ticks;
+                    else if (hkcu.GetValue("LastBatteryCalibrationUtcTicks") is string ticksStr && long.TryParse(ticksStr, out long parsedTicks))
+                        settings.LastBatteryCalibrationUtcTicks = parsedTicks;
+
+                    if (hkcu.GetValue("BatteryCalibrationPhase") is int phase)
+                        settings.BatteryCalibrationPhase = phase;
+
+                    if (hkcu.GetValue("CalibrationLastKnownPercent") is int pct)
+                        settings.CalibrationLastKnownPercent = pct;
+
+                    if (hkcu.GetValue("CalibrationPreChargeLimitEnabled") is int preLimit)
+                        settings.CalibrationPreChargeLimitEnabled = preLimit == 1;
+                }
+            }
+            catch { }
+            settings.Sanitize();
+        }
     }
 }

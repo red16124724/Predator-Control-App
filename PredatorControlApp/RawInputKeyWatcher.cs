@@ -151,7 +151,7 @@ namespace PredatorControlApp
             if (_isDisposed) return;
             uint size = 0;
             uint headerSize = (uint)Marshal.SizeOf<RAWINPUTHEADER>();
-            if (GetRawInputData(hRawInput, RID_INPUT, IntPtr.Zero, ref size, headerSize) != 0 || size == 0 || size > 65536)
+            if (GetRawInputData(hRawInput, RID_INPUT, IntPtr.Zero, ref size, headerSize) != 0 || size < headerSize || size > 65536)
                 return;
 
             IntPtr pData = Marshal.AllocHGlobal((int)size);
@@ -164,6 +164,7 @@ namespace PredatorControlApp
 
                     if (header.dwType == 1) // RIM_TYPEKEYBOARD
                     {
+                        if ((long)size < headerSize + Marshal.SizeOf<RAWKEYBOARD>()) return;
                         var kb = Marshal.PtrToStructure<RAWKEYBOARD>(pRaw);
                         if ((kb.Flags & 1) == 0) // Key down
                         {
@@ -180,22 +181,23 @@ namespace PredatorControlApp
                     }
                     else if (header.dwType == 2) // RIM_TYPEHID
                     {
-                        var hid = Marshal.PtrToStructure<RAWHID>(pRaw);
                         int hidDataOffset = Marshal.OffsetOf<RAWHID>("bRawData").ToInt32();
+                        if ((long)size < headerSize + hidDataOffset) return;
+                        var hid = Marshal.PtrToStructure<RAWHID>(pRaw);
                         int maxPayload = (int)((long)size - headerSize - hidDataOffset);
                         if (maxPayload < 2) return;
-                        int dataLen = Math.Min((int)hid.dwSizeHid, maxPayload);
-                        if (dataLen >= 2)
+                        int totalBytes = (int)Math.Min((long)hid.dwSizeHid * Math.Max(1, (int)hid.dwCount), (long)maxPayload);
+                        if (totalBytes >= 2)
                         {
-                            byte[] rawBytes = new byte[dataLen];
-                            Marshal.Copy((IntPtr)((long)pRaw + hidDataOffset), rawBytes, 0, dataLen);
-                            if (dataLen >= 3 && rawBytes[1] == 129 && rawBytes[2] == 0xFF)
+                            byte[] rawBytes = new byte[totalBytes];
+                            Marshal.Copy((IntPtr)((long)pRaw + hidDataOffset), rawBytes, 0, totalBytes);
+                            if (totalBytes >= 3 && rawBytes[1] == 129 && rawBytes[2] == 0xFF)
                             {
                                 FireNitroSenseKey();
                             }
                             else if (rawBytes[0] == 7 || rawBytes[0] == 0x82 || rawBytes[0] == 0x86 || rawBytes[0] == 0x87 ||
                                      rawBytes[1] == 7 || rawBytes[1] == 130 || rawBytes[1] == 0x82 || rawBytes[1] == 0x86 || rawBytes[1] == 0x87 ||
-                                     (dataLen >= 3 && rawBytes[1] == 129 && (rawBytes[2] == 0x07 || rawBytes[2] == 0x82 || rawBytes[2] == 0x86 || rawBytes[2] == 0x87)))
+                                     (totalBytes >= 3 && rawBytes[1] == 129 && (rawBytes[2] == 0x07 || rawBytes[2] == 0x82 || rawBytes[2] == 0x86 || rawBytes[2] == 0x87)))
                             {
                                 FireModeKey();
                             }

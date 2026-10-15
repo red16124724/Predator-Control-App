@@ -44,13 +44,13 @@ namespace PredatorControlApp
         private DateTime _lastGpuRpmReadTime = DateTime.MinValue;
         private static readonly TimeSpan SensorCacheDuration = TimeSpan.FromMilliseconds(800);
 
-        public byte LastR => _lastR;
-        public byte LastG => _lastG;
-        public byte LastB => _lastB;
-        public byte Brightness => _brightness;
-        public byte Speed => _speed;
-        public byte Direction => _direction;
-        public int LastRgbMode => _lastMode;
+        public byte LastR { get { lock (_lock) return _lastR; } }
+        public byte LastG { get { lock (_lock) return _lastG; } }
+        public byte LastB { get { lock (_lock) return _lastB; } }
+        public byte Brightness { get { lock (_lock) return _brightness; } }
+        public byte Speed { get { lock (_lock) return _speed; } }
+        public byte Direction { get { lock (_lock) return _direction; } }
+        public int LastRgbMode { get { lock (_lock) return _lastMode; } }
         public byte CustomCpuFanSpeed { get { lock (_lock) return _customCpuFanSpeed; } }
         public byte CustomGpuFanSpeed { get { lock (_lock) return _customGpuFanSpeed; } }
         public byte CustomSystemFanSpeed { get { lock (_lock) return _customSystemFanSpeed; } }
@@ -91,7 +91,6 @@ namespace PredatorControlApp
         {
             try { _cachedObj?.Dispose(); } catch { }
             _cachedObj = null;
-            _lastAppliedPowerMode = null;
             _lastSearchAttempt = DateTime.MinValue;
         }
 
@@ -293,8 +292,10 @@ namespace PredatorControlApp
                     if (obj == null) return 0;
 
                     using var inParams = obj.GetMethodParameters("GetGamingSysInfo");
+                    if (inParams == null) return 0;
                     inParams["gmInput"] = (uint)(0x0001 | (sensorId << 8));
                     using var outParams = obj.InvokeMethod("GetGamingSysInfo", inParams, WmiTimeoutOptions);
+                    if (outParams == null || outParams["gmOutput"] == null) return 0;
                     ulong raw = Convert.ToUInt64(outParams["gmOutput"]);
 
                     if (sensorId == (ulong)SensorId.CpuFanSpeed || sensorId == (ulong)SensorId.GpuFanSpeed ||
@@ -305,13 +306,12 @@ namespace PredatorControlApp
                         if (rpm > 0) return rpm;
                     }
 
-                    int val = (int)((raw >> 8) & 0xFFFF);
-                    if (val == 0) val = (int)(raw & 0xFF);
-                    return val;
+                    if ((raw & 0xFF) != 0) return 0;
+                    return (int)((raw >> 8) & 0xFFFF);
                 }
                 catch (Exception ex)
                 {
-                    if (IsComOrWmiException(ex))
+                    if (IsComOrWmiException(ex) || ex is NullReferenceException)
                     {
                         InvalidateCacheUnderLock();
                     }
@@ -330,14 +330,16 @@ namespace PredatorControlApp
                     if (obj == null) return 0;
 
                     using var inParams = obj.GetMethodParameters("GetGamingFanSpeed");
+                    if (inParams == null) return 0;
                     inParams["gmInput"] = fanType;
                     using var outParams = obj.InvokeMethod("GetGamingFanSpeed", inParams, WmiTimeoutOptions);
+                    if (outParams == null || outParams["gmOutput"] == null) return 0;
                     ulong raw = Convert.ToUInt64(outParams["gmOutput"]);
                     return DecodeFanSpeed(raw);
                 }
                 catch (Exception ex)
                 {
-                    if (IsComOrWmiException(ex))
+                    if (IsComOrWmiException(ex) || ex is NullReferenceException)
                     {
                         InvalidateCacheUnderLock();
                     }
@@ -403,13 +405,24 @@ namespace PredatorControlApp
                 }
                 if (EcHid != null && EcHid.IsOpen)
                 {
-                    try { EcHid.WriteMode(AcerProtocol.WmiModeToEcMode(mode)); } catch { }
+                    try
+                    {
+                        if (AcerProtocol.TryWmiModeToEcMode(mode, out byte ecMode))
+                        {
+                            EcHid.WriteMode(ecMode);
+                        }
+                    }
+                    catch { }
                 }
                 isModeSwitch = !_lastAppliedPowerMode.HasValue || _lastAppliedPowerMode.Value != mode;
-                if (isModeSwitch && mode != 1)
+                if (isModeSwitch && _lastAppliedPowerMode == 0x05 && mode != 0x05)
                 {
-                    // Acer EC firmware requires stepping through Balanced (1) before switching to target mode
-                    SendCommandUnderLock("SetGamingMiscSetting", (ulong)0x0B | (1UL << 8));
+                    try
+                    {
+                        // Exiting Turbo: reset fan boost before setting target power mode so target mode is final command
+                        SendCommandUnderLock("SetGamingFanBehavior", BuildFanBehaviorPayload(0x01));
+                    }
+                    catch { }
                 }
                 var res = SendCommandUnderLock("SetGamingMiscSetting", (ulong)0x0B | ((ulong)mode << 8));
                 if (!res.success)
@@ -434,6 +447,53 @@ namespace PredatorControlApp
         public void SetPowerMode(byte mode)
         {
             TrySetPowerMode(mode, false);
+        }
+
+        public bool TryGetPowerMode(out byte mode)
+        {
+            lock (_lock)
+            {
+                if (EcHid != null && EcHid.IsOpen)
+                {
+                    try
+                    {
+                        byte? ecMode = EcHid.ReadMode();
+                        if (ecMode.HasValue && AcerProtocol.TryEcModeToWmiMode(ecMode.Value, out byte mappedMode))
+                        {
+                            _lastAppliedPowerMode = mappedMode;
+                            mode = mappedMode;
+                            return true;
+                        }
+                    }
+                    catch { }
+                }
+
+                if (_lastAppliedPowerMode.HasValue)
+                {
+                    mode = _lastAppliedPowerMode.Value;
+                    return true;
+                }
+
+                mode = 0x01;
+                return false;
+            }
+        }
+
+        public bool TryGetPowerMode(out OperatingMode mode)
+        {
+            if (TryGetPowerMode(out byte rawMode) && Enum.IsDefined(typeof(OperatingMode), rawMode))
+            {
+                mode = (OperatingMode)rawMode;
+                return true;
+            }
+            mode = OperatingMode.Balanced;
+            return false;
+        }
+
+        public byte GetPowerMode()
+        {
+            TryGetPowerMode(out byte mode);
+            return mode;
         }
 
         public static ulong BuildFanBehaviorPayload(byte mode)
@@ -463,17 +523,32 @@ namespace PredatorControlApp
             return (directPrimary, directAlt, extendedPrimary, extendedAlt);
         }
 
+        private byte? _lastAppliedCpuSpeed;
+        private byte? _lastAppliedGpuSpeed;
+        private byte? _lastAppliedSystemSpeed;
+
+        public void InvalidateAppliedFanSpeeds()
+        {
+            lock (_lock)
+            {
+                _lastAppliedCpuSpeed = null;
+                _lastAppliedGpuSpeed = null;
+                _lastAppliedSystemSpeed = null;
+            }
+        }
+
         public void SetFanBehavior(byte mode, bool applyCustomSpeeds = true)
         {
             lock (_lock)
             {
+                InvalidateAppliedFanSpeeds();
                 SendCommandUnderLock("SetGamingFanBehavior", BuildFanBehaviorPayload(mode));
 
                 if (mode == 0x03 && applyCustomSpeeds)
                 {
-                    SetFanSpeed(1UL, _customCpuFanSpeed);
-                    SetFanSpeed(4UL, _customGpuFanSpeed);
-                    SetFanSpeed(2UL, _customSystemFanSpeed);
+                    SetFanSpeed(1UL, _customCpuFanSpeed, force: true);
+                    SetFanSpeed(4UL, _customGpuFanSpeed, force: true);
+                    SetFanSpeed(2UL, _customSystemFanSpeed, force: true);
                 }
             }
         }
@@ -495,30 +570,35 @@ namespace PredatorControlApp
             return true;
         }
 
-        public void SetFanSpeed(ulong fanType, byte percentage)
+        public void SetFanSpeed(ulong fanType, byte percentage, bool force = false)
         {
             byte clamped = Math.Clamp(percentage, (byte)10, (byte)100);
 
             lock (_lock)
             {
-                if (fanType == 1) _customCpuFanSpeed = clamped;
-                else if (fanType == 2) _customSystemFanSpeed = clamped;
-                else if (fanType == 4) _customGpuFanSpeed = clamped;
-
                 if (fanType == 1)
                 {
+                    _customCpuFanSpeed = clamped;
+                    if (!force && _lastAppliedCpuSpeed == clamped) return;
+                    _lastAppliedCpuSpeed = clamped;
                     var (direct, extended) = BuildCpuFanSpeedPayloads(clamped);
                     SendCommandUnderLock("SetGamingFanSpeed", direct);
                     SendCommandUnderLock("SetGamingFanSpeed", extended);
                 }
                 else if (fanType == 2)
                 {
+                    _customSystemFanSpeed = clamped;
+                    if (!force && _lastAppliedSystemSpeed == clamped) return;
+                    _lastAppliedSystemSpeed = clamped;
                     ulong payload = AcerProtocol.FanSpeedInput(FanChannel.System, clamped);
                     SendCommandUnderLock("SetGamingFanSpeed", payload);
                     SendCommandUnderLock("SetGamingFanSpeed", 0x05UL | (3UL << 8) | ((ulong)clamped << 16));
                 }
                 else
                 {
+                    _customGpuFanSpeed = clamped;
+                    if (!force && _lastAppliedGpuSpeed == clamped) return;
+                    _lastAppliedGpuSpeed = clamped;
                     var (directPri, directAlt, extPri, extAlt) = BuildGpuFanSpeedPayloads(clamped);
                     SendCommandUnderLock("SetGamingFanSpeed", directPri);
                     SendCommandUnderLock("SetGamingFanSpeed", directAlt);
@@ -545,21 +625,27 @@ namespace PredatorControlApp
 
         public void SetRgbMode(int mode, byte r, byte g, byte b, byte brightness, byte speed, byte direction)
         {
-            _lastR = r; _lastG = g; _lastB = b;
-            _brightness = Math.Clamp(brightness, (byte)0, (byte)100);
-            _speed = Math.Clamp(speed, (byte)1, (byte)9);
-            _direction = (byte)(direction != 0 ? 1 : 0);
-            _lastMode = Math.Clamp(mode, 0, 10);
-            ApplyLightingMode(_lastMode);
+            lock (_lock)
+            {
+                _lastR = r; _lastG = g; _lastB = b;
+                _brightness = Math.Clamp(brightness, (byte)0, (byte)100);
+                _speed = Math.Clamp(speed, (byte)1, (byte)9);
+                _direction = (byte)(direction != 0 ? 1 : 0);
+                _lastMode = Math.Clamp(mode, 0, 10);
+                ApplyLightingMode(_lastMode);
+            }
         }
 
         public void SetBrightness(byte brightness)
         {
-            _brightness = Math.Clamp(brightness, (byte)0, (byte)100);
-            if (_brightness == 0)
-                TurnOffBacklight();
-            else
-                ApplyLightingMode(_lastMode);
+            lock (_lock)
+            {
+                _brightness = Math.Clamp(brightness, (byte)0, (byte)100);
+                if (_brightness == 0)
+                    TurnOffBacklight();
+                else
+                    ApplyLightingMode(_lastMode);
+            }
         }
 
         public void TurnOffBacklight()
@@ -600,25 +686,34 @@ namespace PredatorControlApp
 
         public void SetSpeed(byte speed)
         {
-            _speed = Math.Clamp(speed, (byte)1, (byte)9);
-            ApplyLightingMode(_lastMode);
+            lock (_lock)
+            {
+                _speed = Math.Clamp(speed, (byte)1, (byte)9);
+                ApplyLightingMode(_lastMode);
+            }
         }
 
         public void SetDirection(byte direction)
         {
-            _direction = (byte)(direction != 0 ? 1 : 0);
-            ApplyLightingMode(_lastMode);
+            lock (_lock)
+            {
+                _direction = (byte)(direction != 0 ? 1 : 0);
+                ApplyLightingMode(_lastMode);
+            }
         }
 
         public void SetStaticColor(byte r, byte g, byte b, byte brightness)
         {
-            _lastR = r; _lastG = g; _lastB = b;
-            _brightness = brightness;
-            _lastMode = 0;
-            if (brightness == 0)
-                TurnOffBacklight();
-            else
-                ApplyLightingMode(0);
+            lock (_lock)
+            {
+                _lastR = r; _lastG = g; _lastB = b;
+                _brightness = brightness;
+                _lastMode = 0;
+                if (brightness == 0)
+                    TurnOffBacklight();
+                else
+                    ApplyLightingMode(0);
+            }
         }
 
         public void SetStaticColor(int r, int g, int b, int brightness)
@@ -949,14 +1044,17 @@ namespace PredatorControlApp
 
         private void SyncWindowsPowerMode(byte acerMode)
         {
-            if (_lastWindowsOverlayMode == acerMode) return;
-            try
+            lock (_lock)
             {
-                Guid overlay = GetOverlayForMode(acerMode);
-                PowerSetActiveOverlayScheme(in overlay);
-                _lastWindowsOverlayMode = acerMode;
+                if (_lastWindowsOverlayMode == acerMode) return;
+                try
+                {
+                    Guid overlay = GetOverlayForMode(acerMode);
+                    PowerSetActiveOverlayScheme(in overlay);
+                    _lastWindowsOverlayMode = acerMode;
+                }
+                catch { }
             }
-            catch { }
         }
 
         private ManagementObject? _cachedBatteryObj;
@@ -999,13 +1097,16 @@ namespace PredatorControlApp
                     if (obj == null) return false;
 
                     using var inParams = obj.GetMethodParameters("SetBatteryHealthControl");
+                    if (inParams == null) return false;
                     inParams["uBatteryNo"] = (byte)1;
                     inParams["uFunctionMask"] = (byte)1;
                     inParams["uFunctionStatus"] = (byte)(enable ? 1 : 0);
                     inParams["uReservedIn"] = new byte[] { 0, 0, 0, 0, 0 };
 
                     using var outParams = obj.InvokeMethod("SetBatteryHealthControl", inParams, WmiTimeoutOptions);
+                    if (outParams == null) return false;
                     var rawRet = outParams["uReturn"];
+                    if (rawRet == null) return false;
                     if (rawRet is byte[] retBytes)
                     {
                         if (retBytes.Length > 0 && retBytes[0] != 0) return false;
@@ -1100,8 +1201,12 @@ namespace PredatorControlApp
                     using var outParams = obj.InvokeMethod("GetBatteryHealthControlStatus", inParams, WmiTimeoutOptions);
                     if (outParams == null) return null;
 
-                    var retBytes = outParams["uReturn"] as byte[];
-                    if (retBytes != null && retBytes.Any(b => b != 0)) return null;
+                    var rawRet = outParams["uReturn"];
+                    if (rawRet != null)
+                    {
+                        if (rawRet is byte[] retBytes && retBytes.Length > 0 && retBytes.Any(b => b != 0)) return null;
+                        if (rawRet is not byte[] && Convert.ToUInt16(rawRet) != 0) return null;
+                    }
 
                     if (outParams["uFunctionList"] == null || outParams["uFunctionStatus"] == null) return null;
                     ulong list = Convert.ToUInt64(outParams["uFunctionList"]);
@@ -1137,13 +1242,16 @@ namespace PredatorControlApp
                     if (obj == null) return false;
 
                     using var inParams = obj.GetMethodParameters("SetBatteryHealthControl");
+                    if (inParams == null) return false;
                     inParams["uBatteryNo"] = (byte)1;
                     inParams["uFunctionMask"] = (byte)2;
                     inParams["uFunctionStatus"] = (byte)(enable ? 1 : 0);
                     inParams["uReservedIn"] = new byte[] { 0, 0, 0, 0, 0 };
 
                     using var outParams = obj.InvokeMethod("SetBatteryHealthControl", inParams, WmiTimeoutOptions);
+                    if (outParams == null) return false;
                     var rawRet = outParams["uReturn"];
+                    if (rawRet == null) return false;
                     if (rawRet is byte[] retBytes)
                     {
                         if (retBytes.Length > 0 && retBytes[0] != 0) return false;
@@ -1159,6 +1267,12 @@ namespace PredatorControlApp
                 }
             }
         }
+
+        public bool StartBatteryCalibration() => SetBatteryCalibration(true);
+
+        public bool StopBatteryCalibration() => SetBatteryCalibration(false);
+
+        public BatteryHealthStatus? GetBatteryCalibrationStatus() => GetBatteryHealthStatus();
 
         public bool? GetCoolBoost()
         {
@@ -1280,14 +1394,14 @@ namespace PredatorControlApp
 
         public (int Brightness, int TimeoutSeconds)? GetBacklightTimeout(byte hotkey = 2)
         {
-            if (EcHid != null && EcHid.IsOpen)
-            {
-                var ecVal = EcHid.ReadBacklightTimeout();
-                if (ecVal.HasValue) return ecVal;
-            }
-
             lock (_lock)
             {
+                if (EcHid != null && EcHid.IsOpen)
+                {
+                    var ecVal = EcHid.ReadBacklightTimeout();
+                    if (ecVal.HasValue) return ecVal;
+                }
+
                 var res = SendActionCommandUnderLock("GetFunction", AcerProtocol.BacklightTimeoutQuery(hotkey));
                 if (res.success)
                 {
@@ -1299,14 +1413,14 @@ namespace PredatorControlApp
 
         public bool SetBacklightTimeout(byte hotkey, int brightness, int timeoutSeconds)
         {
-            if (EcHid != null && EcHid.IsOpen)
-            {
-                if (EcHid.WriteBacklightTimeout(brightness, timeoutSeconds))
-                    return true;
-            }
-
             lock (_lock)
             {
+                if (EcHid != null && EcHid.IsOpen)
+                {
+                    if (EcHid.WriteBacklightTimeout(brightness, timeoutSeconds))
+                        return true;
+                }
+
                 var res = SendActionCommandUnderLock("SetFunction", AcerProtocol.BacklightTimeoutInput(hotkey, brightness, timeoutSeconds));
                 return res.success;
             }

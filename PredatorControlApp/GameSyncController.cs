@@ -204,7 +204,7 @@ namespace PredatorControlApp
         }
 
         private int _isPolling;
-        private int _cachedActivePid = -1;
+        private volatile int _cachedActivePid = -1;
 
         [DllImport("user32.dll")]
         private static extern IntPtr GetForegroundWindow();
@@ -360,9 +360,10 @@ namespace PredatorControlApp
                     {
                         if (_activeExe == currentActiveExe)
                         {
-                            exitedSnapshot = _savedSnapshot;
+                            exitedSnapshot = _savedSnapshot ?? new DashboardSnapshot();
                             _activeExe = null;
                             _savedSnapshot = null;
+                            _cachedActivePid = -1;
                         }
                     }
                 }
@@ -406,7 +407,11 @@ namespace PredatorControlApp
                     Profiles = _profiles.ToList()
                 };
                 var json = JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(_savePath, json);
+                var dir = Path.GetDirectoryName(_savePath);
+                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                var tempPath = _savePath + ".tmp";
+                File.WriteAllText(tempPath, json);
+                File.Move(tempPath, _savePath, overwrite: true);
                 try { File.Copy(_savePath, _savePath + ".bak", overwrite: true); } catch { }
             }
             catch { }

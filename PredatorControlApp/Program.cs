@@ -74,16 +74,16 @@ namespace PredatorControlApp
         {
             string key = $"{ex.GetType().FullName}|{ex.StackTrace}";
 
-            try
-            {
-                var path = LogPath;
-                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                File.AppendAllText(path, $"[{DateTime.Now:u}] {(fatal ? "FATAL" : "ERROR")} {ex}\n\n");
-            }
-            catch { }
-
             lock (_reportLock)
             {
+                try
+                {
+                    var path = LogPath;
+                    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                    File.AppendAllText(path, $"[{DateTime.Now:u}] {(fatal ? "FATAL" : "ERROR")} {ex}\n\n");
+                }
+                catch { }
+
                 if (_dialogOpen || !_reported.Add(key)) return;
                 _dialogOpen = true;
             }
@@ -143,6 +143,12 @@ namespace PredatorControlApp
                 AppDomain.CurrentDomain.UnhandledException += (s, e) =>
                 {
                     if (e.ExceptionObject is Exception ex) Report(ex, true);
+                };
+
+                TaskScheduler.UnobservedTaskException += (s, e) =>
+                {
+                    if (e.Exception != null) Report(e.Exception, false);
+                    e.SetObserved();
                 };
 
                 Form1 form;

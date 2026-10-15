@@ -253,27 +253,45 @@ namespace PredatorControlApp
 
         public void Dispose()
         {
-            lock (_lock)
-            {
-                if (_isDisposed) return;
-                _isDisposed = true;
-                try
-                {
-                    if (_query != IntPtr.Zero)
-                    {
-                        PdhCloseQuery(_query);
-                        _query = IntPtr.Zero;
-                        _cpuCounter = IntPtr.Zero;
-                    }
-                }
-                catch { }
-            }
+            Dispose(true);
             GC.SuppressFinalize(this);
+        }
+
+        private void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                lock (_lock)
+                {
+                    if (_isDisposed) return;
+                    _isDisposed = true;
+                    ReleaseQuery();
+                }
+            }
+            else
+            {
+                _isDisposed = true;
+                ReleaseQuery();
+            }
+        }
+
+        private void ReleaseQuery()
+        {
+            try
+            {
+                IntPtr q = Interlocked.Exchange(ref _query, IntPtr.Zero);
+                if (q != IntPtr.Zero)
+                {
+                    PdhCloseQuery(q);
+                    _cpuCounter = IntPtr.Zero;
+                }
+            }
+            catch { }
         }
 
         ~PdhLoadMonitor()
         {
-            Dispose();
+            Dispose(false);
         }
     }
 }

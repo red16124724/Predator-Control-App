@@ -255,7 +255,18 @@ namespace PredatorControlApp.Tests
                             {
                                 string tmp = settingsFile + $".tmp{threadId}";
                                 File.WriteAllText(tmp, json);
-                                File.Move(tmp, settingsFile, true);
+                                for (int attempt = 0; attempt < 5; attempt++)
+                                {
+                                    try
+                                    {
+                                        File.Move(tmp, settingsFile, true);
+                                        break;
+                                    }
+                                    catch (Exception) when (attempt < 4)
+                                    {
+                                        Thread.Sleep(5);
+                                    }
+                                }
                             }
                             iter++;
                             Interlocked.Increment(ref writes);
@@ -269,19 +280,16 @@ namespace PredatorControlApp.Tests
                     {
                         while (!cts.Token.IsCancellationRequested)
                         {
-                            if (File.Exists(settingsFile))
+                            lock (fileLock)
                             {
-                                lock (fileLock)
+                                if (File.Exists(settingsFile))
                                 {
-                                    if (File.Exists(settingsFile))
+                                    string content = File.ReadAllText(settingsFile);
+                                    if (!string.IsNullOrWhiteSpace(content))
                                     {
-                                        string content = File.ReadAllText(settingsFile);
-                                        if (!string.IsNullOrWhiteSpace(content))
-                                        {
-                                            var parsed = JsonSerializer.Deserialize<AppSettings>(content);
-                                            Assert.NotNull(parsed);
-                                            Interlocked.Increment(ref reads);
-                                        }
+                                        var parsed = JsonSerializer.Deserialize<AppSettings>(content);
+                                        Assert.NotNull(parsed);
+                                        Interlocked.Increment(ref reads);
                                     }
                                 }
                             }

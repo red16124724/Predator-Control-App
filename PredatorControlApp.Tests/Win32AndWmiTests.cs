@@ -323,5 +323,164 @@ namespace PredatorControlApp.Tests
                 Assert.True(hasCsproj, "Source zip must contain .csproj files");
             }
         }
+
+        #region PowerWakeLock Tests
+
+        [Fact]
+        public void PowerWakeLock_Acquire_Default_PassesContinuousSystemAndDisplayRequired()
+        {
+            PowerWakeLock.ResetForTesting();
+            try
+            {
+                uint capturedFlags = 0;
+                PowerWakeLock.ExecutionStateOverride = flags =>
+                {
+                    capturedFlags = flags;
+                    return 0x80000000;
+                };
+
+                bool success = PowerWakeLock.Acquire(displayRequired: true, awayMode: false);
+
+                uint expectedFlags = PowerWakeLock.ES_CONTINUOUS | PowerWakeLock.ES_SYSTEM_REQUIRED | PowerWakeLock.ES_DISPLAY_REQUIRED;
+                Assert.True(success);
+                Assert.True(PowerWakeLock.IsLocked);
+                Assert.Equal(expectedFlags, capturedFlags);
+                Assert.Equal(expectedFlags, PowerWakeLock.CurrentFlags);
+            }
+            finally
+            {
+                PowerWakeLock.ResetForTesting();
+            }
+        }
+
+        [Fact]
+        public void PowerWakeLock_Acquire_DisplayRequiredFalse_ExcludesDisplayRequiredFlag()
+        {
+            PowerWakeLock.ResetForTesting();
+            try
+            {
+                uint capturedFlags = 0;
+                PowerWakeLock.ExecutionStateOverride = flags =>
+                {
+                    capturedFlags = flags;
+                    return 0x80000000;
+                };
+
+                bool success = PowerWakeLock.Acquire(displayRequired: false, awayMode: false);
+
+                uint expectedFlags = PowerWakeLock.ES_CONTINUOUS | PowerWakeLock.ES_SYSTEM_REQUIRED;
+                Assert.True(success);
+                Assert.Equal(expectedFlags, capturedFlags);
+                Assert.Equal(expectedFlags, PowerWakeLock.CurrentFlags);
+            }
+            finally
+            {
+                PowerWakeLock.ResetForTesting();
+            }
+        }
+
+        [Fact]
+        public void PowerWakeLock_Acquire_WithAwayMode_IncludesAwayModeRequiredFlag()
+        {
+            PowerWakeLock.ResetForTesting();
+            try
+            {
+                uint capturedFlags = 0;
+                PowerWakeLock.ExecutionStateOverride = flags =>
+                {
+                    capturedFlags = flags;
+                    return 0x80000000;
+                };
+
+                bool success = PowerWakeLock.Acquire(displayRequired: true, awayMode: true);
+
+                uint expectedFlags = PowerWakeLock.ES_CONTINUOUS | PowerWakeLock.ES_SYSTEM_REQUIRED | PowerWakeLock.ES_DISPLAY_REQUIRED | PowerWakeLock.ES_AWAYMODE_REQUIRED;
+                Assert.True(success);
+                Assert.Equal(expectedFlags, capturedFlags);
+                Assert.Equal(expectedFlags, PowerWakeLock.CurrentFlags);
+            }
+            finally
+            {
+                PowerWakeLock.ResetForTesting();
+            }
+        }
+
+        [Fact]
+        public void PowerWakeLock_Acquire_KernelFailureOrException_ReturnsFalseAndClearsLocked()
+        {
+            PowerWakeLock.ResetForTesting();
+            try
+            {
+                // Case 1: Kernel returns 0 (failure)
+                PowerWakeLock.ExecutionStateOverride = _ => 0;
+                bool successFail = PowerWakeLock.Acquire();
+                Assert.False(successFail);
+                Assert.False(PowerWakeLock.IsLocked);
+                Assert.Equal(0u, PowerWakeLock.CurrentFlags);
+
+                // Case 2: Kernel call throws
+                PowerWakeLock.ExecutionStateOverride = _ => throw new InvalidOperationException("P/Invoke failure");
+                bool successThrow = PowerWakeLock.Acquire();
+                Assert.False(successThrow);
+                Assert.False(PowerWakeLock.IsLocked);
+                Assert.Equal(0u, PowerWakeLock.CurrentFlags);
+            }
+            finally
+            {
+                PowerWakeLock.ResetForTesting();
+            }
+        }
+
+        [Fact]
+        public void PowerWakeLock_Release_RestoresContinuousAndClearsLockedState()
+        {
+            PowerWakeLock.ResetForTesting();
+            try
+            {
+                uint capturedReleaseFlags = 0;
+                PowerWakeLock.ExecutionStateOverride = flags =>
+                {
+                    if (flags == PowerWakeLock.ES_CONTINUOUS)
+                        capturedReleaseFlags = flags;
+                    return 0x80000000;
+                };
+
+                PowerWakeLock.Acquire();
+                Assert.True(PowerWakeLock.IsLocked);
+
+                bool released = PowerWakeLock.Release();
+
+                Assert.True(released);
+                Assert.False(PowerWakeLock.IsLocked);
+                Assert.Equal(PowerWakeLock.ES_CONTINUOUS, capturedReleaseFlags);
+                Assert.Equal(PowerWakeLock.ES_CONTINUOUS, PowerWakeLock.CurrentFlags);
+            }
+            finally
+            {
+                PowerWakeLock.ResetForTesting();
+            }
+        }
+
+        [Fact]
+        public void PowerWakeLock_AcquireScoped_DisposesCleanly()
+        {
+            PowerWakeLock.ResetForTesting();
+            try
+            {
+                PowerWakeLock.ExecutionStateOverride = _ => 0x80000000;
+                using (PowerWakeLock.AcquireScoped())
+                {
+                    Assert.True(PowerWakeLock.IsLocked);
+                }
+                Assert.False(PowerWakeLock.IsLocked);
+                Assert.Equal(PowerWakeLock.ES_CONTINUOUS, PowerWakeLock.CurrentFlags);
+            }
+            finally
+            {
+                PowerWakeLock.ResetForTesting();
+            }
+        }
+
+        #endregion
     }
 }

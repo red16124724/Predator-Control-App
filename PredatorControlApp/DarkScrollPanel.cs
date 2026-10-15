@@ -71,13 +71,22 @@ namespace PredatorControlApp
             int lines = SystemInformation.MouseWheelScrollLines;
             int step = lines < 0 ? ClientSize.Height : Math.Max(1, lines) * S(20);
 
-            int top = -AutoScrollPosition.Y - Math.Sign(delta) * step;
+            var content = DisplayRectangle;
+            int viewH = ClientSize.Height, contentH = content.Height;
+            int maxScroll = Math.Max(0, contentH - viewH);
+
+            int top = Math.Clamp(-AutoScrollPosition.Y - Math.Sign(delta) * step, 0, maxScroll);
             AutoScrollPosition = new Point(-AutoScrollPosition.X, top);
             InvalidateScrollBar();
         }
 
         private bool _dragging;
         private int _dragOffset;
+
+        private int VisibleWidth => (Parent != null && Parent.ClientSize.Width < ClientSize.Width)
+            ? Parent.ClientSize.Width
+            : ClientSize.Width;
+
         private Rectangle ThumbRect()
         {
             var content = DisplayRectangle;
@@ -89,13 +98,13 @@ namespace PredatorControlApp
             int thumbH = Math.Clamp((int)((long)viewH * viewH / contentH), S(30), maxThumb);
             int scrollPos = Math.Clamp(-content.Y, 0, contentH - viewH);
             int thumbY = (int)((float)scrollPos / (contentH - viewH) * (viewH - thumbH));
-            return new Rectangle(ClientSize.Width - barW - S(3), thumbY, barW, thumbH);
+            return new Rectangle(VisibleWidth - barW - S(3), thumbY, barW, thumbH);
         }
 
         private Rectangle BarHitRect()
         {
             int strip = S(14);
-            return new Rectangle(ClientSize.Width - strip, 0, strip, ClientSize.Height);
+            return new Rectangle(VisibleWidth - strip, 0, strip, ClientSize.Height);
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
@@ -150,8 +159,8 @@ namespace PredatorControlApp
 
         private void InvalidateScrollBar()
         {
-            int strip = S(10);
-            Invalidate(new Rectangle(ClientSize.Width - strip, 0, strip, ClientSize.Height));
+            int strip = S(14);
+            Invalidate(new Rectangle(VisibleWidth - strip, 0, strip, ClientSize.Height));
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -170,7 +179,8 @@ namespace PredatorControlApp
             using (var trackBrush = new SolidBrush(trackColor))
                 g.FillRectangle(trackBrush, rect.X - S(1), 0, rect.Width + S(2), ClientSize.Height);
 
-            int r = Math.Max(1, rect.Width / 2);
+            int maxR = Math.Max(1, Math.Min(rect.Width, rect.Height) / 2);
+            int r = Math.Clamp(rect.Width / 2, 1, maxR);
             using var path = new GraphicsPath();
             path.AddArc(rect.X, rect.Y, r * 2, r * 2, 180, 90);
             path.AddArc(rect.Right - r * 2, rect.Y, r * 2, r * 2, 270, 90);

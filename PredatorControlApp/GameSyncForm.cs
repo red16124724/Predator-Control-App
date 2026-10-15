@@ -19,6 +19,7 @@ namespace PredatorControlApp
         private static readonly Font FontTitle = new("Segoe UI", 11f, FontStyle.Bold);
         private static readonly Font FontSection = new("Segoe UI", 8.5f, FontStyle.Bold);
         private static readonly Font FontBody = new("Segoe UI", 9.5f, FontStyle.Regular);
+        private static readonly Font FontClose = new("Arial", 12f);
 
         #endregion
 
@@ -108,7 +109,7 @@ namespace PredatorControlApp
             lblTitle.MouseDown += TitleBar_MouseDown;
             pnlTitle.Controls.Add(lblTitle);
 
-            var lblClose = new Label { Text = "●", ForeColor = Color.FromArgb(255, 95, 86), Font = new Font("Arial", 12f), AutoSize = true, Cursor = Cursors.Hand, BackColor = Color.Transparent };
+            var lblClose = new Label { Text = "●", ForeColor = Color.FromArgb(255, 95, 86), Font = FontClose, AutoSize = true, Cursor = Cursors.Hand, BackColor = Color.Transparent };
             lblClose.Location = new Point(this.ClientSize.Width - pad - lblClose.PreferredWidth - 4, 9);
             lblClose.Click += (s, e) => this.Close();
             pnlTitle.Controls.Add(lblClose);
@@ -359,6 +360,13 @@ namespace PredatorControlApp
             _controller.GameExited += OnControllerGameExited;
         }
 
+        protected override void OnHandleDestroyed(EventArgs e)
+        {
+            _controller.GameDetected -= OnControllerGameDetected;
+            _controller.GameExited -= OnControllerGameExited;
+            base.OnHandleDestroyed(e);
+        }
+
         private void OnControllerGameDetected(GameProfile profile)
         {
             if (IsDisposed || !IsHandleCreated) return;
@@ -479,8 +487,8 @@ namespace PredatorControlApp
 
         private GameProfile EditorToProfile()
         {
-            int powerIdx = Math.Max(0, _cboPower.SelectedIndex);
-            int fanIdx = Math.Max(0, _cboFan.SelectedIndex);
+            int powerIdx = Math.Clamp(_cboPower.SelectedIndex, 0, PowerModeValues.Length - 1);
+            int fanIdx = Math.Clamp(_cboFan.SelectedIndex, 0, FanModeValues.Length - 1);
 
             var p = new GameProfile
             {
@@ -506,7 +514,7 @@ namespace PredatorControlApp
                 _ => -1
             };
 
-            p.RgbMode = _cboRgbMode.SelectedIndex == 0 ? -1 : _cboRgbMode.SelectedIndex - 1;
+            p.RgbMode = _cboRgbMode.SelectedIndex <= 0 ? -1 : _cboRgbMode.SelectedIndex - 1;
             p.RgbBrightness = _trkBrightness.Value;
             p.RgbSpeed = _trkSpeed.Value;
             p.RgbR = _selectedColor.R;
@@ -604,8 +612,8 @@ namespace PredatorControlApp
             var dlgBorder= Color.FromArgb(55, 55, 62);
             var dlgText  = Color.FromArgb(210, 210, 215);
             var dlgSub   = Color.FromArgb(140, 140, 150);
-            var titleFont= new Font("Segoe UI", 10f, FontStyle.Bold);
-            var bodyFont = new Font("Segoe UI", 9.25f);
+            using var titleFont = new Font("Segoe UI", 10f, FontStyle.Bold);
+            using var bodyFont  = new Font("Segoe UI", 9.25f);
 
             using var dlg = new Form
             {
@@ -636,7 +644,7 @@ namespace PredatorControlApp
             var lblClose = new Label
             {
                 Text = "●", ForeColor = Color.FromArgb(255, 95, 86),
-                Font = new Font("Arial", 11f), AutoSize = true,
+                Font = FontClose, AutoSize = true,
                 Cursor = Cursors.Hand, BackColor = Color.Transparent,
                 Location = new Point(dlg.ClientSize.Width - 24, 10)
             };

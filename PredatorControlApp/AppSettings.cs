@@ -29,8 +29,18 @@ namespace PredatorControlApp
             var list = new List<CurvePointData>();
             foreach (var el in doc.RootElement.EnumerateArray())
             {
-                int x = el.TryGetProperty("X", out var px) ? px.GetInt32() : 0;
-                int y = el.TryGetProperty("Y", out var py) ? py.GetInt32() : 0;
+                int x = 0;
+                int y = 0;
+                if (el.TryGetProperty("X", out var px))
+                {
+                    if (!px.TryGetInt32(out x) && px.TryGetDouble(out double dx))
+                        x = (int)Math.Round(dx);
+                }
+                if (el.TryGetProperty("Y", out var py))
+                {
+                    if (!py.TryGetInt32(out y) && py.TryGetDouble(out double dy))
+                        y = (int)Math.Round(dy);
+                }
                 list.Add(new CurvePointData(x, y));
             }
             return list;
@@ -94,6 +104,9 @@ namespace PredatorControlApp
         public int AutoFanBattery { get; set; } = 0;
         public bool FanCurveEnabled { get; set; } = false;
 
+        private int _fanHysteresisDegrees = CurveFollower.DefaultHysteresisDegrees;
+        public int FanHysteresisDegrees { get => _fanHysteresisDegrees; set => _fanHysteresisDegrees = Math.Clamp(value, CurveFollower.MinHysteresisDegrees, CurveFollower.MaxHysteresisDegrees); }
+
         private int _fanSpeedCpu = 50;
         public int FanSpeedCpu { get => _fanSpeedCpu; set => _fanSpeedCpu = Math.Clamp(value, 0, 100); }
 
@@ -129,6 +142,10 @@ namespace PredatorControlApp
         public int RefreshRate { get; set; } = 0;
         public bool LcdOverdrive { get; set; } = true;
         public bool BatteryLimit { get; set; } = false;
+        public long LastBatteryCalibrationUtcTicks { get; set; } = 0;
+        public int BatteryCalibrationPhase { get; set; } = 0; // 0 = Idle, 1 = ChargingToFull, 2 = DischargingToEmpty
+        public int CalibrationLastKnownPercent { get; set; } = -1;
+        public bool CalibrationPreChargeLimitEnabled { get; set; } = false;
         public bool CoolBoost { get; set; } = false;
 
         public int RgbMode { get; set; } = 3;
@@ -143,8 +160,24 @@ namespace PredatorControlApp
         public int ModeKeyAction { get; set; } = 0; // 0 = Cycle, 1 = TurboToggle
         public byte TurboReturnMode { get; set; } = 0x01;
 
+        private static string? _customFilePath;
         [JsonIgnore]
-        public static string? CustomFilePath { get; set; }
+        public static string? CustomFilePath
+        {
+            get => _customFilePath;
+            set
+            {
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    _customFilePath = null;
+                    return;
+                }
+                string full = Path.GetFullPath(value);
+                if (full.IndexOfAny(Path.GetInvalidPathChars()) >= 0 || full.Contains(".."))
+                    throw new ArgumentException("Invalid custom settings path");
+                _customFilePath = full;
+            }
+        }
 
         [JsonIgnore]
         public static string SettingsFilePath =>
@@ -203,6 +236,7 @@ namespace PredatorControlApp
                     AutoFanAC = this.AutoFanAC,
                     AutoFanBattery = this.AutoFanBattery,
                     FanCurveEnabled = this.FanCurveEnabled,
+                    FanHysteresisDegrees = this.FanHysteresisDegrees,
                     FanSpeedCpu = this.FanSpeedCpu,
                     FanSpeedGpu = this.FanSpeedGpu,
                     FanSpeedSys = this.FanSpeedSys,
@@ -217,6 +251,10 @@ namespace PredatorControlApp
                     RefreshRate = this.RefreshRate,
                     LcdOverdrive = this.LcdOverdrive,
                     BatteryLimit = this.BatteryLimit,
+                    LastBatteryCalibrationUtcTicks = this.LastBatteryCalibrationUtcTicks,
+                    BatteryCalibrationPhase = this.BatteryCalibrationPhase,
+                    CalibrationLastKnownPercent = this.CalibrationLastKnownPercent,
+                    CalibrationPreChargeLimitEnabled = this.CalibrationPreChargeLimitEnabled,
                     CoolBoost = this.CoolBoost,
                     RgbMode = this.RgbMode,
                     RgbBrightness = this.RgbBrightness,
@@ -233,22 +271,37 @@ namespace PredatorControlApp
 
         public void Sanitize()
         {
-            if (string.IsNullOrWhiteSpace(Theme) || !Enum.TryParse<AppTheme>(Theme, true, out _))
-                Theme = "System";
+            lock (this)
+            {
+                if (string.IsNullOrWhiteSpace(Theme) || !Enum.TryParse<AppTheme>(Theme, true, out _))
+                    Theme = "System";
 
-            PowerMode = Math.Clamp(PowerMode, (byte)0x00, (byte)0x06);
-            if (PowerModeAC.HasValue) PowerModeAC = Math.Clamp(PowerModeAC.Value, (byte)0x00, (byte)0x06);
-            if (PowerModeBattery.HasValue) PowerModeBattery = Math.Clamp(PowerModeBattery.Value, (byte)0x00, (byte)0x06);
+                PowerMode = Math.Clamp(PowerMode, (byte)0x00, (byte)0x06);
+                if (PowerModeAC.HasValue)
+                {
+                    PowerModeAC = PowerModeAC.Value == 0xFF ? (byte)0xFF : Math.Clamp(PowerModeAC.Value, (byte)0x00, (byte)0x06);
+                }
+                if (PowerModeBattery.HasValue)
+                {
+                    PowerModeBattery = PowerModeBattery.Value == 0xFF ? (byte)0xFF : Math.Clamp(PowerModeBattery.Value, (byte)0x00, (byte)0x06);
+                }
 
-            AutoPowerAC = Math.Clamp(AutoPowerAC, 0, 10);
-            AutoPowerBattery = Math.Clamp(AutoPowerBattery, 0, 10);
+                AutoPowerAC = Math.Clamp(AutoPowerAC, 0, 10);
+                AutoPowerBattery = Math.Clamp(AutoPowerBattery, 0, 10);
 
-            FanMode = Math.Clamp(FanMode, (byte)0x00, (byte)0x03);
-            if (FanModeAC.HasValue) FanModeAC = Math.Clamp(FanModeAC.Value, (byte)0x00, (byte)0x03);
-            if (FanModeBattery.HasValue) FanModeBattery = Math.Clamp(FanModeBattery.Value, (byte)0x00, (byte)0x03);
+                FanMode = Math.Clamp(FanMode, (byte)0x01, (byte)0x03);
+                if (FanModeAC.HasValue)
+                {
+                    FanModeAC = FanModeAC.Value == 0xFF ? (byte)0xFF : Math.Clamp(FanModeAC.Value, (byte)0x01, (byte)0x03);
+                }
+                if (FanModeBattery.HasValue)
+                {
+                    FanModeBattery = FanModeBattery.Value == 0xFF ? (byte)0xFF : Math.Clamp(FanModeBattery.Value, (byte)0x01, (byte)0x03);
+                }
 
-            AutoFanAC = Math.Clamp(AutoFanAC, 0, 10);
-            AutoFanBattery = Math.Clamp(AutoFanBattery, 0, 10);
+                AutoFanAC = Math.Clamp(AutoFanAC, 0, 10);
+                AutoFanBattery = Math.Clamp(AutoFanBattery, 0, 10);
+                FanHysteresisDegrees = Math.Clamp(FanHysteresisDegrees, CurveFollower.MinHysteresisDegrees, CurveFollower.MaxHysteresisDegrees);
 
             FanSpeedCpu = Math.Clamp(FanSpeedCpu, 0, 100);
             FanSpeedGpu = Math.Clamp(FanSpeedGpu, 0, 100);
@@ -273,6 +326,10 @@ namespace PredatorControlApp
             GpuMode = Math.Clamp(GpuMode, 0, 5);
             ModeKeyAction = Math.Clamp(ModeKeyAction, 0, 1);
             TurboReturnMode = Math.Clamp(TurboReturnMode, (byte)0x00, (byte)0x06);
+
+            if (LastBatteryCalibrationUtcTicks < 0) LastBatteryCalibrationUtcTicks = 0;
+            BatteryCalibrationPhase = Math.Clamp(BatteryCalibrationPhase, 0, 2);
+            CalibrationLastKnownPercent = CalibrationLastKnownPercent < 0 ? -1 : Math.Clamp(CalibrationLastKnownPercent, 0, 100);
 
             CpuCurve ??= new();
             lock (CpuCurve)
@@ -305,6 +362,7 @@ namespace PredatorControlApp
                     }
                 }
             }
+        }
         }
 
         public static AppSettings Load()
@@ -358,7 +416,9 @@ namespace PredatorControlApp
             // If not loaded from file or partial, fall back / hydrate from Registry
             try
             {
-                using var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\PredatorControl");
+                using var hkcu = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\PredatorControl");
+                using var hklm = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\PredatorControl");
+                var key = hkcu ?? hklm;
                 if (key != null)
                 {
                     if (!loadedFromFile || string.IsNullOrWhiteSpace(settings.Theme))
@@ -382,6 +442,9 @@ namespace PredatorControlApp
                         if (key.GetValue("AutoFanAC") is int afac) settings.AutoFanAC = afac;
                         if (key.GetValue("AutoFanBattery") is int afbat) settings.AutoFanBattery = afbat;
                         if (key.GetValue("FanCurveEnabled") is int fce) settings.FanCurveEnabled = fce == 1;
+                        if (key.GetValue("FanHysteresisDegrees") is int fhd) settings.FanHysteresisDegrees = Math.Clamp(fhd, CurveFollower.MinHysteresisDegrees, CurveFollower.MaxHysteresisDegrees);
+                        else if (key.GetValue("HysteresisDegrees") is int hd) settings.FanHysteresisDegrees = Math.Clamp(hd, CurveFollower.MinHysteresisDegrees, CurveFollower.MaxHysteresisDegrees);
+                        else if (key.GetValue("FanCurveHysteresis") is int fch) settings.FanHysteresisDegrees = Math.Clamp(fch, CurveFollower.MinHysteresisDegrees, CurveFollower.MaxHysteresisDegrees);
 
                         if (key.GetValue("FanSpeedCpu") is int fsc) settings.FanSpeedCpu = fsc;
                         if (key.GetValue("FanSpeedGpu") is int fsg) settings.FanSpeedGpu = fsg;
@@ -396,6 +459,11 @@ namespace PredatorControlApp
                         if (key.GetValue("RefreshRate") is int rr) settings.RefreshRate = rr;
                         if (key.GetValue("LcdOverdrive") is int od) settings.LcdOverdrive = od == 1;
                         if (key.GetValue("BatteryLimit") is int bl) settings.BatteryLimit = bl == 1;
+                        if (key.GetValue("LastBatteryCalibrationUtcTicks") is long lbct) settings.LastBatteryCalibrationUtcTicks = lbct;
+                        else if (key.GetValue("LastBatteryCalibrationUtcTicks") is string lbcts && long.TryParse(lbcts, out var parsedTicks)) settings.LastBatteryCalibrationUtcTicks = parsedTicks;
+                        if (key.GetValue("BatteryCalibrationPhase") is int bcp) settings.BatteryCalibrationPhase = bcp;
+                        if (key.GetValue("CalibrationLastKnownPercent") is int clkp) settings.CalibrationLastKnownPercent = clkp;
+                        if (key.GetValue("CalibrationPreChargeLimitEnabled") is int cpcle) settings.CalibrationPreChargeLimitEnabled = cpcle == 1;
                         if (key.GetValue("CoolBoost") is int cb) settings.CoolBoost = cb == 1;
 
                         if (key.GetValue("RGB_Mode") is int rm) settings.RgbMode = rm;
@@ -430,15 +498,20 @@ namespace PredatorControlApp
                 {
                     return;
                 }
-                if (File.Exists(path) && (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
-                {
-                    return;
-                }
 
                 if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
 
                 lock (_fileLock)
                 {
+                    try
+                    {
+                        if (File.Exists(path) && (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+                        {
+                            return;
+                        }
+                    }
+                    catch (IOException) { }
+
                     string json;
                     try
                     {
@@ -459,10 +532,18 @@ namespace PredatorControlApp
                         try
                         {
                             File.WriteAllText(tmp, json);
-                            if (File.Exists(path) && (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+                            if (File.Exists(path))
                             {
-                                try { File.Delete(tmp); } catch { }
-                                return;
+                                var attrs = File.GetAttributes(path);
+                                if ((attrs & FileAttributes.ReparsePoint) != 0)
+                                {
+                                    try { File.Delete(tmp); } catch { }
+                                    return;
+                                }
+                                if ((attrs & FileAttributes.ReadOnly) != 0)
+                                {
+                                    try { File.SetAttributes(path, attrs & ~FileAttributes.ReadOnly); } catch { }
+                                }
                             }
                             File.Move(tmp, path, true);
                             break;
@@ -513,6 +594,8 @@ namespace PredatorControlApp
                     key.SetValue("AutoFanAC", AutoFanAC);
                     key.SetValue("AutoFanBattery", AutoFanBattery);
                     key.SetValue("FanCurveEnabled", FanCurveEnabled ? 1 : 0);
+                    key.SetValue("FanHysteresisDegrees", FanHysteresisDegrees);
+                    key.SetValue("HysteresisDegrees", FanHysteresisDegrees);
 
                     key.SetValue("FanSpeedCpu", FanSpeedCpu);
                     key.SetValue("FanSpeedGpu", FanSpeedGpu);
@@ -527,6 +610,10 @@ namespace PredatorControlApp
                     if (RefreshRate > 0) key.SetValue("RefreshRate", RefreshRate);
                     key.SetValue("LcdOverdrive", LcdOverdrive ? 1 : 0);
                     key.SetValue("BatteryLimit", BatteryLimit ? 1 : 0);
+                    key.SetValue("LastBatteryCalibrationUtcTicks", LastBatteryCalibrationUtcTicks, RegistryValueKind.QWord);
+                    key.SetValue("BatteryCalibrationPhase", BatteryCalibrationPhase, RegistryValueKind.DWord);
+                    key.SetValue("CalibrationLastKnownPercent", CalibrationLastKnownPercent, RegistryValueKind.DWord);
+                    key.SetValue("CalibrationPreChargeLimitEnabled", CalibrationPreChargeLimitEnabled ? 1 : 0, RegistryValueKind.DWord);
                     key.SetValue("CoolBoost", CoolBoost ? 1 : 0);
 
                     key.SetValue("RGB_Mode", RgbMode);
@@ -535,6 +622,8 @@ namespace PredatorControlApp
                     key.SetValue("RGB_R", RgbR);
                     key.SetValue("RGB_G", RgbG);
                     key.SetValue("RGB_B", RgbB);
+
+                    key.Flush();
                 }
             }
             catch { }

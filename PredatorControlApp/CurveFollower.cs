@@ -6,10 +6,40 @@ namespace PredatorControlApp
 {
     public sealed class CurveFollower
     {
+        public const int MinHysteresisDegrees = 0;
+        public const int MaxHysteresisDegrees = 10;
+        public const int DefaultHysteresisDegrees = 2;
         private const int MinChangePercent = 2;
-        private const double HysteresisDegrees = 2.0;
+
         private readonly object _syncLock = new();
         private double? _peakTemperature;
+        private int _hysteresisDegrees = DefaultHysteresisDegrees;
+
+        public CurveFollower()
+        {
+        }
+
+        public CurveFollower(int hysteresisDegrees)
+        {
+            HysteresisDegrees = hysteresisDegrees;
+        }
+
+        public CurveFollower(double hysteresisDegrees)
+            : this((int)Math.Round(double.IsNaN(hysteresisDegrees) || double.IsInfinity(hysteresisDegrees) ? DefaultHysteresisDegrees : hysteresisDegrees))
+        {
+        }
+
+        public int HysteresisDegrees
+        {
+            get { lock (_syncLock) return _hysteresisDegrees; }
+            set
+            {
+                lock (_syncLock)
+                {
+                    _hysteresisDegrees = Math.Clamp(value, MinHysteresisDegrees, MaxHysteresisDegrees);
+                }
+            }
+        }
 
         public int? Current
         {
@@ -44,13 +74,18 @@ namespace PredatorControlApp
                 }
 
                 // Temperature-based hysteresis:
-                // Rises immediately on heating. On cooling, holds peak temperature until temperature
-                // drops by more than HysteresisDegrees (2°C) below the peak to prevent fan speed hunting/oscillation.
-                if (!_peakTemperature.HasValue || temperature >= _peakTemperature.Value)
+                // When HysteresisDegrees == 0, deadband hold is bypassed and fan speed tracks curve immediately on both rising and falling temperatures.
+                // When > 0, rises immediately on heating. On cooling, holds peak temperature until temperature
+                // drops by more than HysteresisDegrees below the peak to prevent fan speed hunting/oscillation.
+                if (_hysteresisDegrees <= 0)
                 {
                     _peakTemperature = temperature;
                 }
-                else if (temperature < _peakTemperature.Value - HysteresisDegrees)
+                else if (!_peakTemperature.HasValue || temperature >= _peakTemperature.Value)
+                {
+                    _peakTemperature = temperature;
+                }
+                else if (temperature < _peakTemperature.Value - _hysteresisDegrees)
                 {
                     _peakTemperature = temperature;
                 }
@@ -60,7 +95,8 @@ namespace PredatorControlApp
                 int calculatedPercent = Form1.InterpolateCurve(curvePoints, (int)Math.Round(tempToUse));
                 calculatedPercent = Math.Clamp(calculatedPercent, 0, 100);
 
-                if (_current.HasValue)
+                // Deadband hold: bypassed when HysteresisDegrees == 0 for immediate responsive tracking.
+                if (_hysteresisDegrees > 0 && _current.HasValue)
                 {
                     int cur = _current.Value;
                     bool withinDeadband = Math.Abs(calculatedPercent - cur) < MinChangePercent;

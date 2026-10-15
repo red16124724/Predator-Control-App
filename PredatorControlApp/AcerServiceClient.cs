@@ -13,23 +13,43 @@ namespace PredatorControlApp
     {
         public const int CommandPort = 46933;
         private static readonly byte[] Magic = Encoding.ASCII.GetBytes("ACER");
+        private static readonly SemaphoreSlim _socketLock = new(1, 1);
+        private static readonly object _stateLock = new();
+
         private static bool _serviceAvailable = true;
         private static DateTime _lastFailedAttempt = DateTime.MinValue;
+        private static DateTime _lastServiceStartAttempt = DateTime.MinValue;
         private static readonly TimeSpan RetryCooldown = TimeSpan.FromSeconds(10);
+        private static readonly TimeSpan ServiceStartCooldown = TimeSpan.FromSeconds(60);
 
         public static bool IsServiceReachable
         {
-            get => _serviceAvailable || (DateTime.UtcNow - _lastFailedAttempt) >= RetryCooldown;
+            get
+            {
+                lock (_stateLock)
+                {
+                    return _serviceAvailable || (DateTime.UtcNow - _lastFailedAttempt) >= RetryCooldown;
+                }
+            }
         }
 
         public static void ResetConnectionState()
         {
-            _serviceAvailable = true;
-            _lastFailedAttempt = DateTime.MinValue;
+            lock (_stateLock)
+            {
+                _serviceAvailable = true;
+                _lastFailedAttempt = DateTime.MinValue;
+            }
         }
 
         private static void TryStartService(string serviceName)
         {
+            lock (_stateLock)
+            {
+                if ((DateTime.UtcNow - _lastServiceStartAttempt) < ServiceStartCooldown) return;
+                _lastServiceStartAttempt = DateTime.UtcNow;
+            }
+
             try
             {
                 var psi = new ProcessStartInfo
@@ -47,7 +67,10 @@ namespace PredatorControlApp
 
         public static void EnsureAcerService()
         {
-            if (_serviceAvailable) return;
+            lock (_stateLock)
+            {
+                if (_serviceAvailable) return;
+            }
             TryStartService("AcerServiceSvc");
             TryStartService("AcerLightingService");
         }
@@ -99,6 +122,7 @@ namespace PredatorControlApp
 
         private static string? SendCommand(uint packetId, string jsonPayload)
         {
+            if (!_socketLock.Wait(500)) return null;
             try
             {
                 using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
@@ -109,12 +133,16 @@ namespace PredatorControlApp
                 var connectTask = socket.ConnectAsync(new IPEndPoint(IPAddress.Loopback, CommandPort), cts.Token).AsTask();
                 if (!connectTask.Wait(200) || !socket.Connected)
                 {
-                    _serviceAvailable = false;
-                    _lastFailedAttempt = DateTime.UtcNow;
+                    try { cts.Cancel(); } catch { }
+                    lock (_stateLock)
+                    {
+                        _serviceAvailable = false;
+                        _lastFailedAttempt = DateTime.UtcNow;
+                    }
                     return null;
                 }
 
-                using var stream = new NetworkStream(socket, true);
+                using var stream = new NetworkStream(socket, false);
                 byte[] jsonBytes = Encoding.UTF8.GetBytes(jsonPayload);
                 byte[] packet = new byte[8 + jsonBytes.Length];
 
@@ -127,19 +155,26 @@ namespace PredatorControlApp
 
                 byte[] buffer = new byte[4096];
                 int bytesRead = stream.Read(buffer, 0, buffer.Length);
-                if (bytesRead > 8)
+                if (bytesRead >= 8 && buffer.AsSpan(0, 4).SequenceEqual(Magic))
                 {
-                    _serviceAvailable = true;
+                    lock (_stateLock) _serviceAvailable = true;
                     return Encoding.UTF8.GetString(buffer, 8, bytesRead - 8);
                 }
-                _serviceAvailable = true;
+                lock (_stateLock) _serviceAvailable = true;
                 return string.Empty;
             }
             catch
             {
-                _serviceAvailable = false;
-                _lastFailedAttempt = DateTime.UtcNow;
+                lock (_stateLock)
+                {
+                    _serviceAvailable = false;
+                    _lastFailedAttempt = DateTime.UtcNow;
+                }
                 return null;
+            }
+            finally
+            {
+                _socketLock.Release();
             }
         }
     }

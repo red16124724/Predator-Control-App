@@ -161,7 +161,8 @@ namespace PredatorControlApp
         public static FirmwareEvent? Decode(byte[]? detail)
         {
             if (detail == null || detail.Length == 0) return null;
-            return new FirmwareEvent((FirmwareEventKind)detail[0], (byte)(detail.Length > 1 ? detail[1] : 0), detail.ToArray());
+            byte val = (byte)(detail.Length > 1 ? detail[1] : 0);
+            return new FirmwareEvent((FirmwareEventKind)detail[0], val, detail.ToArray());
         }
 
         public override string ToString() => $"{Kind} Value={Value} Data={Convert.ToHexString(Detail)}";
@@ -212,25 +213,73 @@ namespace PredatorControlApp
         public const int DefaultUsbChargingFloor = 30;
         public const uint BatteryStatusQuery = 2u;
 
-        public static byte WmiModeToEcMode(byte wmiMode, int modeCount = 5) => wmiMode switch
+        public static bool TryWmiModeToEcMode(byte wmiMode, out byte ecMode, int modeCount = 5)
         {
-            0x05 => 0,                      // Turbo: highest
-            0x04 => (byte)(modeCount >= 4 ? 1 : 0), // Performance
-            0x01 => (byte)(modeCount >= 4 ? 2 : 1), // Balanced
-            0x00 => (byte)(modeCount >= 4 ? 3 : 2), // Quiet
-            0x06 => (byte)Math.Max(0, modeCount - 1),  // Eco: lowest
-            _ => 1
-        };
+            switch (wmiMode)
+            {
+                case 0x05:
+                    ecMode = 0; // Turbo: highest
+                    return true;
+                case 0x04:
+                    ecMode = (byte)(modeCount >= 4 ? 1 : 0); // Performance
+                    return true;
+                case 0x01:
+                    ecMode = (byte)(modeCount >= 4 ? 2 : 1); // Balanced
+                    return true;
+                case 0x00:
+                    ecMode = (byte)(modeCount >= 4 ? 3 : 2); // Quiet
+                    return true;
+                case 0x06:
+                    ecMode = (byte)Math.Max(0, modeCount - 1); // Eco: lowest
+                    return true;
+                default:
+                    ecMode = 1;
+                    return false;
+            }
+        }
 
-        public static byte EcModeToWmiMode(byte ecMode) => ecMode switch
+        public static byte WmiModeToEcMode(byte wmiMode, int modeCount = 5)
         {
-            0 => 0x05, // Turbo
-            1 => 0x04, // Performance
-            2 => 0x01, // Balanced
-            3 => 0x00, // Quiet
-            4 => 0x06, // Eco
-            _ => 0x01
-        };
+            TryWmiModeToEcMode(wmiMode, out byte ecMode, modeCount);
+            return ecMode;
+        }
+
+        public static bool TryEcModeToWmiMode(byte ecMode, out byte wmiMode, int modeCount = 5)
+        {
+            if (ecMode >= modeCount)
+            {
+                wmiMode = 0x01; // Balanced fallback
+                return false;
+            }
+
+            switch (ecMode)
+            {
+                case 0:
+                    wmiMode = 0x05; // Turbo
+                    return true;
+                case 1:
+                    wmiMode = (byte)(modeCount >= 4 ? 0x04 : 0x01); // Performance if 4+ modes, else Balanced
+                    return true;
+                case 2:
+                    wmiMode = (byte)(modeCount >= 4 ? 0x01 : 0x00); // Balanced if 4+ modes, else Quiet
+                    return true;
+                case 3:
+                    wmiMode = 0x00; // Quiet
+                    return true;
+                case 4:
+                    wmiMode = 0x06; // Eco
+                    return true;
+                default:
+                    wmiMode = 0x01; // Balanced fallback
+                    return false;
+            }
+        }
+
+        public static byte EcModeToWmiMode(byte ecMode, int modeCount = 5)
+        {
+            TryEcModeToWmiMode(ecMode, out byte wmiMode, modeCount);
+            return wmiMode;
+        }
 
         public static readonly int[] UsbChargingFloors = { 10, 20, 30 };
         private static readonly string[] FanTableModels = { "AN515-46", "AN515-47", "AN515-58", "AN517-42", "AN517-43", "AN517-55" };
@@ -777,7 +826,13 @@ namespace PredatorControlApp
                         handle.Dispose();
                         handle = CreateFile(path, 0, 7, IntPtr.Zero, 3, 0, IntPtr.Zero);
                     }
-                    if (!handle.IsInvalid)
+                    if (handle.IsInvalid)
+                    {
+                        handle.Dispose();
+                        continue;
+                    }
+
+                    try
                     {
                         int repLen = ReportLength;
                         if (HidD_GetPreparsedData(handle, out IntPtr pData))
@@ -801,6 +856,10 @@ namespace PredatorControlApp
                         var dev = new EcHidDevice { _deviceHandle = handle, _globalLock = mtx, _reportLength = repLen };
                         if (dev.ReadVersion() != null) return dev;
                         dev.Dispose();
+                    }
+                    catch
+                    {
+                        handle.Dispose();
                     }
                 }
             }
@@ -875,7 +934,13 @@ namespace PredatorControlApp
                         handle.Dispose();
                         handle = CreateFile(path, 0, 7, IntPtr.Zero, 3, 0, IntPtr.Zero);
                     }
-                    if (!handle.IsInvalid)
+                    if (handle.IsInvalid)
+                    {
+                        handle.Dispose();
+                        continue;
+                    }
+
+                    try
                     {
                         int repLen = ReportLength;
                         if (HidD_GetPreparsedData(handle, out IntPtr pData))
@@ -896,6 +961,10 @@ namespace PredatorControlApp
                         _deviceHandle = handle;
                         _reportLength = repLen;
                         return true;
+                    }
+                    catch
+                    {
+                        handle.Dispose();
                     }
                 }
             }

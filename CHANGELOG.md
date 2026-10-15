@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.1] - 2026-10-15
+
+### 🚀 Summary
+Maintenance and hardening release introducing power mode transition smoothing, battery calibration overhaul with wake lock and ETA calculator, full-app adversarial stress testing suite, and deep GDI/Win32 resource safety fixes.
+
+### 🌟 Added & Improved
+- **Direct Power Mode Transitions**: Eliminated 1-second revert bounce through Balanced mode when changing power profiles; added optimistic UI dispatch and 2500ms telemetry lock window.
+- **Battery Calibration Experience**: Added dedicated calibration loading overlay, real-time EMA charging/discharging ETA calculator, Win32 display/system execution wake lock (`SetThreadExecutionState`), cancel button, and post-shutdown recovery state machine.
+- **GDI+ Bounds Hardening**: Fixed GDI+ parameter exceptions when controls are resized to zero or sub-14px bounds during minimization/docking.
+- **Hardware & Protocol Integrity**: Hardened ACPI error code handling in sensor telemetry, added thread synchronization across battery and power management methods, and eliminated non-blocking GC finalizer starvation in PDH monitoring.
+- **Multi-Monitor Window Restore**: Fixed 16:9 maximized bounds restore across multi-monitor working area origins.
+
 ## [1.4.0] - 2026-10-07
 
 ### 🚀 Summary

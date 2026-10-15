@@ -95,7 +95,14 @@ namespace PredatorControlApp
         private static GraphicsPath RoundedRect(Rectangle bounds, int radius)
         {
             var path = new GraphicsPath();
-            int d = radius * 2;
+            if (bounds.Width <= 0 || bounds.Height <= 0)
+            {
+                path.AddRectangle(new Rectangle(bounds.X, bounds.Y, Math.Max(1, bounds.Width), Math.Max(1, bounds.Height)));
+                return path;
+            }
+            int maxRadius = Math.Max(1, Math.Min(bounds.Width, bounds.Height) / 2);
+            int r = Math.Clamp(radius, 1, maxRadius);
+            int d = r * 2;
             path.AddArc(bounds.X, bounds.Y, d, d, 180, 90);
             path.AddArc(bounds.Right - d, bounds.Y, d, d, 270, 90);
             path.AddArc(bounds.Right - d, bounds.Bottom - d, d, d, 0, 90);
@@ -106,6 +113,7 @@ namespace PredatorControlApp
 
         protected override void OnPaint(PaintEventArgs e)
         {
+            if (Width <= 3 || Height <= 3) return;
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
@@ -225,6 +233,14 @@ namespace PredatorControlApp
                 e.Handled = true;
             }
             base.OnKeyDown(e);
+        }
+
+        public void PerformClick()
+        {
+            if (CanSelect)
+            {
+                OnClick(EventArgs.Empty);
+            }
         }
 
         protected override void OnGotFocus(EventArgs e)

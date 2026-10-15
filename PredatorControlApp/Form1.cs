@@ -250,6 +250,7 @@ namespace PredatorControlApp
         private static readonly Font FontHeaderLight = new("Segoe UI", 8.5f, FontStyle.Regular);
         private static readonly Font FontBody = new("Segoe UI", 9.5f, FontStyle.Regular);
         private static readonly Font FontBodyBold = new("Segoe UI", 9.5f, FontStyle.Bold);
+        private static readonly Font FontCalibrationPercent = new("Segoe UI", 20f, FontStyle.Bold);
 
         private Label _lblTitle = null!, _lblCpuTemp = null!, _lblGpuTemp = null!;
         private Label _lblCpuRpm = null!, _lblGpuRpm = null!;
@@ -281,6 +282,10 @@ namespace PredatorControlApp
         private FanCurveGraph? _embeddedCurveGpu;
         private PredatorButton? _btnEmbeddedApplyCurve;
         private PredatorButton? _btnEmbeddedResetCurve;
+        private Label? _lblEmbeddedHysteresis;
+        private PredatorSlider? _sliderEmbeddedHysteresis;
+        internal PredatorSlider? EmbeddedHysteresisSlider => _sliderEmbeddedHysteresis;
+        internal Label? EmbeddedHysteresisLabel => _lblEmbeddedHysteresis;
 
         private FanCurveForm? _fanCurveForm;
         private bool _fanCurveEnabled;
@@ -299,7 +304,12 @@ namespace PredatorControlApp
         private Label _lblLcdOverdriveStatus = null!;
 
         private byte _currentPowerMode = 0x01;
-        
+        internal byte CurrentPowerMode => _currentPowerMode;
+        private byte _pendingTargetPowerMode = 0x01;
+        internal byte PendingTargetPowerMode => _pendingTargetPowerMode;
+        private DateTime _powerModeTransitionLockUntilUtc = DateTime.MinValue;
+        internal DateTime PowerModeTransitionLockUntilUtc => _powerModeTransitionLockUntilUtc;
+        internal const int PowerModeTransitionLockMs = 2500;
         private PredatorButton? _activePowerBtn, _activeFanBtn, _activeDisplayBtn;
         private bool _isUpdatingBattery;
         private bool _isApplyingRgbMode;
@@ -371,6 +381,21 @@ namespace PredatorControlApp
         private PredatorSwitch? _switchUsbCharging;
         private PredatorDropDown? _cboUsbFloor;
         private PredatorButton? _btnBatteryCalibration;
+        private Panel? _pnlCalibrationOverlay;
+        private Label? _lblCalibrationTitle;
+        private Label? _lblCalibrationAwakeLock;
+        private Panel? _pnlCalibrationWarning;
+        private Label? _lblCalibrationWarning;
+        private Label? _lblCalibrationPhase;
+        private Label? _lblCalibrationBatteryPercent;
+        private Label? _lblCalibrationPowerRate;
+        private ProgressBar? _pbCalibration;
+        private Label? _lblCalibrationEta;
+        private Label? _lblCalibrationLastCalibrated;
+        private PredatorButton? _btnCancelCalibration;
+        private ToolTip? _tipCalibration;
+        private Label? _lblLastCalibratedMain;
+        private readonly BatteryCalibrationEtaCalculator _calibrationEtaCalc = new();
         private PredatorDropDown? _cboTheme;
         private PredatorButton? _btnDiagnostics;
 
@@ -395,6 +420,7 @@ namespace PredatorControlApp
         private bool _isMaximized16x9;
         private Rectangle _normalBounds;
         private readonly AppSettings _appSettings = AppSettings.Load();
+        internal AppSettings Settings => _appSettings;
         private readonly object _saveLock = new();
         private int _modeKeyAction = 0; // 0 = Cycle, 1 = TurboToggle
         private byte _turboReturnMode = 0x01;
@@ -454,6 +480,9 @@ namespace PredatorControlApp
                 try { Updater.CleanStaleUpdateArtifacts(); } catch { }
                 _capabilities = CapabilityProbe.Probe(_wmi, _wmi.EcHid);
                 ThemeManager.LoadThemeFromRegistry();
+                _cpuCurveFollower.HysteresisDegrees = _appSettings.FanHysteresisDegrees;
+                _gpuCurveFollower.HysteresisDegrees = _appSettings.FanHysteresisDegrees;
+                _sysCurveFollower.HysteresisDegrees = _appSettings.FanHysteresisDegrees;
 
             _dpiScale = this.DeviceDpi / 96f;
             try { int detectedHz = GetMaxRefreshRateCore(); if (detectedHz > 60) _maxHz = detectedHz; } catch { }
@@ -506,11 +535,13 @@ namespace PredatorControlApp
                 {
                     SafeBeginInvoke(() =>
                     {
-                        if (string.Equals(msg?.Trim(), "SHOW", StringComparison.OrdinalIgnoreCase))
+                        var trimmed = msg?.Trim();
+                        if (string.Equals(trimmed, "SHOW", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(trimmed, "SHOW_WINDOW", StringComparison.OrdinalIgnoreCase))
                         {
                             ShowApp();
                         }
-                        else
+                        else if (string.Equals(trimmed, "TOGGLE", StringComparison.OrdinalIgnoreCase))
                         {
                             ToggleWindowVisibility();
                         }
@@ -546,6 +577,7 @@ namespace PredatorControlApp
             }
 
             LoadMemory();
+            RecoverInterruptedCalibrationOnStartup();
 
             _gameSync = new GameSyncController();
             _gameSync.GameDetected += OnGameDetected;
@@ -563,9 +595,11 @@ namespace PredatorControlApp
             _timer.Start();
 
             SystemEvents.PowerModeChanged += OnPowerModeChanged;
+            SystemEvents.SessionEnding += OnSessionEnding;
             this.FormClosed += (s, e) =>
             {
                 SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+                try { SystemEvents.SessionEnding -= OnSessionEnding; } catch { }
                 if (_formThemeHandler != null)
                 {
                     ThemeManager.ThemeChanged -= _formThemeHandler;
@@ -1487,6 +1521,11 @@ namespace PredatorControlApp
 
             targetBtn.IsActive = true;
             _activeNavBtn = targetBtn;
+
+            if (_pnlCalibrationOverlay != null && _pnlCalibrationOverlay.Visible)
+            {
+                _pnlCalibrationOverlay.BringToFront();
+            }
         }
 
         private void ToggleMaximize16x9()
@@ -1513,12 +1552,16 @@ namespace PredatorControlApp
                 }
                 else
                 {
-                    int workH = Screen.FromHandle(this.Handle).WorkingArea.Height;
-                    int workW = Screen.FromHandle(this.Handle).WorkingArea.Width;
-                    int targetH = Math.Max(S(540), Math.Min(S(720), workH - S(40)));
+                    var work = Screen.FromHandle(this.Handle).WorkingArea;
+                    int targetH = Math.Max(S(540), Math.Min(S(720), work.Height - S(40)));
                     int targetW = (int)Math.Round(targetH * 16.0 / 9.0);
-                    int targetX = (workW - targetW) / 2;
-                    int targetY = (workH - targetH) / 2;
+                    if (targetW > work.Width - S(40))
+                    {
+                        targetW = work.Width - S(40);
+                        targetH = (int)Math.Round(targetW * 9.0 / 16.0);
+                    }
+                    int targetX = work.X + (work.Width - targetW) / 2;
+                    int targetY = work.Y + (work.Height - targetH) / 2;
                     this.SetBounds(targetX, targetY, targetW, targetH);
                 }
             }
@@ -1569,6 +1612,7 @@ namespace PredatorControlApp
                 using var extIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
                 if (extIcon != null)
                 {
+                    _appIconBitmap?.Dispose();
                     _appIconBitmap = extIcon.ToBitmap();
                     picIcon.Image = _appIconBitmap;
                 }
@@ -1810,6 +1854,8 @@ namespace PredatorControlApp
             _pageContainer.Controls.Add(_pnlLighting);
             _pageContainer.Controls.Add(_pnlSystem);
             _pageContainer.Controls.Add(_pnlSettings);
+
+            BuildCalibrationOverlay();
         }
 
         private DarkScrollPanel CreatePagePanel(int w, int h)
@@ -2256,7 +2302,10 @@ namespace PredatorControlApp
             var cardCurves = MakeCard(_pnlFans, "INTERACTIVE FAN CURVES", col2X, pad, cardW, S(640));
             MakeLabel(cardCurves, "Drag points (Temp °C vs Speed %) to customize hardware response curves.", cPad, S(38), FontHeaderLight, SubHeaderColor);
 
-            int curveH = S(210);
+            var btnPopout = MakeButton(cardCurves, "⛶  Popout Editor", cInnerW - S(125) + cPad, S(32), S(125), S(26));
+            btnPopout.Click += (s, e) => OpenFanCurveEditor();
+
+            int curveH = S(195);
             _embeddedCurveCpu = new FanCurveGraph
             {
                 CurveColor = Color.FromArgb(0, 180, 255),
@@ -2271,15 +2320,44 @@ namespace PredatorControlApp
             {
                 CurveColor = Color.FromArgb(255, 77, 109),
                 FanLabel = "GPU FAN CURVE",
-                Location = new Point(cPad, S(280)),
+                Location = new Point(cPad, S(260)),
                 Size = new Size(cInnerW, curveH),
                 Points = _gpuCurvePoints
             };
             cardCurves.Controls.Add(_embeddedCurveGpu);
 
+            _lblEmbeddedHysteresis = MakeLabel(cardCurves, UiLabelFormatter.FormatHysteresisLabel(_appSettings.FanHysteresisDegrees), cPad, S(460), FontSectionHeader, AccentColor, "accent");
+            _sliderEmbeddedHysteresis = new PredatorSlider
+            {
+                Minimum = CurveFollower.MinHysteresisDegrees,
+                Maximum = CurveFollower.MaxHysteresisDegrees,
+                Value = Math.Clamp(_appSettings.FanHysteresisDegrees, CurveFollower.MinHysteresisDegrees, CurveFollower.MaxHysteresisDegrees),
+                Location = new Point(cPad, S(482)),
+                Size = new Size(cInnerW, S(26))
+            };
+            _sliderEmbeddedHysteresis.ValueChanged += (s, e) =>
+            {
+                int val = _sliderEmbeddedHysteresis.Value;
+                if (_lblEmbeddedHysteresis != null)
+                    _lblEmbeddedHysteresis.Text = UiLabelFormatter.FormatHysteresisLabel(val);
+                _appSettings.FanHysteresisDegrees = val;
+                _cpuCurveFollower.HysteresisDegrees = val;
+                _gpuCurveFollower.HysteresisDegrees = val;
+                _sysCurveFollower.HysteresisDegrees = val;
+            };
+            _sliderEmbeddedHysteresis.ValueCommitted += (s, e) =>
+            {
+                int val = _sliderEmbeddedHysteresis.Value;
+                _appSettings.FanHysteresisDegrees = val;
+                _appSettings.Save();
+                SaveState("FanHysteresisDegrees", val);
+                SaveStateToHklm("FanHysteresisDegrees", val);
+            };
+            cardCurves.Controls.Add(_sliderEmbeddedHysteresis);
+
             int curveBtnW = (cInnerW - S(10)) / 2;
-            _btnEmbeddedResetCurve = MakeButton(cardCurves, "↺  Reset Defaults", cPad, S(504), curveBtnW, S(36));
-            _btnEmbeddedApplyCurve = MakeButton(cardCurves, "✓  Apply Curves", cPad + curveBtnW + S(10), S(504), curveBtnW, S(36));
+            _btnEmbeddedResetCurve = MakeButton(cardCurves, "↺  Reset Defaults", cPad, S(516), curveBtnW, S(34));
+            _btnEmbeddedApplyCurve = MakeButton(cardCurves, "✓  Apply Curves", cPad + curveBtnW + S(10), S(516), curveBtnW, S(34));
 
             _btnEmbeddedResetCurve.Click += (s, e) =>
             {
@@ -2296,6 +2374,22 @@ namespace PredatorControlApp
                         _gpuCurvePoints = new List<Point>(_embeddedCurveGpu.Points);
                     }
                 }
+                if (_sliderEmbeddedHysteresis != null)
+                {
+                    _sliderEmbeddedHysteresis.Value = CurveFollower.DefaultHysteresisDegrees;
+                }
+                if (_lblEmbeddedHysteresis != null)
+                {
+                    _lblEmbeddedHysteresis.Text = UiLabelFormatter.FormatHysteresisLabel(CurveFollower.DefaultHysteresisDegrees);
+                }
+                _appSettings.FanHysteresisDegrees = CurveFollower.DefaultHysteresisDegrees;
+                _cpuCurveFollower.HysteresisDegrees = CurveFollower.DefaultHysteresisDegrees;
+                _gpuCurveFollower.HysteresisDegrees = CurveFollower.DefaultHysteresisDegrees;
+                _sysCurveFollower.HysteresisDegrees = CurveFollower.DefaultHysteresisDegrees;
+                _appSettings.Save();
+                SaveState("FanHysteresisDegrees", CurveFollower.DefaultHysteresisDegrees);
+                SaveStateToHklm("FanHysteresisDegrees", CurveFollower.DefaultHysteresisDegrees);
+
                 SaveCurveToRegistry("CpuCurve", _cpuCurvePoints);
                 SaveCurveToRegistry("GpuCurve", _gpuCurvePoints);
                 if (_fanCurveEnabled)
@@ -2310,6 +2404,17 @@ namespace PredatorControlApp
                 {
                     if (_embeddedCurveCpu != null) _cpuCurvePoints = new List<Point>(_embeddedCurveCpu.Points);
                     if (_embeddedCurveGpu != null) _gpuCurvePoints = new List<Point>(_embeddedCurveGpu.Points);
+                }
+                if (_sliderEmbeddedHysteresis != null)
+                {
+                    int val = _sliderEmbeddedHysteresis.Value;
+                    _appSettings.FanHysteresisDegrees = val;
+                    _cpuCurveFollower.HysteresisDegrees = val;
+                    _gpuCurveFollower.HysteresisDegrees = val;
+                    _sysCurveFollower.HysteresisDegrees = val;
+                    _appSettings.Save();
+                    SaveState("FanHysteresisDegrees", val);
+                    SaveStateToHklm("FanHysteresisDegrees", val);
                 }
                 _fanCurveEnabled = true;
                 _lastCurveCpuSpeed = -1;
@@ -2349,7 +2454,7 @@ namespace PredatorControlApp
                 });
             };
 
-            MakeLabel(cardCurves, "💡 Curves apply in real time when fan profile is set to Custom > Dynamic Curve.", cPad, S(552), FontHeaderLight, SubHeaderColor);
+            MakeLabel(cardCurves, "💡 Curves apply in real time when fan profile is set to Custom > Dynamic Curve.", cPad, S(558), FontHeaderLight, SubHeaderColor);
 
             int totalH = Math.Max(techCardY + S(126), S(660));
             _pnlFans.AutoScrollMinSize = new Size(0, totalH);
@@ -2625,22 +2730,8 @@ namespace PredatorControlApp
             };
 
             _btnBatteryCalibration = MakeButton(cardUsb, "⚡  Start Battery Calibration", cPad, S(156), cInnerW, S(34));
-            _btnBatteryCalibration.Click += (s, e) =>
-            {
-                _btnBatteryCalibration.Enabled = false;
-                Task.Run(() =>
-                {
-                    bool ok = _wmi.SetBatteryCalibration(true);
-                    SafeBeginInvoke(() =>
-                    {
-                        if (!IsDisposed && _btnBatteryCalibration != null)
-                        {
-                            _btnBatteryCalibration.Enabled = true;
-                            MessageBox.Show(this, ok ? "Hardware battery calibration initiated. Keep AC adapter connected until calibration completes." : "Could not start calibration cycle.", "Battery Calibration", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
-                        }
-                    });
-                });
-            };
+            _btnBatteryCalibration.Click += (s, e) => StartBatteryCalibration();
+            _lblLastCalibratedMain = MakeLabel(cardUsb, UiLabelFormatter.FormatLastCalibrated(_appSettings.LastBatteryCalibrationUtcTicks), cPad, S(196), FontBody, SubHeaderColor);
 
             // Card 5: Game Sync
             var cardGame = MakeCard(_pnlSystem, "GAME SYNC PROFILES", col2X, pad + S(424), cardW, S(150));
@@ -2890,6 +2981,10 @@ namespace PredatorControlApp
         {
             HighlightBtn(btn, ref _activePowerBtn);
             _currentPowerMode = mode;
+            _pendingTargetPowerMode = mode;
+            _powerModeTransitionLockUntilUtc = DateTime.UtcNow.AddMilliseconds(PowerModeTransitionLockMs);
+            _wmiHotkeyWatcher?.SuppressModeKeyUntil(_powerModeTransitionLockUntilUtc);
+
             if (!_isGameSyncOverriding)
             {
                 SaveState("Power", mode);
@@ -2984,9 +3079,13 @@ namespace PredatorControlApp
         private void HandleModeKeyPress()
         {
             if (_isClosing || IsDisposed) return;
+            if (DateTime.UtcNow < _powerModeTransitionLockUntilUtc)
+                return;
             if ((DateTime.UtcNow - _lastModeKeyUtc).TotalMilliseconds < 350)
                 return;
             _lastModeKeyUtc = DateTime.UtcNow;
+            _powerModeTransitionLockUntilUtc = DateTime.UtcNow.AddMilliseconds(PowerModeTransitionLockMs);
+            _wmiHotkeyWatcher?.SuppressModeKeyUntil(_powerModeTransitionLockUntilUtc);
 
             if (_modeKeyAction == 1) // Turbo Toggle
             {
@@ -3267,6 +3366,7 @@ namespace PredatorControlApp
                 _fanCurveForm.SetCpuCurve(_cpuCurvePoints.ToList());
                 _fanCurveForm.SetGpuCurve(_gpuCurvePoints.ToList());
             }
+            _fanCurveForm.SetHysteresis(_appSettings.FanHysteresisDegrees);
             _fanCurveForm.UpdateTemps(_cpuTemp, _gpuTemp);
 
             _fanCurveForm.ApplyClicked += (s, args) =>
@@ -3276,6 +3376,12 @@ namespace PredatorControlApp
                     _cpuCurvePoints = args.CpuPoints;
                     _gpuCurvePoints = args.GpuPoints;
                 }
+                int newHysteresis = Math.Clamp(args.HysteresisDegrees, CurveFollower.MinHysteresisDegrees, CurveFollower.MaxHysteresisDegrees);
+                _appSettings.FanHysteresisDegrees = newHysteresis;
+                _cpuCurveFollower.HysteresisDegrees = newHysteresis;
+                _gpuCurveFollower.HysteresisDegrees = newHysteresis;
+                _sysCurveFollower.HysteresisDegrees = newHysteresis;
+
                 _fanCurveEnabled = true;
                 _lastCurveCpuSpeed = -1;
                 _lastCurveGpuSpeed = -1;
@@ -3294,8 +3400,22 @@ namespace PredatorControlApp
 
                 SaveCurveToRegistry("CpuCurve", _cpuCurvePoints);
                 SaveCurveToRegistry("GpuCurve", _gpuCurvePoints);
+                SaveState("FanHysteresisDegrees", newHysteresis);
                 SaveState("FanCurveEnabled", 1);
                 SaveStateToHklm("FanCurveEnabled", 1);
+                _appSettings.Save();
+
+                SafeBeginInvoke(() =>
+                {
+                    if (_sliderEmbeddedHysteresis != null)
+                        _sliderEmbeddedHysteresis.Value = newHysteresis;
+                    if (_lblEmbeddedHysteresis != null)
+                        _lblEmbeddedHysteresis.Text = UiLabelFormatter.FormatHysteresisLabel(newHysteresis);
+                    if (_embeddedCurveCpu != null)
+                        _embeddedCurveCpu.Points = _cpuCurvePoints;
+                    if (_embeddedCurveGpu != null)
+                        _embeddedCurveGpu.Points = _gpuCurvePoints;
+                });
 
                 ApplyFanCurve(forceHardwareApply: true);
                 args.Success = true;
@@ -3435,6 +3555,509 @@ namespace PredatorControlApp
                 _isUpdatingBattery = false;
             }
         }
+
+        #region Battery Calibration & Wake Lock
+
+        private void BuildCalibrationOverlay()
+        {
+            _tipCalibration = new ToolTip();
+            _pnlCalibrationOverlay = new Panel
+            {
+                Name = "_pnlCalibrationOverlay",
+                Tag = "overlay",
+                Visible = false,
+                Dock = DockStyle.Fill,
+                BackColor = ThemeManager.FormBg
+            };
+            _pnlCalibrationOverlay.Paint += (s, e) =>
+            {
+                using var borderPen = new Pen(ThemeManager.CardBorder, 2f);
+                e.Graphics.DrawRectangle(borderPen, 1, 1, _pnlCalibrationOverlay.Width - 2, _pnlCalibrationOverlay.Height - 2);
+            };
+
+            int cardW = Math.Min(S(580), _formW - S(80));
+            int cardH = S(410);
+
+            var card = new Panel
+            {
+                Name = "cardCalibration",
+                Tag = "card",
+                Size = new Size(cardW, cardH),
+                BackColor = ThemeManager.CardBg,
+                Anchor = AnchorStyles.None
+            };
+            card.Location = new Point((_pnlCalibrationOverlay.ClientSize.Width - cardW) / 2, (_pnlCalibrationOverlay.ClientSize.Height - cardH) / 2);
+            card.Paint += (s, e) =>
+            {
+                using var pen = new Pen(ThemeManager.CardBorder, 1f);
+                e.Graphics.DrawRectangle(pen, 0, 0, card.Width - 1, card.Height - 1);
+            };
+
+            _pnlCalibrationOverlay.Resize += (s, e) =>
+            {
+                card.Location = new Point(Math.Max(0, (_pnlCalibrationOverlay.ClientSize.Width - card.Width) / 2),
+                                          Math.Max(0, (_pnlCalibrationOverlay.ClientSize.Height - card.Height) / 2));
+            };
+
+            int cPad = S(20);
+            int innerW = cardW - cPad * 2;
+
+            _lblCalibrationTitle = new Label
+            {
+                Text = "⚡ BATTERY CALIBRATION IN PROGRESS",
+                Font = FontTitle,
+                ForeColor = ThemeManager.HeaderText,
+                Location = new Point(cPad, S(16)),
+                AutoSize = true,
+                UseMnemonic = false
+            };
+            card.Controls.Add(_lblCalibrationTitle);
+
+            _lblCalibrationAwakeLock = new Label
+            {
+                Text = "🔒 System Awake Lock: Active",
+                Font = FontSectionHeader,
+                ForeColor = Color.FromArgb(0x00, 0xCC, 0x88),
+                Location = new Point(cPad, S(42)),
+                AutoSize = true,
+                UseMnemonic = false
+            };
+            card.Controls.Add(_lblCalibrationAwakeLock);
+
+            // Warning Banner + ToolTip
+            _pnlCalibrationWarning = new Panel
+            {
+                Location = new Point(cPad, S(68)),
+                Size = new Size(innerW, S(48)),
+                BackColor = Color.FromArgb(45, 35, 15)
+            };
+            _pnlCalibrationWarning.Paint += (s, e) =>
+            {
+                using var pen = new Pen(Color.FromArgb(230, 160, 30), 1f);
+                e.Graphics.DrawRectangle(pen, 0, 0, _pnlCalibrationWarning.Width - 1, _pnlCalibrationWarning.Height - 1);
+            };
+            _lblCalibrationWarning = new Label
+            {
+                Text = "⚠️ Warning: Keep AC adapter connected. Do not close lid or interrupt calibration.",
+                Font = FontBody,
+                ForeColor = Color.FromArgb(255, 200, 80),
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleCenter,
+                UseMnemonic = false
+            };
+            string warnTip = "Battery calibration cycles through 100% full charge and empty discharge to reset the hardware fuel gauge. Interrupting this process will restore prior settings.";
+            _tipCalibration.SetToolTip(_lblCalibrationWarning, warnTip);
+            _tipCalibration.SetToolTip(_pnlCalibrationWarning, warnTip);
+            _pnlCalibrationWarning.Controls.Add(_lblCalibrationWarning);
+            card.Controls.Add(_pnlCalibrationWarning);
+
+            // Phase label
+            _lblCalibrationPhase = new Label
+            {
+                Text = "Phase 1 / 2: Charging to Full (100%)",
+                Font = FontTitle,
+                ForeColor = ThemeManager.Accent,
+                Location = new Point(cPad, S(126)),
+                AutoSize = true,
+                UseMnemonic = false
+            };
+            card.Controls.Add(_lblCalibrationPhase);
+
+            // Battery % and Power Rate
+            _lblCalibrationBatteryPercent = new Label
+            {
+                Text = "--%",
+                Font = FontCalibrationPercent,
+                ForeColor = ThemeManager.TextPrimary,
+                Location = new Point(cPad, S(152)),
+                AutoSize = true,
+                UseMnemonic = false
+            };
+            card.Controls.Add(_lblCalibrationBatteryPercent);
+
+            _lblCalibrationPowerRate = new Label
+            {
+                Text = "Power Rate: Measuring...",
+                Font = FontBody,
+                ForeColor = ThemeManager.TextSecondary,
+                Location = new Point(cPad, S(194)),
+                AutoSize = true,
+                UseMnemonic = false
+            };
+            card.Controls.Add(_lblCalibrationPowerRate);
+
+            // Progress bar
+            _pbCalibration = new ProgressBar
+            {
+                Location = new Point(cPad, S(220)),
+                Size = new Size(innerW, S(18)),
+                Minimum = 0,
+                Maximum = 100,
+                Value = 0,
+                Style = ProgressBarStyle.Continuous
+            };
+            card.Controls.Add(_pbCalibration);
+
+            // ETA label
+            _lblCalibrationEta = new Label
+            {
+                Text = "Calculating remaining time...",
+                Font = FontSectionHeader,
+                ForeColor = ThemeManager.TextPrimary,
+                Location = new Point(cPad, S(248)),
+                AutoSize = true,
+                UseMnemonic = false
+            };
+            card.Controls.Add(_lblCalibrationEta);
+
+            // Last Calibrated
+            _lblCalibrationLastCalibrated = new Label
+            {
+                Text = UiLabelFormatter.FormatLastCalibrated(_appSettings.LastBatteryCalibrationUtcTicks),
+                Font = FontBody,
+                ForeColor = ThemeManager.TextSecondary,
+                Location = new Point(cPad, S(276)),
+                AutoSize = true,
+                UseMnemonic = false
+            };
+            card.Controls.Add(_lblCalibrationLastCalibrated);
+
+            // Cancel Button
+            _btnCancelCalibration = new PredatorButton
+            {
+                Text = "❌  Cancel Calibration",
+                Location = new Point(cPad, S(314)),
+                Size = new Size(innerW, S(36)),
+                UseMnemonic = false
+            };
+            _btnCancelCalibration.Click += (s, e) => CancelBatteryCalibration();
+            card.Controls.Add(_btnCancelCalibration);
+
+            _pnlCalibrationOverlay.Controls.Add(card);
+            _pageContainer.Controls.Add(_pnlCalibrationOverlay);
+        }
+
+        private void StartBatteryCalibration()
+        {
+            var result = MessageBox.Show(this,
+                "Battery Calibration will charge the battery to 100%, discharge it completely to calibrate the fuel gauge, and recharge it.\n\n" +
+                "• Keep AC adapter connected at all times.\n" +
+                "• System sleep and display timeout will be temporarily suspended.\n" +
+                "• This process may take several hours.\n\n" +
+                "Do you want to start Battery Calibration now?",
+                "Start Battery Calibration",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (result != DialogResult.Yes) return;
+
+            bool preLimit = _switchBatteryLimit != null && _switchBatteryLimit.Checked;
+            _appSettings.CalibrationPreChargeLimitEnabled = preLimit;
+
+            if (preLimit)
+            {
+                ApplyBatteryLimit(false);
+            }
+
+            PowerWakeLock.Acquire(displayRequired: true, awayMode: false);
+
+            var telemetry = BatteryCalibrationEtaCalculator.QueryTelemetry();
+            int currentPct = telemetry.BatteryPercent;
+            int initialPhase = currentPct >= 99 ? 2 : 1;
+
+            _appSettings.BatteryCalibrationPhase = initialPhase;
+            _appSettings.CalibrationLastKnownPercent = currentPct;
+            _appSettings.Save();
+            RegistrySafety.SaveCalibrationState(_appSettings.LastBatteryCalibrationUtcTicks, _appSettings.BatteryCalibrationPhase, _appSettings.CalibrationLastKnownPercent, _appSettings.CalibrationPreChargeLimitEnabled);
+
+            var now = DateTime.UtcNow;
+            _calibrationEtaCalc.Reset();
+            _calibrationEtaCalc.UpdatePercentage(currentPct, now);
+            if (telemetry.RemainingCapacity > 0)
+            {
+                _calibrationEtaCalc.UpdateCapacity(telemetry.RemainingCapacity, now);
+            }
+            _wmi.StartBatteryCalibration();
+
+            ShowCalibrationOverlay(true);
+            UpdateCalibrationOverlayUI(telemetry);
+        }
+
+        private void CancelBatteryCalibration()
+        {
+            var result = MessageBox.Show(this,
+                "Are you sure you want to cancel Battery Calibration?\n\n" +
+                "The calibration cycle will be stopped and normal charging behavior will be restored.",
+                "Cancel Battery Calibration",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+
+            if (result != DialogResult.Yes) return;
+
+            _wmi.StopBatteryCalibration();
+            PowerWakeLock.Release();
+
+            if (_appSettings.CalibrationPreChargeLimitEnabled)
+            {
+                ApplyBatteryLimit(true);
+            }
+
+            _appSettings.BatteryCalibrationPhase = 0;
+            _appSettings.CalibrationLastKnownPercent = -1;
+            _appSettings.Save();
+            RegistrySafety.SaveCalibrationState(_appSettings.LastBatteryCalibrationUtcTicks, 0, -1, false);
+
+            ShowCalibrationOverlay(false);
+            if (_lblLastCalibratedMain != null)
+            {
+                _lblLastCalibratedMain.Text = UiLabelFormatter.FormatLastCalibrated(_appSettings.LastBatteryCalibrationUtcTicks);
+            }
+        }
+
+        private void CompleteBatteryCalibration()
+        {
+            _wmi.StopBatteryCalibration();
+            PowerWakeLock.Release();
+
+            if (_appSettings.CalibrationPreChargeLimitEnabled)
+            {
+                ApplyBatteryLimit(true);
+            }
+
+            _appSettings.LastBatteryCalibrationUtcTicks = DateTime.UtcNow.Ticks;
+            _appSettings.BatteryCalibrationPhase = 0;
+            _appSettings.CalibrationLastKnownPercent = -1;
+            _appSettings.Save();
+            RegistrySafety.SaveCalibrationState(_appSettings.LastBatteryCalibrationUtcTicks, 0, -1, false);
+
+            ShowCalibrationOverlay(false);
+            if (_lblLastCalibratedMain != null)
+            {
+                _lblLastCalibratedMain.Text = UiLabelFormatter.FormatLastCalibrated(_appSettings.LastBatteryCalibrationUtcTicks);
+            }
+
+            MessageBox.Show(this,
+                "Battery Calibration has completed successfully!\n\n" +
+                "The battery fuel gauge has been recalibrated and your previous power settings have been restored.",
+                "Battery Calibration Complete",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+
+        private void RecoverInterruptedCalibrationOnStartup()
+        {
+            try
+            {
+                int phase = _appSettings.BatteryCalibrationPhase;
+                int lastPct = _appSettings.CalibrationLastKnownPercent;
+
+                if (phase == 0) return;
+
+                // Case 1: Post-shutdown cutoff at empty (Phase 2 discharging and shutdown at <= 15%)
+                if (phase == 2 && lastPct >= 0 && lastPct <= 15)
+                {
+                    _wmi.StopBatteryCalibration();
+                    PowerWakeLock.Release();
+
+                    if (_appSettings.CalibrationPreChargeLimitEnabled)
+                    {
+                        ApplyBatteryLimit(true);
+                    }
+
+                    _appSettings.LastBatteryCalibrationUtcTicks = DateTime.UtcNow.Ticks;
+                    _appSettings.BatteryCalibrationPhase = 0;
+                    _appSettings.CalibrationLastKnownPercent = -1;
+                    _appSettings.Save();
+                    RegistrySafety.SaveCalibrationState(_appSettings.LastBatteryCalibrationUtcTicks, 0, -1, false);
+
+                    if (_lblLastCalibratedMain != null)
+                    {
+                        _lblLastCalibratedMain.Text = UiLabelFormatter.FormatLastCalibrated(_appSettings.LastBatteryCalibrationUtcTicks);
+                    }
+                }
+                // Case 2: Interrupted at high percent or system crash/reboot
+                else
+                {
+                    bool isHardwareCalibrating = false;
+                    try
+                    {
+                        var status = _wmi.GetBatteryCalibrationStatus();
+                        isHardwareCalibrating = status != null && status.CalibrationOn;
+                    }
+                    catch { }
+
+                    if (isHardwareCalibrating)
+                    {
+                        PowerWakeLock.Acquire(displayRequired: true, awayMode: false);
+                        ShowCalibrationOverlay(true);
+                    }
+                    else
+                    {
+                        _wmi.StopBatteryCalibration();
+                        PowerWakeLock.Release();
+
+                        if (_appSettings.CalibrationPreChargeLimitEnabled)
+                        {
+                            ApplyBatteryLimit(true);
+                        }
+
+                        _appSettings.BatteryCalibrationPhase = 0;
+                        _appSettings.CalibrationLastKnownPercent = -1;
+                        _appSettings.Save();
+                        RegistrySafety.SaveCalibrationState(_appSettings.LastBatteryCalibrationUtcTicks, 0, -1, false);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Program.Report(ex, false);
+            }
+        }
+
+        private void ShowCalibrationOverlay(bool show)
+        {
+            if (_pnlCalibrationOverlay != null)
+            {
+                _pnlCalibrationOverlay.Visible = show;
+                if (show)
+                {
+                    _pnlCalibrationOverlay.BringToFront();
+                }
+            }
+        }
+
+        private void UpdateCalibrationOverlayTick()
+        {
+            try
+            {
+                if (!PowerWakeLock.IsLocked)
+                {
+                    PowerWakeLock.Acquire(displayRequired: true, awayMode: false);
+                }
+
+                var snap = BatteryCalibrationEtaCalculator.QueryTelemetry();
+                int currentPct = snap.BatteryPercent;
+                _appSettings.CalibrationLastKnownPercent = currentPct;
+
+                var now = DateTime.UtcNow;
+                _calibrationEtaCalc.UpdatePercentage(currentPct, now);
+                if (snap.RemainingCapacity > 0)
+                {
+                    _calibrationEtaCalc.UpdateCapacity(snap.RemainingCapacity, now);
+                }
+
+                if (_appSettings.BatteryCalibrationPhase == 1)
+                {
+                    if (currentPct >= 100)
+                    {
+                        _appSettings.BatteryCalibrationPhase = 2;
+                        _calibrationEtaCalc.Reset();
+                        _calibrationEtaCalc.UpdatePercentage(currentPct, now);
+                        if (snap.RemainingCapacity > 0)
+                        {
+                            _calibrationEtaCalc.UpdateCapacity(snap.RemainingCapacity, now);
+                        }
+                        RegistrySafety.SaveCalibrationState(_appSettings.LastBatteryCalibrationUtcTicks, _appSettings.BatteryCalibrationPhase, _appSettings.CalibrationLastKnownPercent, _appSettings.CalibrationPreChargeLimitEnabled);
+                    }
+                }
+                else if (_appSettings.BatteryCalibrationPhase == 2)
+                {
+                    if (currentPct <= 3 && snap.IsCharging)
+                    {
+                        CompleteBatteryCalibration();
+                        return;
+                    }
+                }
+
+                RegistrySafety.SaveCalibrationState(_appSettings.LastBatteryCalibrationUtcTicks, _appSettings.BatteryCalibrationPhase, _appSettings.CalibrationLastKnownPercent, _appSettings.CalibrationPreChargeLimitEnabled);
+
+                UpdateCalibrationOverlayUI(snap);
+            }
+            catch (Exception ex)
+            {
+                Program.Report(ex, false);
+            }
+        }
+
+        private void UpdateCalibrationOverlayUI(BatteryTelemetrySnapshot snap)
+        {
+            if (_pnlCalibrationOverlay == null || !_pnlCalibrationOverlay.Visible) return;
+
+            bool isChargingPhase = _appSettings.BatteryCalibrationPhase == 1;
+            double rate = isChargingPhase ? snap.ChargeRate : snap.DischargeRate;
+
+            var eta = _calibrationEtaCalc.CalculateEta(
+                _appSettings.BatteryCalibrationPhase,
+                snap.RemainingCapacity,
+                snap.FullChargedCapacity,
+                rate > 0 ? rate : null,
+                allowWarmupFallback: true,
+                batteryPercent: snap.BatteryPercent);
+
+            if (_lblCalibrationPhase != null)
+                _lblCalibrationPhase.Text = isChargingPhase ? "Phase 1 / 2: Charging to Full (100%)" : "Phase 2 / 2: Discharging to Empty (0%)";
+
+            if (_lblCalibrationBatteryPercent != null)
+                _lblCalibrationBatteryPercent.Text = $"{snap.BatteryPercent}%";
+
+            if (_pbCalibration != null)
+                _pbCalibration.Value = Math.Clamp(snap.BatteryPercent, 0, 100);
+
+            if (_lblCalibrationPowerRate != null)
+            {
+                double? activeRate = rate > 0 ? rate : _calibrationEtaCalc.SmoothedRate;
+                if (activeRate.HasValue && activeRate.Value > 0)
+                {
+                    double r = activeRate.Value;
+                    _lblCalibrationPowerRate.Text = r >= 1000
+                        ? $"Power Rate: {r / 1000.0:F1} W"
+                        : $"Power Rate: {r:F0} mW";
+                }
+                else if (_calibrationEtaCalc.SmoothedPercentPerMinute.HasValue && _calibrationEtaCalc.SmoothedPercentPerMinute.Value > 0)
+                {
+                    double pctPerHour = _calibrationEtaCalc.SmoothedPercentPerMinute.Value * 60.0;
+                    if (snap.FullChargedCapacity > 100)
+                    {
+                        double estW = (pctPerHour / 100.0) * snap.FullChargedCapacity / 1000.0;
+                        _lblCalibrationPowerRate.Text = $"Power Rate: ~{estW:F1} W";
+                    }
+                    else
+                    {
+                        _lblCalibrationPowerRate.Text = $"Rate: ~{_calibrationEtaCalc.SmoothedPercentPerMinute.Value:F2} %/min";
+                    }
+                }
+                else
+                {
+                    _lblCalibrationPowerRate.Text = isChargingPhase ? "Power Rate: Measuring (~35 W)" : "Power Rate: Measuring (~25 W)";
+                }
+            }
+
+            if (_lblCalibrationEta != null)
+                _lblCalibrationEta.Text = UiLabelFormatter.FormatCalibrationEta(eta, isChargingPhase);
+
+            if (_lblCalibrationLastCalibrated != null)
+                _lblCalibrationLastCalibrated.Text = UiLabelFormatter.FormatLastCalibrated(_appSettings.LastBatteryCalibrationUtcTicks);
+
+            if (_lblLastCalibratedMain != null)
+                _lblLastCalibratedMain.Text = UiLabelFormatter.FormatLastCalibrated(_appSettings.LastBatteryCalibrationUtcTicks);
+        }
+
+        private void OnSessionEnding(object? sender, SessionEndingEventArgs e)
+        {
+            try
+            {
+                if (_appSettings.BatteryCalibrationPhase != 0)
+                {
+                    var p = SystemInformation.PowerStatus;
+                    int pct = (int)Math.Round(Math.Clamp(p.BatteryLifePercent, 0f, 1f) * 100.0);
+                    _appSettings.CalibrationLastKnownPercent = pct;
+                    RegistrySafety.SaveCalibrationState(_appSettings.LastBatteryCalibrationUtcTicks, _appSettings.BatteryCalibrationPhase, _appSettings.CalibrationLastKnownPercent, _appSettings.CalibrationPreChargeLimitEnabled);
+                }
+            }
+            catch { }
+        }
+
+        #endregion
 
         private void ApplyRgbModeFromDropdown(int mode)
         {
@@ -3771,6 +4394,7 @@ namespace PredatorControlApp
                             case "AutoFanAC": _appSettings.AutoFanAC = value; break;
                             case "AutoFanBattery": _appSettings.AutoFanBattery = value; break;
                             case "FanCurveEnabled": _appSettings.FanCurveEnabled = value == 1; break;
+                            case "FanHysteresisDegrees": _appSettings.FanHysteresisDegrees = value; break;
                             case "FanSpeedCpu": _appSettings.FanSpeedCpu = value; break;
                             case "FanSpeedGpu": _appSettings.FanSpeedGpu = value; break;
                             case "FanSpeedSys": _appSettings.FanSpeedSys = value; break;
@@ -4088,14 +4712,7 @@ namespace PredatorControlApp
                                 _isUpdatingBattery = false;
                             };
 
-                            if (IsHandleCreated)
-                            {
-                                SafeBeginInvoke(disableAction);
-                            }
-                            else
-                            {
-                                HandleCreated += (s, e) => SafeBeginInvoke(disableAction);
-                            }
+                            SafeBeginInvoke(disableAction);
                         }
                     }
                     catch { }
@@ -4412,6 +5029,11 @@ namespace PredatorControlApp
                 }
             }
 
+            if (_appSettings.BatteryCalibrationPhase != 0)
+            {
+                UpdateCalibrationOverlayTick();
+            }
+
             if (_isSleeping || _isLidClosed)
                 return;
 
@@ -4479,19 +5101,30 @@ namespace PredatorControlApp
                                 _cpuSensorMisses = 0;
                             }
 
+                            if (DateTime.UtcNow < _powerModeTransitionLockUntilUtc)
+                            {
+                                if (_wmi.TryGetPowerMode(out byte hwPowerMode) && hwPowerMode == _pendingTargetPowerMode)
+                                {
+                                    _powerModeTransitionLockUntilUtc = DateTime.MinValue;
+                                }
+                            }
+
                             if (!onBattery && _isPluggedIn == true && _currentPowerMode != 0x06 && (DateTime.UtcNow - _lastFirmwareReassert).TotalSeconds >= 30)
                             {
-                                _lastFirmwareReassert = DateTime.UtcNow;
-                                byte pMode = GetCurrentPowerByte();
-                                byte fMode = GetCurrentFanByte();
-                                Task.Run(() =>
+                                if (DateTime.UtcNow >= _powerModeTransitionLockUntilUtc)
                                 {
-                                    _wmi.SetPowerMode(pMode);
-                                    if (fMode != 0x03)
+                                    _lastFirmwareReassert = DateTime.UtcNow;
+                                    byte pMode = GetCurrentPowerByte();
+                                    byte fMode = GetCurrentFanByte();
+                                    Task.Run(() =>
                                     {
-                                        _wmi.SetFanBehavior(fMode, false);
-                                    }
-                                });
+                                        _wmi.SetPowerMode(pMode);
+                                        if (fMode != 0x03)
+                                        {
+                                            _wmi.SetFanBehavior(fMode, false);
+                                        }
+                                    });
+                                }
                             }
 
                             if (isWindowVisible)
@@ -5021,7 +5654,6 @@ namespace PredatorControlApp
                 int waited = 0;
                 while (Interlocked.CompareExchange(ref _telemetryRunning, 0, 0) == 1 && waited < 40)
                 {
-                    Application.DoEvents();
                     Thread.Sleep(25);
                     waited++;
                 }
@@ -5037,6 +5669,7 @@ namespace PredatorControlApp
                 try { _pipeServer?.Dispose(); } catch { }
                 try { _colorPicker.Dispose(); } catch { }
                 try { _fanCurveForm?.Dispose(); } catch { }
+                try { PowerWakeLock.Release(); } catch { }
                 base.OnFormClosing(e);
             }
         }

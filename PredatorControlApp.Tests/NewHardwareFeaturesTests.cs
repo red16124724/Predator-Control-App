@@ -359,6 +359,288 @@ namespace PredatorControlApp.Tests
         private static extern SafeFileHandle CreateFile(
             string lpFileName, uint dwDesiredAccess, uint dwShareMode,
             IntPtr lpSecurityAttributes, uint dwCreationDisposition, uint dwFlagsAndAttributes, IntPtr hTemplateFile);
+
+        #region Battery Calibration ETA & Recovery Tests
+
+        [Fact]
+        public void BatteryCalibrationEtaCalculator_ChargingEta_CalculatesAccurately()
+        {
+            var calc = new BatteryCalibrationEtaCalculator(alpha: 1.0);
+            var eta = calc.CalculateEta(phase: 1, remainingCapacity: 30000, fullCapacity: 60000, directRate: 30000);
+            Assert.NotNull(eta);
+            Assert.Equal(60, Math.Round(eta!.Value.TotalMinutes));
+        }
+
+        [Fact]
+        public void BatteryCalibrationEtaCalculator_DischargingEta_CalculatesAccurately()
+        {
+            var calc = new BatteryCalibrationEtaCalculator(alpha: 1.0);
+            var eta = calc.CalculateEta(phase: 2, remainingCapacity: 30000, fullCapacity: 60000, directRate: 15000);
+            Assert.NotNull(eta);
+            Assert.Equal(120, Math.Round(eta!.Value.TotalMinutes));
+        }
+
+        [Theory]
+        [InlineData(0)]
+        [InlineData(-100)]
+        public void BatteryCalibrationEtaCalculator_ZeroOrNegativeRate_ReturnsNullWithoutThrowing(double rate)
+        {
+            var calc = new BatteryCalibrationEtaCalculator();
+            var eta = calc.CalculateEta(phase: 1, remainingCapacity: 30000, fullCapacity: 60000, directRate: rate);
+            Assert.Null(eta);
+        }
+
+        [Fact]
+        public void BatteryCalibrationEtaCalculator_EmaSmoothing_DampensRateJitter()
+        {
+            var calc = new BatteryCalibrationEtaCalculator(alpha: 0.2);
+            calc.UpdateDirectRate(10000);
+            calc.UpdateDirectRate(20000);
+
+            Assert.NotNull(calc.SmoothedRate);
+            Assert.Equal(12000.0, calc.SmoothedRate!.Value, 1);
+        }
+
+        [Fact]
+        public void BatteryCalibrationEtaCalculator_PercentageFallback_CalculatesAccurately()
+        {
+            var calc = new BatteryCalibrationEtaCalculator(alpha: 1.0);
+            var t0 = DateTime.UtcNow;
+            calc.UpdatePercentage(50, t0);
+            calc.UpdatePercentage(52, t0.AddMinutes(2));
+
+            var eta = calc.CalculateEta(phase: 1, remainingCapacity: 52, fullCapacity: 100, directRate: null);
+            Assert.NotNull(eta);
+            Assert.Equal(48, Math.Round(eta!.Value.TotalMinutes));
+        }
+
+        [Fact]
+        public void BatteryCalibrationEtaCalculator_Reset_ClearsAllInternalState()
+        {
+            var calc = new BatteryCalibrationEtaCalculator();
+            calc.UpdateDirectRate(15000);
+            calc.UpdatePercentage(50, DateTime.UtcNow);
+
+            calc.Reset();
+
+            Assert.Null(calc.SmoothedRate);
+            Assert.Null(calc.LastPercent);
+            Assert.Null(calc.SmoothedPercentPerMinute);
+        }
+
+        [Fact]
+        public void BatteryCalibration_WhenDirectRateUnavailable_Phase2_CalculatesFromPercentageDelta()
+        {
+            var calc = new BatteryCalibrationEtaCalculator(alpha: 1.0);
+            var t0 = DateTime.UtcNow;
+
+            // Telemetry tick 1: 90%
+            calc.UpdatePercentage(90, t0);
+            // Telemetry tick 2: 86% after 4 minutes -> rate = (90 - 86) / 4 = 1.0% per min
+            calc.UpdatePercentage(86, t0.AddMinutes(4));
+
+            // Phase 2 (Discharging): current 86% -> 86 minutes remaining to empty
+            var eta = calc.CalculateEta(phase: 2, remainingCapacity: 86, fullCapacity: 100, directRate: 0);
+
+            Assert.NotNull(eta);
+            Assert.Equal(86, Math.Round(eta!.Value.TotalMinutes));
+        }
+
+        [Fact]
+        public void BatteryCalibration_WarmupFallback_ImmediateValidEta()
+        {
+            var calc = new BatteryCalibrationEtaCalculator();
+
+            // Direct rate is 0 and no percentage history yet, but allowWarmupFallback is true
+            var etaCharging = calc.CalculateEta(phase: 1, remainingCapacity: 60, fullCapacity: 100, directRate: 0, allowWarmupFallback: true, batteryPercent: 60);
+            Assert.NotNull(etaCharging);
+            // 40% remaining * 1.5 min = 60 mins
+            Assert.Equal(60, Math.Round(etaCharging!.Value.TotalMinutes));
+
+            var etaDischarging = calc.CalculateEta(phase: 2, remainingCapacity: 60, fullCapacity: 100, directRate: 0, allowWarmupFallback: true, batteryPercent: 60);
+            Assert.NotNull(etaDischarging);
+            Assert.True(etaDischarging!.Value.TotalMinutes > 0);
+
+            // Static helper direct check
+            var staticCharging = BatteryCalibrationEtaCalculator.GetWarmupFallbackEta(1, 70);
+            Assert.NotNull(staticCharging);
+            Assert.Equal(45, Math.Round(staticCharging!.Value.TotalMinutes)); // 30% * 1.5 = 45m
+        }
+
+        [Fact]
+        public void BatteryCalibration_RapidUpdatesUnderThreeSeconds_AreIgnoredToPreventJitter()
+        {
+            var calc = new BatteryCalibrationEtaCalculator(alpha: 1.0);
+            var t0 = DateTime.UtcNow;
+            calc.UpdatePercentage(50, t0);
+
+            // Rapid jitter: update 1.5 seconds later (0.025 min < 0.05 min threshold)
+            calc.UpdatePercentage(55, t0.AddSeconds(1.5));
+            Assert.Null(calc.SmoothedPercentPerMinute); // Ignored
+            Assert.Equal(50, calc.LastPercent); // Baseline unchanged
+
+            // Valid update: 4 seconds later (0.0667 min >= 0.05 min threshold)
+            calc.UpdatePercentage(52, t0.AddSeconds(4));
+            Assert.NotNull(calc.SmoothedPercentPerMinute);
+            Assert.Equal(52, calc.LastPercent);
+            Assert.Equal(30.0, calc.SmoothedPercentPerMinute!.Value, 1);
+        }
+
+        [Fact]
+        public void BatteryCalibration_Pipeline_WarmupToCalculationToLabelFormat()
+        {
+            var calc = new BatteryCalibrationEtaCalculator(alpha: 1.0);
+            var t0 = DateTime.UtcNow;
+
+            // 1. Initial State: Without fallback, returns null -> "Calculating remaining time..."
+            var eta0 = calc.CalculateEta(phase: 1, remainingCapacity: 20, fullCapacity: 100, directRate: 0, allowWarmupFallback: false);
+            string label0 = UiLabelFormatter.FormatCalibrationEta(eta0, isCharging: true);
+            Assert.Equal("Calculating remaining time...", label0);
+
+            // 2. Initial State: With warmup fallback, immediately provides valid formatted ETA!
+            var etaWarmup = calc.CalculateEta(phase: 1, remainingCapacity: 20, fullCapacity: 100, directRate: 0, allowWarmupFallback: true, batteryPercent: 20);
+            Assert.NotNull(etaWarmup);
+            string labelWarmup = UiLabelFormatter.FormatCalibrationEta(etaWarmup, isCharging: true);
+            Assert.StartsWith("Estimated Time Remaining (Charging):", labelWarmup);
+            Assert.DoesNotContain("Calculating", labelWarmup);
+
+            // 3. Second tick (warmed up: +5% in 10 minutes -> 0.5% per minute)
+            calc.UpdatePercentage(20, t0);
+            calc.UpdatePercentage(25, t0.AddMinutes(10));
+            // Remaining 75% / 0.5% per min = 150 minutes (02h 30m)
+            var eta2 = calc.CalculateEta(phase: 1, remainingCapacity: 25, fullCapacity: 100, directRate: 0);
+            Assert.NotNull(eta2);
+            string label2 = UiLabelFormatter.FormatCalibrationEta(eta2, isCharging: true);
+            Assert.Equal("Estimated Time Remaining (Charging): 02h 30m", label2);
+
+            // 4. Switch to Phase 2 (Discharge: 80% down to 78% in 3 minutes -> 0.667% per minute)
+            calc.Reset();
+            calc.UpdatePercentage(80, t0);
+            calc.UpdatePercentage(78, t0.AddMinutes(3));
+            var eta3 = calc.CalculateEta(phase: 2, remainingCapacity: 78, fullCapacity: 100, directRate: 0);
+            Assert.NotNull(eta3);
+            string label3 = UiLabelFormatter.FormatCalibrationEta(eta3, isCharging: false);
+            Assert.Equal("Estimated Time Remaining (Discharging): 01h 57m", label3);
+        }
+
+        [Theory]
+        [InlineData(0, true)]
+        [InlineData(5, true)]
+        [InlineData(15, true)]
+        [InlineData(16, false)]
+        [InlineData(50, false)]
+        public void BatteryCalibration_PostShutdownRecovery_Logic_CutoffVsInterrupted(int lastPercent, bool expectedSuccess)
+        {
+            var settings = new AppSettings
+            {
+                BatteryCalibrationPhase = 2,
+                CalibrationLastKnownPercent = lastPercent,
+                CalibrationPreChargeLimitEnabled = true,
+                LastBatteryCalibrationUtcTicks = 0
+            };
+
+            bool completed = settings.BatteryCalibrationPhase == 2 && settings.CalibrationLastKnownPercent >= 0 && settings.CalibrationLastKnownPercent <= 15;
+            if (completed)
+            {
+                settings.LastBatteryCalibrationUtcTicks = 999999L;
+            }
+            if (settings.CalibrationPreChargeLimitEnabled)
+            {
+                settings.BatteryLimit = true;
+            }
+            settings.BatteryCalibrationPhase = 0;
+            settings.CalibrationLastKnownPercent = -1;
+
+            Assert.Equal(expectedSuccess, completed);
+            Assert.Equal(0, settings.BatteryCalibrationPhase);
+            Assert.Equal(-1, settings.CalibrationLastKnownPercent);
+            Assert.True(settings.BatteryLimit);
+            if (expectedSuccess)
+            {
+                Assert.Equal(999999L, settings.LastBatteryCalibrationUtcTicks);
+            }
+            else
+            {
+                Assert.Equal(0L, settings.LastBatteryCalibrationUtcTicks);
+            }
+        }
+
+        [Fact]
+        public void BatteryCalibrationEtaCalculator_CapacityDelta_CalculatesRateAndEtaAccurately()
+        {
+            var calc = new BatteryCalibrationEtaCalculator(alpha: 1.0);
+            var t0 = DateTime.UtcNow;
+
+            // t0: 50,000 mWh
+            calc.UpdateCapacity(50000, t0);
+            Assert.Equal(50000, calc.LastCapacity);
+            Assert.Null(calc.SmoothedRate);
+
+            // t0 + 30s: 50,250 mWh (delta = 250 mWh in 30 seconds = 30,000 mW = 30W)
+            calc.UpdateCapacity(50250, t0.AddSeconds(30));
+            Assert.NotNull(calc.SmoothedRate);
+            Assert.Equal(30000.0, calc.SmoothedRate!.Value, 1);
+
+            // Full capacity 60,000 mWh, remaining 50,250 mWh -> delta = 9,750 mWh
+            // Hours = 9,750 / 30,000 = 0.325 hours = 19.5 minutes
+            var eta = calc.CalculateEta(phase: 1, remainingCapacity: 50250, fullCapacity: 60000, directRate: null);
+            Assert.NotNull(eta);
+            Assert.Equal(20, Math.Round(eta!.Value.TotalMinutes));
+        }
+
+        [Fact]
+        public void BatteryCalibrationEtaCalculator_CapacityDelta_RejectsJitterUnderSixSeconds()
+        {
+            var calc = new BatteryCalibrationEtaCalculator(alpha: 1.0);
+            var t0 = DateTime.UtcNow;
+
+            calc.UpdateCapacity(50000, t0);
+            // 3 seconds later (< 6 seconds threshold)
+            calc.UpdateCapacity(50050, t0.AddSeconds(3));
+            Assert.Null(calc.SmoothedRate);
+            Assert.Equal(50000, calc.LastCapacity);
+
+            // 10 seconds later (>= 6 seconds threshold)
+            calc.UpdateCapacity(50083, t0.AddSeconds(10)); // 83 mWh / (10/3600) = ~29880 mW
+            Assert.NotNull(calc.SmoothedRate);
+            Assert.Equal(50083, calc.LastCapacity);
+        }
+
+        [Fact]
+        public void BatteryCalibrationEtaCalculator_CapacityDelta_DischargingEta_CalculatesAccurately()
+        {
+            var calc = new BatteryCalibrationEtaCalculator(alpha: 1.0);
+            var t0 = DateTime.UtcNow;
+
+            // Discharging: drops from 40,000 mWh to 39,875 mWh in 30s (delta = 125 mWh = 15,000 mW)
+            calc.UpdateCapacity(40000, t0);
+            calc.UpdateCapacity(39875, t0.AddSeconds(30));
+            Assert.NotNull(calc.SmoothedRate);
+            Assert.Equal(15000.0, calc.SmoothedRate!.Value, 1);
+
+            // Phase 2: remaining 39,875 mWh -> hours = 39,875 / 15,000 = 2.658 hours = 159.5 minutes
+            var eta = calc.CalculateEta(phase: 2, remainingCapacity: 39875, fullCapacity: 60000, directRate: null);
+            Assert.NotNull(eta);
+            Assert.Equal(160, Math.Round(eta!.Value.TotalMinutes));
+        }
+
+        [Fact]
+        public void BatteryCalibrationEtaCalculator_InferRateFromPercentPerMinute_WhenFullCapacityKnown()
+        {
+            var calc = new BatteryCalibrationEtaCalculator(alpha: 1.0);
+            var t0 = DateTime.UtcNow;
+
+            // 1% per minute with 60,000 mWh pack -> inferred 600 mWh/min = 36,000 mW
+            calc.UpdatePercentage(50, t0);
+            calc.UpdatePercentage(51, t0.AddMinutes(1));
+
+            var eta = calc.CalculateEta(phase: 1, remainingCapacity: 50000, fullCapacity: 60000, directRate: null);
+            Assert.NotNull(eta);
+            Assert.NotNull(calc.SmoothedRate);
+            Assert.Equal(36000.0, calc.SmoothedRate!.Value, 1);
+        }
+
+        #endregion
     }
 }
 

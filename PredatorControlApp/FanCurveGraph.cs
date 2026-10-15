@@ -302,6 +302,7 @@ namespace PredatorControlApp
 
         protected override void OnPaint(PaintEventArgs e)
         {
+            if (Width <= PadLeft + PadRight || Height <= PadTop + PadBottom) return;
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
@@ -378,7 +379,7 @@ namespace PredatorControlApp
 
         private void DrawCurveFill(Graphics g, RectangleF area)
         {
-            if (_points.Count < 2) return;
+            if (_points.Count < 2 || area.Height <= 0 || area.Width <= 0) return;
 
             using var path = new GraphicsPath();
             var pixels = _points.Select(CurvePointToPixel).ToArray();
@@ -575,7 +576,7 @@ namespace PredatorControlApp
 
                     int lo = _points[_dragIndex - 1].X + MinTempGap;
                     int hi = _points[_dragIndex + 1].X - MinTempGap;
-                    temp = lo > hi ? (lo + hi) / 2 : Math.Clamp(temp, lo, hi);
+                    temp = lo > hi ? _points[_dragIndex].X : Math.Clamp(temp, lo, hi);
                 }
 
                 var updated = new Point(temp, speed);

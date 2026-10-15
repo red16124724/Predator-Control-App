@@ -30,7 +30,12 @@ namespace PredatorControlApp
             set
             {
                 int clamped = Math.Clamp(value, _minimum, _maximum);
-                if (clamped != _value) { _value = clamped; Invalidate(); }
+                if (clamped != _value)
+                {
+                    _value = clamped;
+                    Invalidate();
+                    ValueChanged?.Invoke(this, EventArgs.Empty);
+                }
             }
         }
 
@@ -95,6 +100,7 @@ namespace PredatorControlApp
 
         protected override void OnPaint(PaintEventArgs e)
         {
+            if (Width <= ThumbRadius * 2 || Height <= TrackHeight) return;
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.Clear(Parent?.BackColor ?? ThemeManager.CardBg);
@@ -194,23 +200,19 @@ namespace PredatorControlApp
                 case Keys.Left:
                 case Keys.Down:
                     Value = Math.Max(_minimum, _value - step);
-                    ValueChanged?.Invoke(this, EventArgs.Empty);
                     ValueCommitted?.Invoke(this, EventArgs.Empty);
                     return true;
                 case Keys.Right:
                 case Keys.Up:
                     Value = Math.Min(_maximum, _value + step);
-                    ValueChanged?.Invoke(this, EventArgs.Empty);
                     ValueCommitted?.Invoke(this, EventArgs.Empty);
                     return true;
                 case Keys.Home:
                     Value = _minimum;
-                    ValueChanged?.Invoke(this, EventArgs.Empty);
                     ValueCommitted?.Invoke(this, EventArgs.Empty);
                     return true;
                 case Keys.End:
                     Value = _maximum;
-                    ValueChanged?.Invoke(this, EventArgs.Empty);
                     ValueCommitted?.Invoke(this, EventArgs.Empty);
                     return true;
             }

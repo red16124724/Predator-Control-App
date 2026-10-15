@@ -99,6 +99,7 @@ namespace PredatorControlApp
 
         protected override void OnPaint(PaintEventArgs e)
         {
+            if (Width <= 3 || Height <= 3) return;
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.Clear(Parent?.BackColor ?? ThemeManager.CardBg);
@@ -161,6 +162,13 @@ namespace PredatorControlApp
         private static GraphicsPath GetRoundedRectPath(Rectangle rect, int radius)
         {
             var path = new GraphicsPath();
+            if (rect.Width <= 0 || rect.Height <= 0)
+            {
+                path.AddRectangle(new Rectangle(rect.X, rect.Y, Math.Max(1, rect.Width), Math.Max(1, rect.Height)));
+                return path;
+            }
+            int maxRadius = Math.Max(1, Math.Min(rect.Width, rect.Height) / 2);
+            radius = Math.Clamp(radius, 1, maxRadius);
             int diameter = radius * 2;
             path.AddArc(rect.X, rect.Y, diameter, diameter, 180, 90);
             path.AddArc(rect.Right - diameter, rect.Y, diameter, diameter, 270, 90);
@@ -176,6 +184,7 @@ namespace PredatorControlApp
             {
                 ThemeManager.ThemeChanged -= _themeHandler;
                 _animTimer.Stop();
+                _animTimer.Tick -= OnAnimTick;
                 _animTimer.Dispose();
             }
             base.Dispose(disposing);

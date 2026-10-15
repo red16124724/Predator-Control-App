@@ -2,8 +2,8 @@
 
 <div align="center">
 
-![Predator Control App](https://img.shields.io/badge/Predator_Control-v1.4.0-red?style=for-the-badge&logo=acer&logoColor=white)
-[![Latest Release](https://img.shields.io/badge/Download-v1.4.0_Standalone-brightgreen?style=for-the-badge&logo=github)](https://github.com/red16124724/Predator-Control-App/releases)
+![Predator Control App](https://img.shields.io/badge/Predator_Control-v1.4.1-red?style=for-the-badge&logo=acer&logoColor=white)
+[![Latest Release](https://img.shields.io/badge/Download-v1.4.1_Standalone-brightgreen?style=for-the-badge&logo=github)](https://github.com/red16124724/Predator-Control-App/releases)
 [![Platform](https://img.shields.io/badge/Windows-10%20%7C%2011%20(64--bit)-blue?style=for-the-badge&logo=windows)](https://github.com/red16124724/Predator-Control-App/releases)
 [![License](https://img.shields.io/badge/License-MIT-orange?style=for-the-badge)](LICENSE)
 [![No Install Needed](https://img.shields.io/badge/Portable-Zero_Install_Required-purple?style=for-the-badge)](#-quick-start--easy-installation-for-beginners)
@@ -144,18 +144,6 @@ Predator Control App is built with a **strict offline-first privacy architecture
 - ❌ **No Background Web Traffic**: The application never touches the internet on startup or while running in the background.
 - 🔒 **Secure On-Demand Updates Only**: The app only connects to GitHub when you explicitly click the "Check for Updates" button.
 - 🛡️ **SHA-256 Checksum Verification**: Every download is verified against published cryptographic hashes to protect against tampering.
-
-
-
-<img width="2510" height="1384" alt="image" src="https://github.com/user-attachments/assets/9b314410-fec7-4ceb-af88-52d6e8d0823e" />
-
-<img width="2532" height="1412" alt="image" src="https://github.com/user-attachments/assets/fc7a9cea-63e5-4ee6-b2d1-7419d344c0fe" />
-
-<img width="2544" height="1406" alt="image" src="https://github.com/user-attachments/assets/69df58b8-ca2e-42c3-9640-29fe1a7a6067" />
-
-<img width="2550" height="1380" alt="image" src="https://github.com/user-attachments/assets/f64809f2-a455-44d7-9517-b854bb4bc6ed" />
-
-<img width="2554" height="1414" alt="image" src="https://github.com/user-attachments/assets/534930c6-3f12-4006-82a0-7ee3d3ae1602" />
 
 ---
 

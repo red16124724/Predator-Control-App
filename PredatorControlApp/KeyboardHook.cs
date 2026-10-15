@@ -251,6 +251,16 @@ namespace PredatorControlApp
                 _hookId = IntPtr.Zero;
             }
             GC.KeepAlive(_proc);
+            GC.SuppressFinalize(this);
+        }
+
+        ~KeyboardHook()
+        {
+            if (_hookId != IntPtr.Zero)
+            {
+                UnhookWindowsHookEx(_hookId);
+                _hookId = IntPtr.Zero;
+            }
         }
     }
 }

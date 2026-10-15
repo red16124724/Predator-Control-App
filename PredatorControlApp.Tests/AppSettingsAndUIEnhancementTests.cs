@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Text.Json;
+using PredatorControlApp;
 using Xunit;
 
 namespace PredatorControlApp.Tests
@@ -401,6 +402,329 @@ namespace PredatorControlApp.Tests
             Assert.Equal(Color.FromArgb(0, 220, 255), customLabel.ForeColor);
             // accent must be overwritten with ThemeManager.Accent
             Assert.Equal(ThemeManager.Accent, accentLabel.ForeColor);
+        }
+
+        #endregion
+
+        #region Fan Hysteresis Persistence and UI Tests
+
+        [Fact]
+        public void AppSettings_FanHysteresisDegrees_DefaultsToTwo()
+        {
+            var settings = new AppSettings();
+            Assert.Equal(CurveFollower.DefaultHysteresisDegrees, settings.FanHysteresisDegrees);
+            Assert.Equal(2, settings.FanHysteresisDegrees);
+        }
+
+        [Fact]
+        public void AppSettings_FanHysteresisDegrees_SerializationAndSnapshotRoundTrip()
+        {
+            var original = new AppSettings
+            {
+                FanHysteresisDegrees = 6
+            };
+
+            // Test CreateSnapshot
+            var snapshot = original.CreateSnapshot();
+            Assert.Equal(6, snapshot.FanHysteresisDegrees);
+
+            // Test JSON serialization
+            string json = JsonSerializer.Serialize(original);
+            var deserialized = JsonSerializer.Deserialize<AppSettings>(json);
+            Assert.NotNull(deserialized);
+            Assert.Equal(6, deserialized!.FanHysteresisDegrees);
+        }
+
+        [Theory]
+        [InlineData(-10, 0)]
+        [InlineData(-1, 0)]
+        [InlineData(0, 0)]
+        [InlineData(5, 5)]
+        [InlineData(10, 10)]
+        [InlineData(15, 10)]
+        public void AppSettings_FanHysteresisDegrees_Sanitize_ClampsOutOfRange(int input, int expected)
+        {
+            var settings = new AppSettings
+            {
+                FanHysteresisDegrees = input
+            };
+            settings.Sanitize();
+            Assert.Equal(expected, settings.FanHysteresisDegrees);
+        }
+
+        [Fact]
+        public void UiLabelFormatter_FormatHysteresisLabel_FormatsCorrectly()
+        {
+            Assert.Equal("Hysteresis: 0°C (Instant)", UiLabelFormatter.FormatHysteresisLabel(0));
+            Assert.Equal("Hysteresis: 1°C", UiLabelFormatter.FormatHysteresisLabel(1));
+            Assert.Equal("Hysteresis: 2°C", UiLabelFormatter.FormatHysteresisLabel(2));
+            Assert.Equal("Hysteresis: 5°C", UiLabelFormatter.FormatHysteresisLabel(5));
+            Assert.Equal("Hysteresis: 10°C", UiLabelFormatter.FormatHysteresisLabel(10));
+        }
+
+        [Fact]
+        public void FanCurveForm_HysteresisControl_BindsToAppSettingsAndFiresApply()
+        {
+            using var form = new FanCurveForm();
+
+            // Default hysteresis
+            Assert.Equal(CurveFollower.DefaultHysteresisDegrees, form.HysteresisDegrees);
+            Assert.Equal(CurveFollower.DefaultHysteresisDegrees, form.HysteresisSlider.Value);
+            Assert.Equal("Hysteresis: 2°C", form.HysteresisLabel.Text);
+
+            // Change hysteresis via SetHysteresis
+            form.SetHysteresis(5);
+            Assert.Equal(5, form.HysteresisDegrees);
+            Assert.Equal(5, form.HysteresisSlider.Value);
+            Assert.Equal("Hysteresis: 5°C", form.HysteresisLabel.Text);
+
+            // Change hysteresis to 0
+            form.SetHysteresis(0);
+            Assert.Equal(0, form.HysteresisDegrees);
+            Assert.Equal(0, form.HysteresisSlider.Value);
+            Assert.Equal("Hysteresis: 0°C (Instant)", form.HysteresisLabel.Text);
+
+            // Slider value change event
+            form.HysteresisSlider.Value = 8;
+            Assert.Equal(8, form.HysteresisDegrees);
+            Assert.Equal("Hysteresis: 8°C", form.HysteresisLabel.Text);
+
+            // ApplyClicked event fires with updated HysteresisDegrees
+            FanCurveApplyEventArgs? receivedArgs = null;
+            form.ApplyClicked += (s, args) =>
+            {
+                receivedArgs = args;
+                args.Success = true;
+            };
+
+            form.ApplyCurves();
+            Assert.NotNull(receivedArgs);
+            Assert.Equal(8, receivedArgs!.HysteresisDegrees);
+
+            // Reset restores default hysteresis (2°C)
+            form.ResetDefaults();
+            Assert.Equal(CurveFollower.DefaultHysteresisDegrees, form.HysteresisDegrees);
+            Assert.Equal(CurveFollower.DefaultHysteresisDegrees, form.HysteresisSlider.Value);
+            Assert.Equal("Hysteresis: 2°C", form.HysteresisLabel.Text);
+        }
+
+        [Fact]
+        public void FanCurveForm_Hysteresis_AutoScrollAndLayout_Verified()
+        {
+            using var form = new FanCurveForm();
+            Assert.True(form.AutoScroll, "FanCurveForm must have AutoScroll enabled to prevent high-DPI clipping.");
+            Assert.True(form.AutoScrollMinSize.Height >= 580);
+            Assert.NotNull(form.HysteresisSlider);
+            Assert.NotNull(form.HysteresisLabel);
+            Assert.True(form.Controls.Contains(form.HysteresisSlider));
+            Assert.True(form.Controls.Contains(form.HysteresisLabel));
+        }
+
+        [Fact]
+        public void Form1_EmbeddedHysteresisSlider_PresentAndBoundToSettingsAndFollowers()
+        {
+            Exception? error = null;
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    using var form = new Form1();
+                    Assert.NotNull(form.EmbeddedHysteresisSlider);
+                    Assert.NotNull(form.EmbeddedHysteresisLabel);
+
+                    var slider = form.EmbeddedHysteresisSlider!;
+                    var label = form.EmbeddedHysteresisLabel!;
+
+                    // Range
+                    Assert.Equal(CurveFollower.MinHysteresisDegrees, slider.Minimum);
+                    Assert.Equal(CurveFollower.MaxHysteresisDegrees, slider.Maximum);
+
+                    // Value reflects settings
+                    Assert.Equal(form.Settings.FanHysteresisDegrees, slider.Value);
+                    Assert.Contains("Hysteresis", label.Text);
+
+                    // Changing value updates label and settings
+                    slider.Value = 6;
+                    Assert.Equal(6, form.Settings.FanHysteresisDegrees);
+                    Assert.Equal("Hysteresis: 6°C", label.Text);
+
+                    slider.Value = 0;
+                    Assert.Equal(0, form.Settings.FanHysteresisDegrees);
+                    Assert.Equal("Hysteresis: 0°C (Instant)", label.Text);
+                }
+                catch (Exception ex)
+                {
+                    error = ex;
+                }
+            });
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+            bool finished = thread.Join(10000);
+            Assert.True(finished, "Form1 inspection timed out.");
+            if (error != null) throw error;
+        }
+
+        #endregion
+
+        #region Battery Calibration Settings & UI Formatter Tests
+
+        [Fact]
+        public void AppSettings_CalibrationFields_Defaults()
+        {
+            var settings = new AppSettings();
+            Assert.Equal(0, settings.LastBatteryCalibrationUtcTicks);
+            Assert.Equal(0, settings.BatteryCalibrationPhase);
+            Assert.Equal(-1, settings.CalibrationLastKnownPercent);
+            Assert.False(settings.CalibrationPreChargeLimitEnabled);
+        }
+
+        [Fact]
+        public void AppSettings_CalibrationFields_SerializationRoundTrip()
+        {
+            long fixedTicks = new DateTime(2026, 10, 14, 15, 30, 0, DateTimeKind.Utc).Ticks;
+            var original = new AppSettings
+            {
+                LastBatteryCalibrationUtcTicks = fixedTicks,
+                BatteryCalibrationPhase = 2,
+                CalibrationLastKnownPercent = 14,
+                CalibrationPreChargeLimitEnabled = true
+            };
+
+            string json = JsonSerializer.Serialize(original);
+            var deserialized = JsonSerializer.Deserialize<AppSettings>(json);
+
+            Assert.NotNull(deserialized);
+            Assert.Equal(fixedTicks, deserialized!.LastBatteryCalibrationUtcTicks);
+            Assert.Equal(2, deserialized.BatteryCalibrationPhase);
+            Assert.Equal(14, deserialized.CalibrationLastKnownPercent);
+            Assert.True(deserialized.CalibrationPreChargeLimitEnabled);
+        }
+
+        [Fact]
+        public void AppSettings_CalibrationFields_CreateSnapshot_ClonesIndependently()
+        {
+            var original = new AppSettings
+            {
+                LastBatteryCalibrationUtcTicks = 123456789L,
+                BatteryCalibrationPhase = 1,
+                CalibrationLastKnownPercent = 75,
+                CalibrationPreChargeLimitEnabled = true
+            };
+
+            var snapshot = original.CreateSnapshot();
+
+            Assert.Equal(123456789L, snapshot.LastBatteryCalibrationUtcTicks);
+            Assert.Equal(1, snapshot.BatteryCalibrationPhase);
+            Assert.Equal(75, snapshot.CalibrationLastKnownPercent);
+            Assert.True(snapshot.CalibrationPreChargeLimitEnabled);
+
+            original.LastBatteryCalibrationUtcTicks = 987654321L;
+            original.BatteryCalibrationPhase = 0;
+            original.CalibrationLastKnownPercent = 10;
+            original.CalibrationPreChargeLimitEnabled = false;
+
+            Assert.Equal(123456789L, snapshot.LastBatteryCalibrationUtcTicks);
+            Assert.Equal(1, snapshot.BatteryCalibrationPhase);
+            Assert.Equal(75, snapshot.CalibrationLastKnownPercent);
+            Assert.True(snapshot.CalibrationPreChargeLimitEnabled);
+        }
+
+        [Theory]
+        [InlineData(-500L, 0L)]
+        [InlineData(0L, 0L)]
+        [InlineData(100000L, 100000L)]
+        public void AppSettings_Sanitize_ClampsLastBatteryCalibrationUtcTicks(long inputTicks, long expectedTicks)
+        {
+            var settings = new AppSettings { LastBatteryCalibrationUtcTicks = inputTicks };
+            settings.Sanitize();
+            Assert.Equal(expectedTicks, settings.LastBatteryCalibrationUtcTicks);
+        }
+
+        [Theory]
+        [InlineData(-5, 0)]
+        [InlineData(0, 0)]
+        [InlineData(1, 1)]
+        [InlineData(2, 2)]
+        [InlineData(3, 2)]
+        [InlineData(99, 2)]
+        public void AppSettings_Sanitize_ClampsBatteryCalibrationPhase(int inputPhase, int expectedPhase)
+        {
+            var settings = new AppSettings { BatteryCalibrationPhase = inputPhase };
+            settings.Sanitize();
+            Assert.Equal(expectedPhase, settings.BatteryCalibrationPhase);
+        }
+
+        [Theory]
+        [InlineData(-10, -1)]
+        [InlineData(-1, -1)]
+        [InlineData(0, 0)]
+        [InlineData(50, 50)]
+        [InlineData(100, 100)]
+        [InlineData(101, 100)]
+        [InlineData(999, 100)]
+        public void AppSettings_Sanitize_ClampsCalibrationLastKnownPercent(int inputPercent, int expectedPercent)
+        {
+            var settings = new AppSettings { CalibrationLastKnownPercent = inputPercent };
+            settings.Sanitize();
+            Assert.Equal(expectedPercent, settings.CalibrationLastKnownPercent);
+        }
+
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public void UiLabelFormatter_FormatCalibrationEta_NullOrNegative_ReturnsCalculating(bool isCharging)
+        {
+            Assert.Equal("Calculating remaining time...", UiLabelFormatter.FormatCalibrationEta(null, isCharging));
+            Assert.Equal("Calculating remaining time...", UiLabelFormatter.FormatCalibrationEta(TimeSpan.FromSeconds(-1), isCharging));
+            Assert.Equal("Calculating remaining time...", UiLabelFormatter.FormatCalibrationEta(TimeSpan.FromMinutes(-30), isCharging));
+        }
+
+        [Theory]
+        [InlineData(95, true, "Estimated Time Remaining (Charging): 01h 35m")]
+        [InlineData(5, true, "Estimated Time Remaining (Charging): 00h 05m")]
+        [InlineData(0, true, "Estimated Time Remaining (Charging): 00h 00m")]
+        [InlineData(130, false, "Estimated Time Remaining (Discharging): 02h 10m")]
+        [InlineData(45, false, "Estimated Time Remaining (Discharging): 00h 45m")]
+        public void UiLabelFormatter_FormatCalibrationEta_ValidPhases_FormatsCorrectly(int totalMinutes, bool isCharging, string expected)
+        {
+            var eta = TimeSpan.FromMinutes(totalMinutes);
+            string formatted = UiLabelFormatter.FormatCalibrationEta(eta, isCharging);
+            Assert.Equal(expected, formatted);
+        }
+
+        [Fact]
+        public void UiLabelFormatter_FormatCalibrationEta_Over24Hours_CorrectlyFormatsTotalHours()
+        {
+            var eta = TimeSpan.FromHours(27).Add(TimeSpan.FromMinutes(15));
+            string formatted = UiLabelFormatter.FormatCalibrationEta(eta, isCharging: true);
+            Assert.Equal("Estimated Time Remaining (Charging): 27h 15m", formatted);
+        }
+
+        [Theory]
+        [InlineData(0L)]
+        [InlineData(-1L)]
+        [InlineData(-100000L)]
+        public void UiLabelFormatter_FormatLastCalibrated_ZeroOrNegative_ReturnsNever(long ticks)
+        {
+            Assert.Equal("Last Calibrated: Never", UiLabelFormatter.FormatLastCalibrated(ticks));
+        }
+
+        [Fact]
+        public void UiLabelFormatter_FormatLastCalibrated_ValidTicks_FormatsLocalTime()
+        {
+            var utcTime = new DateTime(2026, 10, 14, 12, 30, 0, DateTimeKind.Utc);
+            var localTime = utcTime.ToLocalTime();
+            string expected = $"Last Calibrated: {localTime:yyyy-MM-dd HH:mm}";
+
+            string actual = UiLabelFormatter.FormatLastCalibrated(utcTime.Ticks);
+            Assert.Equal(expected, actual);
+        }
+
+        [Fact]
+        public void UiLabelFormatter_FormatLastCalibrated_CorruptedTicks_SafelyReturnsNeverWithoutThrowing()
+        {
+            string actual = UiLabelFormatter.FormatLastCalibrated(long.MaxValue);
+            Assert.Equal("Last Calibrated: Never", actual);
         }
 
         #endregion

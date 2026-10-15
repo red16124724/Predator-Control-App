@@ -59,11 +59,17 @@ namespace PredatorControlApp
                 {
 
                     if (e.Category == UserPreferenceCategory.General && CurrentTheme == AppTheme.System)
-
                     {
-
+                        try
+                        {
+                            if (Application.OpenForms.Count > 0 && Application.OpenForms[0] is Form f && f.IsHandleCreated)
+                            {
+                                f.BeginInvoke(new Action(() => ThemeChanged?.Invoke()));
+                                return;
+                            }
+                        }
+                        catch { }
                         ThemeChanged?.Invoke();
-
                     }
 
                 };

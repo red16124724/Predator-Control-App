@@ -27,63 +27,68 @@ namespace PredatorControlApp
             StartWatching();
         }
 
-        private void StopAndDisposeWatchersUnderLock()
+        private void StopAndDisposeWatchers()
         {
-            if (_apgeWatcher != null)
+            ManagementEventWatcher? apge;
+            ManagementEventWatcher? generic;
+            lock (_lock)
             {
-                try
-                {
-                    _apgeWatcher.Stopped -= OnWatcherStopped;
-                    _apgeWatcher.EventArrived -= WmiEventArrived;
-                    try { _apgeWatcher.Stop(); } catch { }
-                    _apgeWatcher.Dispose();
-                }
-                catch { }
-                finally
-                {
-                    _apgeWatcher = null;
-                }
+                apge = _apgeWatcher;
+                _apgeWatcher = null;
+                generic = _genericWatcher;
+                _genericWatcher = null;
             }
 
-            if (_genericWatcher != null)
+            if (apge != null)
             {
                 try
                 {
-                    _genericWatcher.Stopped -= OnWatcherStopped;
-                    _genericWatcher.EventArrived -= WmiEventArrived;
-                    try { _genericWatcher.Stop(); } catch { }
-                    _genericWatcher.Dispose();
+                    apge.Stopped -= OnWatcherStopped;
+                    apge.EventArrived -= WmiEventArrived;
+                    try { apge.Stop(); } catch { }
+                    apge.Dispose();
                 }
                 catch { }
-                finally
+            }
+
+            if (generic != null)
+            {
+                try
                 {
-                    _genericWatcher = null;
+                    generic.Stopped -= OnWatcherStopped;
+                    generic.EventArrived -= WmiEventArrived;
+                    try { generic.Stop(); } catch { }
+                    generic.Dispose();
                 }
+                catch { }
             }
         }
 
         private void StartWatching()
         {
+            StopAndDisposeWatchers();
             lock (_lock)
             {
                 if (_isDisposed) return;
-                StopAndDisposeWatchersUnderLock();
 
+                ManagementEventWatcher? apge = null;
                 try
                 {
                     var scope = new ManagementScope(@"\\.\root\wmi");
                     scope.Connect();
 
                     var query = new EventQuery("SELECT * FROM APGeEvent");
-                    var watcher = new ManagementEventWatcher(scope, query);
-                    watcher.EventArrived += WmiEventArrived;
-                    watcher.Stopped += OnWatcherStopped;
-                    watcher.Start();
-                    _apgeWatcher = watcher;
+                    apge = new ManagementEventWatcher(scope, query);
+                    apge.EventArrived += WmiEventArrived;
+                    apge.Stopped += OnWatcherStopped;
+                    apge.Start();
+                    _apgeWatcher = apge;
+                    apge = null;
                 }
                 catch (Exception ex)
                 {
                     Debug.WriteLine($"WmiHotkeyWatcher: APGeEvent unavailable: {ex.Message}");
+                    try { apge?.Dispose(); } catch { }
                     if (_apgeWatcher != null)
                     {
                         try { _apgeWatcher.Dispose(); } catch { }
@@ -91,21 +96,24 @@ namespace PredatorControlApp
                     }
                 }
 
+                ManagementEventWatcher? generic = null;
                 try
                 {
                     var scope = new ManagementScope(@"\\.\root\wmi");
                     scope.Connect();
 
                     var query = new EventQuery("SELECT * FROM AcerGenericEvent");
-                    var watcher = new ManagementEventWatcher(scope, query);
-                    watcher.EventArrived += WmiEventArrived;
-                    watcher.Stopped += OnWatcherStopped;
-                    watcher.Start();
-                    _genericWatcher = watcher;
+                    generic = new ManagementEventWatcher(scope, query);
+                    generic.EventArrived += WmiEventArrived;
+                    generic.Stopped += OnWatcherStopped;
+                    generic.Start();
+                    _genericWatcher = generic;
+                    generic = null;
                 }
                 catch (Exception ex)
                 {
                     Debug.WriteLine($"WmiHotkeyWatcher: AcerGenericEvent unavailable: {ex.Message}");
+                    try { generic?.Dispose(); } catch { }
                     if (_genericWatcher != null)
                     {
                         try { _genericWatcher.Dispose(); } catch { }
@@ -138,13 +146,40 @@ namespace PredatorControlApp
             }
         }
 
+        private DateTime _suppressUntilUtc = DateTime.MinValue;
+
+        public void SuppressModeKeyUntil(DateTime untilUtc)
+        {
+            lock (_lock)
+            {
+                if (untilUtc > _suppressUntilUtc)
+                    _suppressUntilUtc = untilUtc;
+            }
+        }
+
+        public void SuppressModeKey(int durationMs = 2500)
+        {
+            SuppressModeKeyUntil(DateTime.UtcNow.AddMilliseconds(durationMs));
+        }
+
         private void FireModeKeyPressed()
         {
             if (_isDisposed) return;
-            long now = Environment.TickCount64;
-            if (now - _lastModeKeyTick >= DebounceThresholdMs)
+            bool shouldFire = false;
+            lock (_lock)
             {
-                _lastModeKeyTick = now;
+                if (DateTime.UtcNow < _suppressUntilUtc)
+                    return;
+
+                long now = Environment.TickCount64;
+                if (now - _lastModeKeyTick >= DebounceThresholdMs)
+                {
+                    _lastModeKeyTick = now;
+                    shouldFire = true;
+                }
+            }
+            if (shouldFire)
+            {
                 try { ModeKeyPressed?.Invoke(); } catch { }
             }
         }
@@ -180,7 +215,8 @@ namespace PredatorControlApp
                         var fwEvent = FirmwareEvent.Decode(bytes);
                         if (fwEvent != null)
                         {
-                            if (fwEvent.Kind == FirmwareEventKind.ModeKey || fwEvent.Value == 7 || fwEvent.Value == 0x82 || fwEvent.Value == 0x86 || fwEvent.Value == 0x87)
+                            if (fwEvent.Kind == FirmwareEventKind.ModeKey || fwEvent.Value == 7 || fwEvent.Value == 0x82 || fwEvent.Value == 0x86 || fwEvent.Value == 0x87 ||
+                                bytes[0] == 7 || bytes[0] == 0x82 || bytes[0] == 0x86 || bytes[0] == 0x87)
                             {
                                 FireModeKeyPressed();
                             }
@@ -239,11 +275,14 @@ namespace PredatorControlApp
 
         protected virtual void Dispose(bool disposing)
         {
-            lock (_lock)
+            if (disposing)
             {
-                if (_isDisposed) return;
-                _isDisposed = true;
-                StopAndDisposeWatchersUnderLock();
+                lock (_lock)
+                {
+                    if (_isDisposed) return;
+                    _isDisposed = true;
+                }
+                StopAndDisposeWatchers();
             }
         }
 

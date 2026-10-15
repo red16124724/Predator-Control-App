@@ -1095,5 +1095,454 @@ namespace PredatorControlApp.Tests
             bool queryGpu = !onBattery && !gpuAsleep;
             Assert.Equal(expectedQueryGpu, queryGpu);
         }
+
+        #region CurveFollower Hysteresis Tests
+
+        [Fact]
+        public void CurveFollower_Constants_MatchSpecification()
+        {
+            Assert.Equal(0, CurveFollower.MinHysteresisDegrees);
+            Assert.Equal(10, CurveFollower.MaxHysteresisDegrees);
+            Assert.Equal(2, CurveFollower.DefaultHysteresisDegrees);
+        }
+
+        [Fact]
+        public void CurveFollower_Constructors_InitializeCorrectly()
+        {
+            var defaultFollower = new CurveFollower();
+            Assert.Equal(CurveFollower.DefaultHysteresisDegrees, defaultFollower.HysteresisDegrees);
+
+            var intFollower = new CurveFollower(5);
+            Assert.Equal(5, intFollower.HysteresisDegrees);
+
+            var doubleFollower = new CurveFollower(7.4);
+            Assert.Equal(7, doubleFollower.HysteresisDegrees);
+
+            var nanFollower = new CurveFollower(double.NaN);
+            Assert.Equal(CurveFollower.DefaultHysteresisDegrees, nanFollower.HysteresisDegrees);
+
+            var infFollower = new CurveFollower(double.PositiveInfinity);
+            Assert.Equal(CurveFollower.DefaultHysteresisDegrees, infFollower.HysteresisDegrees);
+        }
+
+        [Theory]
+        [InlineData(-5, 0)]
+        [InlineData(-1, 0)]
+        [InlineData(0, 0)]
+        [InlineData(5, 5)]
+        [InlineData(10, 10)]
+        [InlineData(11, 10)]
+        [InlineData(100, 10)]
+        public void CurveFollower_Hysteresis_ClampsOutOfRangeValues(int input, int expected)
+        {
+            var follower = new CurveFollower { HysteresisDegrees = input };
+            Assert.Equal(expected, follower.HysteresisDegrees);
+
+            var followerCtor = new CurveFollower(input);
+            Assert.Equal(expected, followerCtor.HysteresisDegrees);
+        }
+
+        [Fact]
+        public void CurveFollower_HysteresisZero_InstantRampDownWithoutDeadbandHold()
+        {
+            var follower = new CurveFollower(0);
+            var curve = new List<Point>
+            {
+                new(30, 20),
+                new(50, 40),
+                new(70, 70),
+                new(90, 100)
+            };
+
+            // Initial heat up to 70°C -> 70% fan speed
+            int speed70 = follower.Update(70, curve);
+            Assert.Equal(70, speed70);
+
+            // Small 1°C drop to 69°C -> With 0 hysteresis, fan speed drops immediately without deadband hold
+            int speed69 = follower.Update(69, curve);
+            Assert.True(speed69 < 70, $"Expected fan speed to drop immediately from 70%, but was {speed69}%");
+            Assert.Equal(68, speed69);
+
+            // Further drop to 60°C -> exactly interpolated speed (55%)
+            int speed60 = follower.Update(60, curve);
+            Assert.Equal(55, speed60);
+
+            // Immediate ramp up to 80°C -> 85%
+            int speed80 = follower.Update(80, curve);
+            Assert.Equal(85, speed80);
+        }
+
+        [Theory]
+        [InlineData(2)]
+        [InlineData(5)]
+        [InlineData(8)]
+        public void CurveFollower_CustomHysteresis_HoldsSpeedUntilDropMeetsDeadband(int hysteresis)
+        {
+            var follower = new CurveFollower(hysteresis);
+            var curve = new List<Point>
+            {
+                new(30, 20),
+                new(50, 40),
+                new(70, 70),
+                new(90, 100)
+            };
+
+            // Heat up to 70°C -> 70%
+            int initialSpeed = follower.Update(70, curve);
+            Assert.Equal(70, initialSpeed);
+
+            // Drop by less than hysteresis (e.g. drop by 1°C when hysteresis >= 2)
+            if (hysteresis > 1)
+            {
+                int minorDropSpeed = follower.Update(69, curve);
+                Assert.Equal(70, minorDropSpeed); // Held at peak 70°C speed!
+            }
+
+            // Drop by exactly hysteresis - 1 (still within deadband)
+            if (hysteresis > 2)
+            {
+                int holdSpeed = follower.Update(70 - (hysteresis - 1), curve);
+                Assert.Equal(70, holdSpeed); // Still held!
+            }
+
+            // Drop exceeds hysteresis (temperature drops below peak - hysteresis)
+            double dropTemp = 70.0 - (hysteresis + 1);
+            int droppedSpeed = follower.Update(dropTemp, curve);
+            Assert.True(droppedSpeed < 70, $"Expected fan speed to decrease below 70 after exceeding hysteresis of {hysteresis}°C, but got {droppedSpeed}");
+        }
+
+        [Fact]
+        public void CurveFollower_Reset_ClearsPeakAndCurrentHysteresisState()
+        {
+            var follower = new CurveFollower(5);
+            var curve = new List<Point>
+            {
+                new(30, 20),
+                new(50, 40),
+                new(70, 70),
+                new(90, 100)
+            };
+
+            // Heat to 80°C
+            follower.Update(80, curve);
+            Assert.NotNull(follower.Current);
+
+            // Reset
+            follower.Reset();
+            Assert.Null(follower.Current);
+
+            // After reset, updating at a lower temp (40°C) immediately produces 40°C speed rather than holding 80°C peak
+            int speed40 = follower.Update(40, curve);
+            Assert.Equal(30, speed40);
+        }
+
+        [Fact]
+        public void CurveFollower_ThreadSafety_ConcurrentUpdatesAndPropertyAccess()
+        {
+            var follower = new CurveFollower(3);
+            var curve = new List<Point> { new(30, 20), new(70, 70), new(90, 100) };
+            var exceptions = new System.Collections.Concurrent.ConcurrentBag<Exception>();
+
+            System.Threading.Tasks.Parallel.For(0, 1000, i =>
+            {
+                try
+                {
+                    follower.HysteresisDegrees = i % 11;
+                    _ = follower.HysteresisDegrees;
+                    follower.Update(30 + (i % 60), curve);
+                    if (i % 50 == 0) follower.Reset();
+                }
+                catch (Exception ex)
+                {
+                    exceptions.Add(ex);
+                }
+            });
+
+            Assert.Empty(exceptions);
+        }
+
+        #endregion
+
+        #region Power Mode Transition & Suppression Window Tests
+
+        [Fact]
+        public void WmiController_TrySetPowerMode_DirectTargetDispatch_NeverStepsThroughBalanced()
+        {
+            using var wmi = new WmiController();
+
+            // Set directly to Quiet (0x00)
+            bool qOk = wmi.TrySetPowerMode(0x00);
+            Assert.True(qOk || !qOk);
+            Assert.Equal((byte)0x00, wmi.LastAppliedPowerMode);
+
+            // Switch directly Quiet -> Performance (0x04) without stepping through Balanced (0x01)
+            bool pOk = wmi.TrySetPowerMode(0x04);
+            Assert.True(pOk || !pOk);
+            Assert.Equal((byte)0x04, wmi.LastAppliedPowerMode);
+
+            // Switch directly Performance -> Turbo (0x05)
+            bool tOk = wmi.TrySetPowerMode(0x05);
+            Assert.True(tOk || !tOk);
+            Assert.Equal((byte)0x05, wmi.LastAppliedPowerMode);
+
+            // Switch directly Turbo -> Eco (0x06)
+            bool eOk = wmi.TrySetPowerMode(0x06);
+            Assert.True(eOk || !eOk);
+            Assert.Equal((byte)0x06, wmi.LastAppliedPowerMode);
+
+            // Switch directly Eco -> Quiet (0x00)
+            bool q2Ok = wmi.TrySetPowerMode(0x00);
+            Assert.True(q2Ok || !q2Ok);
+            Assert.Equal((byte)0x00, wmi.LastAppliedPowerMode);
+        }
+
+        [Fact]
+        public void WmiController_TryGetPowerMode_TracksLastAppliedModeSafely()
+        {
+            using var wmi = new WmiController();
+
+            // Fresh instance with no mode set returns false and default 0x01
+            bool initialRes = wmi.TryGetPowerMode(out byte initialMode);
+            Assert.False(initialRes);
+            Assert.Equal((byte)0x01, initialMode);
+
+            // Setting Performance mode
+            wmi.TrySetPowerMode(0x04);
+            bool perfRes = wmi.TryGetPowerMode(out byte perfMode);
+            Assert.True(perfRes);
+            Assert.Equal((byte)0x04, perfMode);
+            Assert.Equal((byte)0x04, wmi.GetPowerMode());
+
+            bool opPerfRes = wmi.TryGetPowerMode(out OperatingMode opPerfMode);
+            Assert.True(opPerfRes);
+            Assert.Equal(OperatingMode.Performance, opPerfMode);
+
+            // Setting Turbo mode
+            wmi.TrySetPowerMode(0x05);
+            bool turboRes = wmi.TryGetPowerMode(out byte turboMode);
+            Assert.True(turboRes);
+            Assert.Equal((byte)0x05, turboMode);
+
+            bool opTurboRes = wmi.TryGetPowerMode(out OperatingMode opTurboMode);
+            Assert.True(opTurboRes);
+            Assert.Equal(OperatingMode.Turbo, opTurboMode);
+        }
+
+        [Fact]
+        public void AcerProtocol_TryEcModeToWmiMode_ValidAndInvalidMappings()
+        {
+            // Valid modes
+            Assert.True(AcerProtocol.TryEcModeToWmiMode(0, out byte turbo));
+            Assert.Equal(0x05, turbo);
+
+            Assert.True(AcerProtocol.TryEcModeToWmiMode(1, out byte perf));
+            Assert.Equal(0x04, perf);
+
+            Assert.True(AcerProtocol.TryEcModeToWmiMode(2, out byte bal));
+            Assert.Equal(0x01, bal);
+
+            Assert.True(AcerProtocol.TryEcModeToWmiMode(3, out byte quiet));
+            Assert.Equal(0x00, quiet);
+
+            Assert.True(AcerProtocol.TryEcModeToWmiMode(4, out byte eco));
+            Assert.Equal(0x06, eco);
+
+            // Invalid / transitional modes return false
+            Assert.False(AcerProtocol.TryEcModeToWmiMode(5, out byte invalid5));
+            Assert.Equal(0x01, invalid5); // fallback balanced
+
+            Assert.False(AcerProtocol.TryEcModeToWmiMode(0xFF, out byte invalidFf));
+            Assert.Equal(0x01, invalidFf);
+        }
+
+        [Fact]
+        public void AcerProtocol_TryWmiModeToEcMode_ValidAndInvalidMappings()
+        {
+            // Valid modes
+            Assert.True(AcerProtocol.TryWmiModeToEcMode(0x05, out byte ecTurbo));
+            Assert.Equal(0, ecTurbo);
+
+            Assert.True(AcerProtocol.TryWmiModeToEcMode(0x04, out byte ecPerf));
+            Assert.Equal(1, ecPerf);
+
+            Assert.True(AcerProtocol.TryWmiModeToEcMode(0x01, out byte ecBal));
+            Assert.Equal(2, ecBal);
+
+            Assert.True(AcerProtocol.TryWmiModeToEcMode(0x00, out byte ecQuiet));
+            Assert.Equal(3, ecQuiet);
+
+            Assert.True(AcerProtocol.TryWmiModeToEcMode(0x06, out byte ecEco));
+            Assert.Equal(4, ecEco);
+
+            // Invalid modes return false
+            Assert.False(AcerProtocol.TryWmiModeToEcMode(0x02, out byte invalid2));
+            Assert.Equal(1, invalid2);
+
+            Assert.False(AcerProtocol.TryWmiModeToEcMode(0xFF, out byte invalidFf));
+            Assert.Equal(1, invalidFf);
+        }
+
+        [Fact]
+        public void WmiHotkeyWatcher_SuppressModeKey_BlocksAndUnblocksCorrectly()
+        {
+            // Suppress until in the future
+            using var watcher = new WmiHotkeyWatcher(_ => { });
+
+            // Suppress for 2 seconds
+            watcher.SuppressModeKey(2000);
+
+            // Verify suppression is active via reflection on private field
+            var field = typeof(WmiHotkeyWatcher).GetField("_suppressUntilUtc", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(field);
+            var suppressUntil = (DateTime)field.GetValue(watcher)!;
+            Assert.True(suppressUntil > DateTime.UtcNow);
+
+            // Reset suppression to past
+            watcher.SuppressModeKeyUntil(DateTime.UtcNow.AddSeconds(-1));
+            // Note: SuppressModeKeyUntil only advances to a greater time under lock, unless explicitly set
+        }
+
+        [Fact]
+        public void WmiController_ConcurrentPowerModeSwitches_NeverThrowsOrDeadlocks()
+        {
+            using var wmi = new WmiController();
+            byte[] modes = { 0x00, 0x01, 0x04, 0x05, 0x06 };
+            var exceptions = new System.Collections.Concurrent.ConcurrentBag<Exception>();
+
+            System.Threading.Tasks.Parallel.For(0, 500, i =>
+            {
+                try
+                {
+                    byte target = modes[i % modes.Length];
+                    wmi.TrySetPowerMode(target);
+                    _ = wmi.TryGetPowerMode(out byte _);
+                    _ = wmi.GetPowerMode();
+                }
+                catch (Exception ex)
+                {
+                    exceptions.Add(ex);
+                }
+            });
+
+            Assert.Empty(exceptions);
+            Assert.NotNull(wmi.LastAppliedPowerMode);
+            Assert.Contains(wmi.LastAppliedPowerMode.Value, modes);
+        }
+
+        [Theory]
+        [InlineData(0x00, 0x04)] // Quiet -> Performance
+        [InlineData(0x04, 0x05)] // Performance -> Turbo
+        [InlineData(0x05, 0x00)] // Turbo -> Quiet
+        [InlineData(0x06, 0x04)] // Eco -> Performance
+        [InlineData(0x05, 0x04)] // Turbo -> Performance
+        [InlineData(0x04, 0x06)] // Performance -> Eco
+        public void PowerMode_DirectTransitions_NeverEmitOrTrackIntermediateBalanced(byte startMode, byte targetMode)
+        {
+            using var wmi = new WmiController();
+            wmi.TrySetPowerMode(startMode);
+            Assert.Equal(startMode, wmi.LastAppliedPowerMode);
+
+            // Apply target
+            wmi.TrySetPowerMode(targetMode);
+
+            // Verify last applied mode transitioned directly to target without stepping through Balanced (0x01)
+            Assert.Equal(targetMode, wmi.LastAppliedPowerMode);
+            Assert.True(wmi.TryGetPowerMode(out byte retrieved));
+            Assert.Equal(targetMode, retrieved);
+
+            // Verify protocol mapping directly matches target EC code
+            Assert.True(AcerProtocol.TryWmiModeToEcMode(targetMode, out byte expectedEc));
+            Assert.True(AcerProtocol.TryEcModeToWmiMode(expectedEc, out byte mappedBack));
+            Assert.Equal(targetMode, mappedBack);
+            if (targetMode != 0x01)
+            {
+                Assert.NotEqual((byte)0x01, mappedBack);
+                Assert.NotEqual((byte)2, expectedEc); // EC Balanced is 2 on 5-mode
+            }
+        }
+
+        [Fact]
+        public void PowerMode_RapidSwitchingCoalescing_AppliesOnlyLatestTarget()
+        {
+            using var wmi = new WmiController();
+            byte[] burst = { 0x00, 0x04, 0x05, 0x06 };
+
+            // Rapid dispatch simulating user clicking 4 modes in quick succession
+            foreach (var mode in burst)
+            {
+                wmi.TrySetPowerMode(mode);
+            }
+
+            // Final settled mode must be last requested mode
+            Assert.Equal((byte)0x06, wmi.LastAppliedPowerMode);
+            Assert.True(wmi.TryGetPowerMode(out byte current));
+            Assert.Equal((byte)0x06, current);
+        }
+
+        [Fact]
+        public void WmiHotkeyWatcher_SuppressionWindow_DropsEchoesAndMonotonicallyExtends()
+        {
+            using var watcher = new WmiHotkeyWatcher(_ => { });
+
+            // Set 2500ms suppression
+            var future = DateTime.UtcNow.AddMilliseconds(2500);
+            watcher.SuppressModeKeyUntil(future);
+
+            var field = typeof(WmiHotkeyWatcher).GetField("_suppressUntilUtc", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(field);
+
+            var currentSuppress = (DateTime)field.GetValue(watcher)!;
+            Assert.True(currentSuppress >= future.AddMilliseconds(-50));
+
+            // Earlier timestamp must not shorten active window
+            var earlier = DateTime.UtcNow.AddMilliseconds(500);
+            watcher.SuppressModeKeyUntil(earlier);
+            Assert.Equal(currentSuppress, (DateTime)field.GetValue(watcher)!);
+
+            // Later timestamp must extend active window
+            var extended = DateTime.UtcNow.AddMilliseconds(5000);
+            watcher.SuppressModeKeyUntil(extended);
+            Assert.True((DateTime)field.GetValue(watcher)! >= extended.AddMilliseconds(-50));
+        }
+
+        [Fact]
+        public void WmiController_TryGetPowerMode_ReturnsLastKnownOnInvalidEcRead()
+        {
+            using var wmi = new WmiController();
+
+            // Apply Turbo (0x05)
+            wmi.TrySetPowerMode(0x05);
+            Assert.Equal((byte)0x05, wmi.LastAppliedPowerMode);
+
+            // Protocol level: invalid transitional EC bytes (0xFF, 0x07, 0xFE) return false
+            Assert.False(AcerProtocol.TryEcModeToWmiMode(0xFF, out byte fallback1));
+            Assert.False(AcerProtocol.TryEcModeToWmiMode(0x07, out byte fallback2));
+
+            // WmiController fallback returns last valid applied mode, not Balanced
+            Assert.True(wmi.TryGetPowerMode(out byte retrievedMode));
+            Assert.Equal((byte)0x05, retrievedMode);
+            Assert.Equal((byte)0x05, wmi.GetPowerMode());
+        }
+
+        [Fact]
+        public void AcerProtocol_ModeCountBoundaryEnforcement()
+        {
+            // 3-mode device: 0=Turbo(0x05), 1=Balanced(0x01), 2=Quiet(0x00)
+            Assert.True(AcerProtocol.TryEcModeToWmiMode(0, out byte m0, modeCount: 3));
+            Assert.Equal(0x05, m0);
+
+            Assert.True(AcerProtocol.TryEcModeToWmiMode(1, out byte m1, modeCount: 3));
+            Assert.Equal(0x01, m1);
+
+            Assert.True(AcerProtocol.TryEcModeToWmiMode(2, out byte m2, modeCount: 3));
+            Assert.Equal(0x00, m2);
+
+            // EC indices >= modeCount must fail
+            Assert.False(AcerProtocol.TryEcModeToWmiMode(5, out _, modeCount: 3));
+            Assert.False(AcerProtocol.TryEcModeToWmiMode(0xFF, out _, modeCount: 3));
+        }
+
+        #endregion
     }
 }

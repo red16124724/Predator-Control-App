@@ -73,12 +73,62 @@ namespace PredatorControlApp
 
             return FormatLabel(cleaned);
         }
+
+        /// <summary>
+        /// Formats temperature hysteresis degrees into a user-friendly label.
+        /// Returns "Hysteresis: 0°C (Instant)" when 0, and "Hysteresis: {degrees}°C" otherwise.
+        /// </summary>
+        public static string FormatHysteresisLabel(int degrees)
+        {
+            return degrees == 0 ? "Hysteresis: 0°C (Instant)" : $"Hysteresis: {degrees}°C";
+        }
+
         /// <summary>
         /// Combines base text flags with TextFormatFlags.NoPrefix when useMnemonic is false to prevent mnemonic ampersand underscores.
         /// </summary>
         public static TextFormatFlags GetTextFormatFlags(TextFormatFlags baseFlags = TextFormatFlags.Default, bool useMnemonic = false)
         {
             return useMnemonic ? baseFlags : (baseFlags | TextFormatFlags.NoPrefix);
+        }
+
+        /// <summary>
+        /// Formats battery calibration remaining time ETA.
+        /// When eta is null, returns "Calculating remaining time...".
+        /// When charging, returns "Estimated Time Remaining (Charging): {hh}h {mm}m".
+        /// When discharging, returns "Estimated Time Remaining (Discharging): {hh}h {mm}m".
+        /// </summary>
+        public static string FormatCalibrationEta(TimeSpan? eta, bool isCharging)
+        {
+            if (!eta.HasValue || eta.Value < TimeSpan.Zero)
+            {
+                return "Calculating remaining time...";
+            }
+
+            var ts = eta.Value;
+            int totalHours = (int)ts.TotalHours;
+            int mins = ts.Minutes;
+
+            string phasePrefix = isCharging ? "Estimated Time Remaining (Charging)" : "Estimated Time Remaining (Discharging)";
+            return $"{phasePrefix}: {totalHours:D2}h {mins:D2}m";
+        }
+
+        /// <summary>
+        /// Formats last calibrated timestamp from UTC ticks.
+        /// Returns "Last Calibrated: Never" if ticks <= 0.
+        /// Otherwise returns "Last Calibrated: {yyyy-MM-dd HH:mm}".
+        /// </summary>
+        public static string FormatLastCalibrated(long utcTicks)
+        {
+            if (utcTicks <= 0) return "Last Calibrated: Never";
+            try
+            {
+                var dt = new DateTime(utcTicks, DateTimeKind.Utc).ToLocalTime();
+                return $"Last Calibrated: {dt:yyyy-MM-dd HH:mm}";
+            }
+            catch
+            {
+                return "Last Calibrated: Never";
+            }
         }
 
         /// <summary>

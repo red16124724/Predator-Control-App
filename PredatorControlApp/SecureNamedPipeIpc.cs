@@ -98,59 +98,70 @@ namespace PredatorControlApp
             {
                 while (!_cts.Token.IsCancellationRequested)
                 {
+                    NamedPipeServerStream? pipe = null;
                     try
                     {
-                        using var pipe = NamedPipeServerStreamAcl.Create(
+                        pipe = NamedPipeServerStreamAcl.Create(
                             _pipeName, PipeDirection.InOut, NamedPipeServerStream.MaxAllowedServerInstances,
                             PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 0, 0, CreatePipeSecurity());
 
                         await pipe.WaitForConnectionAsync(_cts.Token);
 
-                        using var reader = new StreamReader(pipe, Encoding.UTF8);
-                        using var readCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-                        readCts.CancelAfter(2000);
-                        try
-                        {
-                            // Bounded message reading to prevent unbounded memory allocation DoS attacks
-                            var sb = new StringBuilder();
-                            char[] charBuf = new char[1];
-                            while (sb.Length < MaxMessageLength)
-                            {
-                                int readCount = await reader.ReadAsync(charBuf.AsMemory(0, 1), readCts.Token);
-                                if (readCount <= 0) break;
-                                if (charBuf[0] == '\n') break;
-                                if (charBuf[0] != '\r') sb.Append(charBuf[0]);
-                            }
+                        var connectedPipe = pipe;
+                        pipe = null; // Ownership transferred to client task
 
-                            string line = sb.ToString().Trim();
-                            if (!string.IsNullOrEmpty(line))
+                        _ = Task.Run(async () =>
+                        {
+                            using (connectedPipe)
                             {
-                                try { _onMessage(line); } catch { }
+                                try
+                                {
+                                    using var reader = new StreamReader(connectedPipe, Encoding.UTF8);
+                                    using var readCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+                                    readCts.CancelAfter(2000);
+                                    try
+                                    {
+                                        // Bounded message reading to prevent unbounded memory allocation DoS attacks
+                                        var sb = new StringBuilder();
+                                        char[] charBuf = new char[1];
+                                        while (sb.Length < MaxMessageLength)
+                                        {
+                                            int readCount = await reader.ReadAsync(charBuf.AsMemory(0, 1), readCts.Token);
+                                            if (readCount <= 0) break;
+                                            if (charBuf[0] == '\n') break;
+                                            if (charBuf[0] != '\r') sb.Append(charBuf[0]);
+                                        }
+
+                                        string line = sb.ToString().Trim();
+                                        if (!string.IsNullOrEmpty(line))
+                                        {
+                                            try { _onMessage(line); } catch { }
+                                        }
+                                    }
+                                    catch { }
+                                }
+                                catch { }
                             }
-                        }
-                        catch (OperationCanceledException) when (!_cts.Token.IsCancellationRequested)
-                        {
-                            // Per-client read timeout; continue server loop to accept next connection
-                        }
-                        catch (IOException)
-                        {
-                            // Client disconnected abruptly or pipe broken; continue server loop
-                        }
+                        }, _cts.Token);
                     }
                     catch (OperationCanceledException) when (_cts.Token.IsCancellationRequested)
                     {
+                        pipe?.Dispose();
                         break;
                     }
                     catch (OperationCanceledException)
                     {
+                        pipe?.Dispose();
                         if (_cts.Token.IsCancellationRequested) break;
                     }
                     catch (ObjectDisposedException)
                     {
+                        pipe?.Dispose();
                         break;
                     }
                     catch
                     {
+                        pipe?.Dispose();
                         try { await Task.Delay(200, _cts.Token); } catch { break; }
                     }
                 }

@@ -10,6 +10,7 @@ namespace PredatorControlApp
             {
                 _isClosing = true;
                 try { Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerModeChanged; } catch { }
+                try { Microsoft.Win32.SystemEvents.SessionEnding -= OnSessionEnding; } catch { }
                 if (_formThemeHandler != null)
                 {
                     try { ThemeManager.ThemeChanged -= _formThemeHandler; } catch { }
@@ -27,6 +28,7 @@ namespace PredatorControlApp
                     _rgbRestoreCts = null;
                 }
                 UnregisterPowerNotifications();
+                try { PowerWakeLock.Release(); } catch { }
                 if (_gameSync != null)
                 {
                     _gameSync.GameDetected -= OnGameDetected;
@@ -55,6 +57,7 @@ namespace PredatorControlApp
                 try { _colorPicker?.Dispose(); } catch { }
                 try { _fanCurveForm?.Dispose(); } catch { }
                 try { _appIconBitmap?.Dispose(); } catch { }
+                try { _tipCalibration?.Dispose(); } catch { }
                 try { Icon?.Dispose(); } catch { }
                 components?.Dispose();
             }
