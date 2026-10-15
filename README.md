@@ -205,7 +205,7 @@ dotnet restore PredatorControlApp.slnx
 # 3. Build the solution
 dotnet build PredatorControlApp.slnx -c Release
 
-# 4. Run all 271 unit tests
+# 4. Run all 908 unit tests
 dotnet test PredatorControlApp.slnx
 
 # 5. Publish the standalone single-file binary
