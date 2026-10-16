@@ -165,11 +165,12 @@ Predator Control App talks directly to your laptop's built-in Windows ACPI/WMI/E
 
 ### Step 1: Disable Background Services
 1. Press `Win + R` on your keyboard, type **`services.msc`**, and press **Enter**.
-2. Locate the following services:
+2. Locate the following services(it will vary in your device):
    - `Acer Gaming Service`
-   - `Acer Quick Access Service`
    - `AcerService`
    - `Acer Power Button Service`
+   - `Acer Agent Service`
+   - `Acer System Monitor Service`
 3. For each one:
    - Double-click the service.
    - Change **Startup type** to **Disabled**.
