@@ -136,8 +136,7 @@ winget install -e --id namazso.PawnIO
 - **Fast Keyboard Shortcuts**: `Predator + 1` (Eco), `Predator + 2` (Quiet), `Predator + 3` (Balanced), `Predator + 4` (Performance), `Predator + 5` (Turbo).
 
 ### ⚡ CPU Power Limit Control (PL1 / PL2) via PawnIO
-- **Ring-0 Intel RAPL Control**: Real-time adjustment of PL1 (Sustained Power) and PL2 (Short Burst Power) limits in Watts.
-- **MSR & MMIO Synchronization**: Double-buffered register locking with atomic tau preservation.
+- **Intel RAPL Control**: Real-time adjustment of PL1 (Sustained Power) and PL2 (Short Burst Power) limits in Watts.
 - **Dynamic Thermal Safety Arbitration**: Automatic thermal ceiling protection without overwriting your saved custom profiles.
 
 ### ❄️ Advanced Fan & Cooling Control
@@ -166,7 +165,7 @@ Upgrade from the 8 basic factory presets to **34 dynamic lighting effects**:
 
 ### 📊 Live Hardware Telemetry
 - **Accurate CPU & GPU Temperatures**: Real-time readouts in the app window and right in the system tray.
-- **Windows PDH Hardware Load**: Monitors CPU and GPU utilization using lightweight Windows performance counters.
+- **Windows Hardware Load**: Monitors CPU and GPU utilization using lightweight Windows performance counters.
 - **Real-Time Streaming Graph**: Watch fan speeds and temperatures stream live on an interactive chart.
 
 ### 🎨 Themes & Diagnostics
