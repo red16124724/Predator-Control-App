@@ -2,15 +2,15 @@
 
 <div align="center">
 
-![Predator Control App](https://img.shields.io/badge/Predator_Control-v1.4.1-red?style=for-the-badge&logo=acer&logoColor=white)
-[![Latest Release](https://img.shields.io/badge/Download-v1.4.1_Standalone-brightgreen?style=for-the-badge&logo=github)](https://github.com/red16124724/Predator-Control-App/releases)
+![Predator Control App](https://img.shields.io/badge/Predator_Control-v1.5.0-red?style=for-the-badge&logo=acer&logoColor=white)
+[![Latest Release](https://img.shields.io/badge/Download-v1.5.0_Standalone-brightgreen?style=for-the-badge&logo=github)](https://github.com/red16124724/Predator-Control-App/releases)
 [![Platform](https://img.shields.io/badge/Windows-10%20%7C%2011%20(64--bit)-blue?style=for-the-badge&logo=windows)](https://github.com/red16124724/Predator-Control-App/releases)
 [![License](https://img.shields.io/badge/License-MIT-orange?style=for-the-badge)](LICENSE)
 [![No Install Needed](https://img.shields.io/badge/Portable-Zero_Install_Required-purple?style=for-the-badge)](#-quick-start--easy-installation-for-beginners)
 [![100% Offline](https://img.shields.io/badge/Privacy-100%25_Offline-success?style=for-the-badge)](#-100-offline-privacy-guarantee)
 
 **A lightning-fast, ultra-lightweight, and feature-packed control center for Acer Predator gaming laptops.**  
-*Get 100% direct control over your fans, power modes, screen refresh rate, keyboard lighting, battery health, and GPU MUX switch — without the bloat, battery drain, or lag of PredatorSense.*
+*Get 100% direct control over your fans, power modes, CPU power limits, screen refresh rate, keyboard lighting, battery health, and GPU MUX switch — without the bloat, battery drain, or lag of PredatorSense.*
 
 </div>
 
@@ -19,9 +19,11 @@
 ## 📖 Table of Contents
 
 - [⚡ Quick Start — Easy Installation for Beginners](#-quick-start--easy-installation-for-beginners)
+- [🔌 How to Install PawnIO (Optional — CPU Power Limits)](#-how-to-install-pawnio-optional--for-cpu-power-limits)
 - [❓ Common Questions & Troubleshooting](#-common-questions--troubleshooting)
 - [✨ Key Features](#-key-features)
   - [🚀 Power & Performance Modes](#-power--performance-modes)
+  - [⚡ CPU Power Limit Control (PL1 / PL2)](#-cpu-power-limit-control-pl1--pl2-via-pawnio)
   - [❄️ Advanced Fan & Cooling Control](#️-advanced-fan--cooling-control)
   - [🎮 GPU & Display Control (MUX Switch)](#-gpu--display-control-mux-switch)
   - [🌈 34 Keyboard RGB Lighting Effects](#-34-keyboard-rgb-lighting-effects)
@@ -45,7 +47,7 @@ Head over to the **[Releases Page](https://github.com/red16124724/Predator-Contr
 - 📥 **`PredatorControlApp-Standalone.exe`** *(Recommended)* — Everything is bundled into this single file. You do not even need to install .NET!
 
 ### 2️⃣ Step 2: Run as Administrator
-1. Move the downloaded file to a folder you like (for example, inside `C:\Program Files\PredatorControl` or a folder in your `Documents`).
+1. Move the downloaded file to a folder you like (for example, inside `C:\Program Files\Predator Control` or a folder in your `Documents`).
 2. **Right-click** on `PredatorControlApp-Standalone.exe` and select **"Run as administrator"**.
 
 > 💡 **Why does it need Administrator rights?**  
@@ -58,7 +60,37 @@ The app will open up with your laptop's live temperatures, fan controls, and pow
 
 ---
 
+## 🔌 How to Install PawnIO (Optional — For CPU Power Limits)
+
+Predator Control App works **100% out of the box** for fan speeds, power modes, RGB lighting, battery care, and MUX switching without installing anything extra.
+
+If you also want **direct CPU Power Limit control (PL1 and PL2 wattage tuning and undervolting/capping)**, you can install **PawnIO** — a trusted, lightweight open-source Ring-0 driver:
+
+### 🚀 Option A: One-Line WinGet Install (Fastest)
+Open **PowerShell** or **Command Prompt as Administrator** and run:
+```cmd
+winget install -e --id namazso.PawnIO
+```
+
+### 📥 Option B: Manual Installer
+1. Download the installer directly from **[pawnio.eu](https://pawnio.eu)** or from the **[PawnIO Setup GitHub Releases](https://github.com/namazso/PawnIO.Setup/releases/latest)**.
+2. Run `PawnIO.Setup.exe` and complete the quick installation wizard.
+3. Completely close and relaunch **Predator Control App as Administrator**.
+4. Inside the app, click the **"⚡ Hardware Capabilities"** button. You will see:
+   ```
+   PawnIO Driver: Active (MSR & MMIO Unlocked)
+   ```
+   Your CPU's PL1 and PL2 power limit sliders are now fully operational!
+
+---
+
 ## ❓ Common Questions & Troubleshooting
+
+<details>
+<summary><b>🔌 Do I have to install PawnIO?</b></summary>
+
+> **No!** PawnIO is completely optional. The app works normally without it for fan curves, modes, lighting, refresh rate, and battery control. PawnIO is only needed if you wish to adjust your Intel CPU's PL1 and PL2 wattage limits directly at the silicon level.
+</details>
 
 <details>
 <summary><b>🔵 Windows shows a blue screen saying "Windows protected your PC"?</b></summary>
@@ -101,6 +133,12 @@ The app will open up with your laptop's live temperatures, fan controls, and pow
 - **5 Hardware Power Profiles**: Instantly switch between **Quiet / Silent**, **Balanced**, **Performance**, **Turbo**, and **Eco**.
 - **Auto AC/Battery Switching**: Automatically switches to battery-saving profiles when you unplug your charger, and restores high performance when plugged back in.
 - **Physical Predator Key**: Press the dedicated physical "Mode" key on your laptop's keyboard to cycle power modes, with the Mode Key LED in sync!
+- **Fast Keyboard Shortcuts**: `Predator + 1` (Eco), `Predator + 2` (Quiet), `Predator + 3` (Balanced), `Predator + 4` (Performance), `Predator + 5` (Turbo).
+
+### ⚡ CPU Power Limit Control (PL1 / PL2) via PawnIO
+- **Ring-0 Intel RAPL Control**: Real-time adjustment of PL1 (Sustained Power) and PL2 (Short Burst Power) limits in Watts.
+- **MSR & MMIO Synchronization**: Double-buffered register locking with atomic tau preservation.
+- **Dynamic Thermal Safety Arbitration**: Automatic thermal ceiling protection without overwriting your saved custom profiles.
 
 ### ❄️ Advanced Fan & Cooling Control
 - **Direct EC Hardware Access**: Communicates directly with your laptop's Embedded Controller (EC) chip via high-speed HID commands, with automatic fallback to Acer WMI.
@@ -206,7 +244,7 @@ dotnet restore PredatorControlApp.slnx
 # 3. Build the solution
 dotnet build PredatorControlApp.slnx -c Release
 
-# 4. Run all 908 unit tests
+# 4. Run automated test suite
 dotnet test PredatorControlApp.slnx
 
 # 5. Publish the standalone single-file binary
