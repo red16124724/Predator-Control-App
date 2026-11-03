@@ -11,7 +11,7 @@ using Xunit;
 
 namespace PredatorControlApp.Tests
 {
-    [Collection("NoParallel")]
+    [Collection("KeyboardHookTests")]
     public class GameSyncAndHotkeyStressTests : IDisposable
     {
         private readonly string _tempDir;

@@ -38,6 +38,7 @@ namespace PredatorControlApp.Tests
 
     /// </summary>
 
+    [Collection("AcerServiceClientTests")]
     public class ZoneLightingHardwareAndUiTests
 
     {

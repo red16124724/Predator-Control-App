@@ -12,7 +12,7 @@ using Xunit;
 
 namespace PredatorControlApp.Tests
 {
-    [Collection("NoParallel")]
+    [Collection("KeyboardHookTests")]
     public class ModeShortcutTests : IDisposable
     {
         private const int WM_KEYDOWN = 0x0100;

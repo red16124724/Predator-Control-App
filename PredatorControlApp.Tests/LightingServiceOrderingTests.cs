@@ -4,6 +4,7 @@ using Xunit;
 
 namespace PredatorControlApp.Tests;
 
+[Collection("AcerServiceClientTests")]
 public sealed class LightingServiceOrderingTests
 {
     [Theory]

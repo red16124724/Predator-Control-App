@@ -10,6 +10,7 @@ using PredatorControlApp;
 
 namespace PredatorControlApp.Tests;
 
+[Collection("AcerServiceClientTests")]
 public sealed class LifecyclePersistenceAndBackgroundServiceStressTests
 {
     #region 1. RegistrySafety & AppSettings Corrupt Value Recovery & Atomic Writes

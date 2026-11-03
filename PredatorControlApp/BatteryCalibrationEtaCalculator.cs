@@ -71,6 +71,7 @@ namespace PredatorControlApp
 
         public void Reset()
         {
+            PredatorNativeMigrations.BatteryEtaReset();
             lock (_syncLock)
             {
                 _smoothedRate = null;
@@ -124,6 +125,7 @@ namespace PredatorControlApp
                     {
                         _lastCapacity = capacity;
                         _lastCapacityTimestamp = timestamp;
+                        _smoothedPercentPerMinute = null;
                         return;
                     }
 
@@ -187,7 +189,7 @@ namespace PredatorControlApp
                 {
                     double minutes = (timestamp - _lastPercentTimestamp.Value).TotalMinutes;
                     // Detect sleep/hibernate or clock skew gap: if more than 5 minutes elapsed, re-baseline without rate corruption
-                    if (minutes > 5.0)
+                    if (minutes > 120.0)
                     {
                         _lastPercent = percent;
                         _lastPercentTimestamp = timestamp;
@@ -284,8 +286,9 @@ namespace PredatorControlApp
             // clamps. It returns 1 when it could not produce an estimate, in which
             // case the managed path below handles warm-up, re-baselining and the
             // "nothing known yet" case.
+            double? rateForNative = directRate ?? _smoothedRate;
             int nativeResult = PredatorNativeMigrations.BatteryEtaCalculate(
-                phase, remainingCapacity, fullCapacity, directRate,
+                phase, remainingCapacity, fullCapacity, rateForNative,
                 allowWarmupFallback, batteryPercent, out double nativeSeconds);
             if (nativeResult == 0)
             {

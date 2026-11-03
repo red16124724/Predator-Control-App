@@ -423,12 +423,14 @@ pub unsafe extern "C" fn predator_hook_set_shortcuts(
     count: i32,
 ) -> i32 {
     crate::safe_ffi(0, || {
-        if (entries as usize) < 0x10000 || count <= 0 {
-            return 0;
-        }
         hook::with_hook(0, |state| {
-            state.set_shortcuts(entries, count);
-            state.shortcut_count() as i32
+            if (entries as usize) < 0x10000 || count <= 0 {
+                state.set_shortcuts(std::ptr::null(), 0);
+                0
+            } else {
+                state.set_shortcuts(entries, count);
+                state.shortcut_count() as i32
+            }
         })
     })
 }

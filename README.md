@@ -129,29 +129,29 @@ Change laptop performance states instantly from within any fullscreen game:
 
 ---
 
-## 🧹 How to Safely Disable PredatorSense & NitroSense (Optional)
+## 🧹 Safely Disable OEM PredatorSense / NitroSense (Optional)
 
-Predator Control App communicates directly with your laptop's hardware via ACPI, WMI, and EC transports. Acer background services are not required and can be disabled to reclaim system resources:
+To free up ~500 MB of RAM and eliminate OEM background CPU polling, disable stock services:
 
-### Step 1: Disable Background Services
-1. Press `Win + R`, type **`services.msc`**, and press **Enter**.
-2. Locate and disable the following services (if present on your system):
-   - `Acer Gaming Service`
-   - `Acer Quick Access Service`
-   - `AcerService`
-   - `Acer Power Button Service`
-   - `NitroSense Service` (on Nitro laptops)
-   - `PredatorSense Service` (on Predator laptops)
-3. For each service:
-   - Double-click the entry.
-   - Set **Startup type** to **Disabled**.
-   - Click **Stop** if running.
-   - Click **OK**.
+```powershell
+# Run PowerShell as Administrator:
+$services = @(
+    "Acer Gaming Service",
+    "Acer Quick Access Service",
+    "AcerService",
+    "Acer Power Button Service",
+    "NitroSense Service",
+    "PredatorSense Service"
+)
 
-### Step 2: Disable OEM Startup Applications
-1. Press `Ctrl + Shift + Esc` to open **Task Manager**.
-2. Navigate to the **Startup apps** tab.
-3. Locate **PredatorSense** or **NitroSense**, right-click, and select **Disable**.
+foreach ($svc in $services) {
+    if (Get-Service -Name $svc -ErrorAction SilentlyContinue) {
+        Stop-Service -Name $svc -Force -ErrorAction SilentlyContinue
+        Set-Service -Name $svc -StartupType Disabled
+        Write-Host "Disabled: $svc" -ForegroundColor Green
+    }
+}
+```
 
 ---
 

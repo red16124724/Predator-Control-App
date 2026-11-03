@@ -364,7 +364,8 @@ namespace PredatorControlApp
                         "Per-key write was not acknowledged. Falling back to 4-zone.", DateTime.UtcNow));
                 }
 
-                if ((_wmi == null && !AcerServiceClient.IsServiceReachable && _zoneWriter == null) || caps.Tier == KeyboardLightingTier.Unavailable)
+                bool hasService = caps.LightingServiceReachable || AcerServiceClient.CommandInterceptor != null;
+                if ((_wmi == null && !hasService && _zoneWriter == null) || caps.Tier == KeyboardLightingTier.Unavailable)
                 {
                     var status = new KeyboardLightingStatus(
                         false, true, KeyboardLightingTier.Unavailable,

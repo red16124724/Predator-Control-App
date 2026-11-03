@@ -718,6 +718,18 @@ fn test_ffi_misaligned_handles_and_migration_stress() {
         let unaligned_sc_ptr = unaligned_sc_mem.as_mut_ptr().add(1) as *mut ShortcutEntry;
         std::ptr::write_unaligned(unaligned_sc_ptr, sc);
         assert_eq!(predator_hook_set_shortcuts(unaligned_sc_ptr, 1), 1);
+        assert_eq!(predator_hook_set_shortcuts(std::ptr::null(), 0), 0);
+        predator_core::hook::with_hook((), |state| {
+            assert_eq!(state.shortcut_count(), 0);
+        });
+        assert_eq!(predator_hook_set_shortcuts(unaligned_sc_ptr, 1), 1);
+        predator_core::hook::with_hook((), |state| {
+            assert_eq!(state.shortcut_count(), 1);
+        });
+        assert_eq!(predator_hook_set_shortcuts(unaligned_sc_ptr, 0), 0);
+        predator_core::hook::with_hook((), |state| {
+            assert_eq!(state.shortcut_count(), 0);
+        });
 
         // 5. Unaligned samples for audio push
         let audio_handle = predator_audio_create(48000, 512, 16);

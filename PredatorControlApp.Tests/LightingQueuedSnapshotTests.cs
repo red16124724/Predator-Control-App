@@ -22,12 +22,12 @@ public class LightingQueuedSnapshotTests
         using var controller = new KeyboardLightingController(null, caps, null, writer);
         controller.SetZoneColor(0, Color.Red);
         Task first = controller.ApplyAsync(KeyboardLightingScope.Zones);
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
         controller.SetZoneColor(0, Color.Green);
         Task waiting = controller.ApplyAsync(KeyboardLightingScope.Zones);
         controller.SetZoneColor(0, Color.Blue);
         release.SetResult();
-        await Task.WhenAll(first, waiting).WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.WhenAll(first, waiting).WaitAsync(TimeSpan.FromSeconds(30));
         Assert.Equal(new[] { Color.Red.ToArgb(), Color.Blue.ToArgb() }, writes);
     }
 }

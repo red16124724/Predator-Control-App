@@ -811,6 +811,7 @@ namespace PredatorControlApp
             }
             catch { }
 
+            PredatorNativeMigrations.HookSetShortcuts(Array.Empty<NativeShortcutEntry>());
             ResetModifierStates();
             UninstallHookDirect();
             GC.KeepAlive(_proc);
