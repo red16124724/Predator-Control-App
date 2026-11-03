@@ -129,17 +129,6 @@ Change laptop performance states instantly from within any fullscreen game:
 
 ---
 
-## 📦 Verified Release Downloads
-
-All official binaries are built in clean environments and verified for SHA-256 integrity:
-
-| Asset | Size | Checksum (SHA-256) | Download |
-|---|---|---|---|
-| **PredatorControlApp-1.5.5-Standalone.zip** | ~54.4 MB | Verified Clean Package | [Download .zip](https://github.com/red16124724/Predator-Control-App/releases/download/v1.5.5/PredatorControlApp-1.5.5-Standalone.zip) |
-| **PredatorControlApp.exe** (Single Binary) | ~54.4 MB | Verified Standalone Executable | [Download .exe](https://github.com/red16124724/Predator-Control-App/releases/download/v1.5.5/PredatorControlApp.exe) |
-
----
-
 ## 🧹 How to Safely Disable PredatorSense & NitroSense (Optional)
 
 Predator Control App communicates directly with your laptop's hardware via ACPI, WMI, and EC transports. Acer background services are not required and can be disabled to reclaim system resources:
