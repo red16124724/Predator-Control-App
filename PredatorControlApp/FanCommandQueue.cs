@@ -4,6 +4,7 @@ internal enum FanCommandKind { Mode, Speeds, Cpu, Gpu, System }
 
 internal sealed class FanCommandQueue
 {
+    private const int MaxPendingCommands = 64;
     private readonly object _sync = new();
     private readonly LinkedList<(FanCommandKind Kind, Action Apply, TaskCompletionSource Completion)> _pending = new();
     private bool _running;
@@ -23,13 +24,21 @@ internal sealed class FanCommandQueue
             for (var node = _pending.First; node != null;)
             {
                 var next = node.Next;
-                if (kind == FanCommandKind.Mode || (kind != FanCommandKind.Speeds && node.Value.Kind == kind))
+                if (kind == FanCommandKind.Mode || node.Value.Kind == kind)
                 {
                     node.Value.Completion.TrySetResult();
                     _pending.Remove(node);
                 }
                 node = next;
             }
+
+            while (_pending.Count >= MaxPendingCommands && _pending.First != null)
+            {
+                var dropped = _pending.First;
+                dropped.Value.Completion.TrySetResult();
+                _pending.RemoveFirst();
+            }
+
             _pending.AddLast((kind, apply, completion));
             if (!_running)
             {

@@ -322,7 +322,95 @@ namespace PredatorControlApp
 
 
 
-        private ManagementObject? GetWmiObjectUnderLock()
+
+        public static bool SafeConvertToUInt64(object? val, out ulong result)
+        {
+            result = 0;
+            if (val == null) return false;
+
+            try
+            {
+                switch (val)
+                {
+                    case ulong ul:
+                        result = ul;
+                        return true;
+                    case uint ui:
+                        result = ui;
+                        return true;
+                    case ushort us:
+                        result = us;
+                        return true;
+                    case byte b:
+                        result = b;
+                        return true;
+                    case long l:
+                        result = unchecked((ulong)l);
+                        return true;
+                    case int i:
+                        result = unchecked((ulong)(long)i);
+                        return true;
+                    case short s:
+                        result = unchecked((ulong)(ushort)s);
+                        return true;
+                    case sbyte sb:
+                        result = unchecked((ulong)(byte)sb);
+                        return true;
+                    case byte[] bytes:
+                        if (bytes.Length >= 8)
+                        {
+                            result = BitConverter.ToUInt64(bytes, 0);
+                            return true;
+                        }
+                        if (bytes.Length >= 4)
+                        {
+                            result = BitConverter.ToUInt32(bytes, 0);
+                            return true;
+                        }
+                        if (bytes.Length >= 2)
+                        {
+                            result = BitConverter.ToUInt16(bytes, 0);
+                            return true;
+                        }
+                        if (bytes.Length == 1)
+                        {
+                            result = bytes[0];
+                            return true;
+                        }
+                        return false;
+                    case string str:
+                        string sVal = str.Trim();
+                        if (sVal.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return ulong.TryParse(sVal.Substring(2), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out result);
+                        }
+                        return ulong.TryParse(sVal, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out result);
+                    default:
+                        result = Convert.ToUInt64(val, System.Globalization.CultureInfo.InvariantCulture);
+                        return true;
+                }
+            }
+            catch
+            {
+                result = 0;
+                return false;
+            }
+        }
+
+        public static bool SafeConvertToUInt32(object? val, out uint result)
+        {
+            result = 0;
+            if (val == null) return false;
+
+            if (SafeConvertToUInt64(val, out ulong r64))
+            {
+                result = unchecked((uint)r64);
+                return true;
+            }
+            return false;
+        }
+
+                private ManagementObject? GetWmiObjectUnderLock()
 
         {
 
@@ -613,9 +701,11 @@ namespace PredatorControlApp
                         {
                             if (prop.Name != "ReturnValue" && !prop.IsArray && prop.Value != null)
                             {
-                                ulong result = Convert.ToUInt64(prop.Value);
-                                res = ((result & 0xFF) == 0, result);
-                                return res;
+                                if (SafeConvertToUInt64(prop.Value, out ulong result))
+                                {
+                                    res = ((result & 0xFF) == 0, result);
+                                    return res;
+                                }
                             }
                         }
                     }
@@ -709,6 +799,7 @@ namespace PredatorControlApp
                 {
                     try { acquired = mutex.WaitOne(timeoutMs); }
                     catch (AbandonedMutexException) { acquired = true; }
+                    catch (ObjectDisposedException) { acquired = false; }
                 }
 
                 if (mutex != null && !acquired)
@@ -758,9 +849,8 @@ namespace PredatorControlApp
                     if (outParams != null)
                     {
                         var gmOut = TryGetPropertyValue(outParams, "gmOutput");
-                        if (gmOut != null)
+                        if (gmOut != null && SafeConvertToUInt64(gmOut, out raw))
                         {
-                            raw = Convert.ToUInt64(gmOut);
                             ok = true;
                         }
                     }
@@ -856,11 +946,9 @@ namespace PredatorControlApp
 
                     var gmOut = TryGetPropertyValue(outParams, "gmOutput");
 
-                    if (gmOut != null)
+                    if (gmOut != null && SafeConvertToUInt64(gmOut, out ulong result))
 
                     {
-
-                        ulong result = Convert.ToUInt64(gmOut);
 
                         res = ((result & 0xFF) == 0, result);
 
@@ -961,11 +1049,9 @@ namespace PredatorControlApp
 
                     var gmOut = TryGetPropertyValue(outParams, "gmOutput");
 
-                    if (gmOut != null)
+                    if (gmOut != null && SafeConvertToUInt64(gmOut, out ulong result))
 
                     {
-
-                        ulong result = Convert.ToUInt64(gmOut);
 
                         success = (result & 0xFF) == 0;
 
@@ -1070,11 +1156,9 @@ namespace PredatorControlApp
 
                     var gmOut = TryGetPropertyValue(outParams, "gmOutput");
 
-                    if (gmOut != null)
+                    if (gmOut != null && SafeConvertToUInt64(gmOut, out ulong result))
 
                     {
-
-                        ulong result = Convert.ToUInt64(gmOut);
 
                         success = (result & 0xFF) == 0;
 
@@ -1206,11 +1290,9 @@ namespace PredatorControlApp
 
                         var gmOut = TryGetPropertyValue(outParams, "gmOutput");
 
-                        if (gmOut != null)
+                        if (gmOut != null && SafeConvertToUInt64(gmOut, out raw))
 
                         {
-
-                            raw = Convert.ToUInt64(gmOut);
 
                             queryOk = true;
 
@@ -1346,11 +1428,9 @@ namespace PredatorControlApp
 
                         var gmOut = TryGetPropertyValue(outParams, "gmOutput");
 
-                        if (gmOut != null)
+                        if (gmOut != null && SafeConvertToUInt64(gmOut, out raw))
 
                         {
-
-                            raw = Convert.ToUInt64(gmOut);
 
                             queryOk = true;
 
@@ -2394,7 +2474,7 @@ namespace PredatorControlApp
 
                 _appliedHardwareMode = 0;
 
-                int effBrightness = brightness >= 0 ? Math.Clamp(brightness, 0, 100) : (int)_brightness;
+                int effBrightness = brightness == -1 ? (int)_brightness : Math.Clamp(brightness, 0, 100);
                 _brightness = (byte)effBrightness;
 
 
@@ -2652,7 +2732,7 @@ namespace PredatorControlApp
                 }
 
                 // 2. Dual-dispatch SetGamingKBBacklight for modern Acer laptops (PHN14, PHN16, PHN18, etc.) on newer BIOS
-                effBrightness = brightness >= 0 ? Math.Clamp(brightness, 0, 100) : _brightness;
+                effBrightness = brightness == -1 ? (int)_brightness : Math.Clamp(brightness, 0, 100);
                 byte[] kbPayload = new byte[16];
                 kbPayload[0] = 0; // Mode 0 Static
                 kbPayload[1] = 0;
@@ -2662,9 +2742,9 @@ namespace PredatorControlApp
                 if (colors.Count == 1)
                 {
                     Color color = colors[0];
-                    byte scaledR = color.R;
-                    byte scaledG = color.G;
-                    byte scaledB = color.B;
+                    byte scaledR = (byte)((color.R * colorBrightness) / 100);
+                    byte scaledG = (byte)((color.G * colorBrightness) / 100);
+                    byte scaledB = (byte)((color.B * colorBrightness) / 100);
                     if (effBrightness > 0)
                     {
                         if (color.R > 0 && scaledR == 0) scaledR = 1;
@@ -2695,9 +2775,9 @@ namespace PredatorControlApp
                     foreach (var (zoneIdx, colorIdx) in mappings)
                     {
                         Color color = colors[colorIdx];
-                        byte scaledR = color.R;
-                        byte scaledG = color.G;
-                        byte scaledB = color.B;
+                        byte scaledR = (byte)((color.R * colorBrightness) / 100);
+                        byte scaledG = (byte)((color.G * colorBrightness) / 100);
+                        byte scaledB = (byte)((color.B * colorBrightness) / 100);
                         if (effBrightness > 0)
                         {
                             if (color.R > 0 && scaledR == 0) scaledR = 1;
@@ -2721,9 +2801,9 @@ namespace PredatorControlApp
                     for (int i = 0; i < count; i++)
                     {
                         Color color = colors[colors.Count == 2 ? i / 2 : i];
-                        byte scaledR = color.R;
-                        byte scaledG = color.G;
-                        byte scaledB = color.B;
+                        byte scaledR = (byte)((color.R * colorBrightness) / 100);
+                        byte scaledG = (byte)((color.G * colorBrightness) / 100);
+                        byte scaledB = (byte)((color.B * colorBrightness) / 100);
                         if (effBrightness > 0)
                         {
                             if (color.R > 0 && scaledR == 0) scaledR = 1;
@@ -3563,9 +3643,15 @@ namespace PredatorControlApp
 
                     }
 
-                    uint result = Convert.ToUInt32(rawRet);
+                    if (SafeConvertToUInt32(rawRet, out uint result))
 
-                    return result == 0;
+                    {
+
+                        return result == 0;
+
+                    }
+
+                    return false;
 
                 }
 
@@ -3678,9 +3764,7 @@ namespace PredatorControlApp
 
                     var fnList = TryGetPropertyValue(outParams, "uFunctionList");
 
-                    if (fnList == null) return false;
-
-                    ulong list = Convert.ToUInt64(fnList);
+                    if (fnList == null || !SafeConvertToUInt64(fnList, out ulong list)) return false;
 
                     return (list & 2UL) != 0;
 
@@ -3746,7 +3830,7 @@ namespace PredatorControlApp
 
                         if (rawRet is byte[] retBytes && retBytes.Length > 0 && retBytes.Any(b => b != 0)) return null;
 
-                        if (rawRet is not byte[] && Convert.ToUInt32(rawRet) != 0) return null;
+                        if (rawRet is not byte[] && SafeConvertToUInt32(rawRet, out uint rCode) && rCode != 0) return null;
 
                     }
 
@@ -3758,7 +3842,7 @@ namespace PredatorControlApp
 
                     if (fnList == null || fnStatus == null) return null;
 
-                    ulong list = Convert.ToUInt64(fnList);
+                    if (!SafeConvertToUInt64(fnList, out ulong list)) return null;
 
                     var status = fnStatus as byte[];
 
@@ -3860,11 +3944,11 @@ namespace PredatorControlApp
 
                                 }
 
-                                else
+                                else if (SafeConvertToUInt32(rawRet, out uint rVal))
 
                                 {
 
-                                    healthOk = Convert.ToUInt32(rawRet) == 0;
+                                    healthOk = rVal == 0;
 
                                 }
 
@@ -3904,11 +3988,11 @@ namespace PredatorControlApp
 
                             var retCode = TryGetPropertyValue(outDataParams, "uReturnCode");
 
-                            if (retCode != null)
+                            if (retCode != null && SafeConvertToUInt32(retCode, out uint bacVal))
 
                             {
 
-                                bacOk = Convert.ToUInt32(retCode) == 0;
+                                bacOk = bacVal == 0;
 
                             }
 
@@ -4035,11 +4119,9 @@ namespace PredatorControlApp
 
                         var gmOut = TryGetPropertyValue(outParams, "gmOutput");
 
-                        if (gmOut != null)
+                        if (gmOut != null && SafeConvertToUInt64(gmOut, out raw))
 
                         {
-
-                            raw = Convert.ToUInt64(gmOut);
 
                             queryOk = true;
 

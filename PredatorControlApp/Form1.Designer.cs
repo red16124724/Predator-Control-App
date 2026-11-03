@@ -66,6 +66,10 @@ namespace PredatorControlApp
                     try { _trayIcon.Dispose(); } catch { }
                     _trayIcon = null;
                 }
+                if (this.Icon != null && !ReferenceEquals(this.Icon, SystemIcons.Application))
+                {
+                    try { this.Icon.Dispose(); } catch { }
+                }
                 try { _trayMenu?.Dispose(); } catch { }
                 _trayMenu = null;
                 if (_timer != null)

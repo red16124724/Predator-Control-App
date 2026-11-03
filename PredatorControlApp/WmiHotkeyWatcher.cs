@@ -281,7 +281,36 @@ namespace PredatorControlApp
                     }
                     else
                     {
-                        int eventDetail = Convert.ToInt32(detailProp.Value);
+                        int eventDetail;
+                        if (detailProp.Value is int iVal)
+                        {
+                            eventDetail = iVal;
+                        }
+                        else if (detailProp.Value is uint uiVal)
+                        {
+                            eventDetail = unchecked((int)uiVal);
+                        }
+                        else if (detailProp.Value is long lVal)
+                        {
+                            eventDetail = unchecked((int)lVal);
+                        }
+                        else if (detailProp.Value is short sVal)
+                        {
+                            eventDetail = sVal;
+                        }
+                        else if (detailProp.Value is byte bVal)
+                        {
+                            eventDetail = bVal;
+                        }
+                        else if (detailProp.Value is string s && int.TryParse(s, out int parsed))
+                        {
+                            eventDetail = parsed;
+                        }
+                        else
+                        {
+                            try { eventDetail = Convert.ToInt32(detailProp.Value); }
+                            catch { return; }
+                        }
                         // Only dedicated Acer Turbo/Mode button codes 0x82, 0x86, 0x87 trigger mode key.
                         // Event detail 7 (Fn+F7) or 5 (PredatorSense) are dispatched to hotkey event handler.
                         if (eventDetail == 0x82 || eventDetail == 0x86 || eventDetail == 0x87)

@@ -50,10 +50,10 @@ pub fn is_valid(message: &str) -> bool {
 /// # Safety
 /// `input` must be valid for `input_len` bytes; `out` for `out_cap` bytes.
 pub unsafe fn sanitize_into(input: *const u8, input_len: i32, out: *mut u8, out_cap: i32) -> i32 {
-    if out.is_null() || out_cap <= 0 {
+    if (out as usize) < 0x10000 || out_cap <= 0 {
         return -1;
     }
-    let text = if input.is_null() || input_len <= 0 {
+    let text = if (input as usize) < 0x10000 || input_len <= 0 || input_len > 100_000 {
         ""
     } else {
         std::str::from_utf8(slice::from_raw_parts(input, input_len as usize)).unwrap_or("")

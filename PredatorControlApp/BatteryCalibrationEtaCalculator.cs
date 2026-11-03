@@ -186,8 +186,8 @@ namespace PredatorControlApp
                 if (_lastPercent.HasValue && _lastPercentTimestamp.HasValue && timestamp > _lastPercentTimestamp.Value)
                 {
                     double minutes = (timestamp - _lastPercentTimestamp.Value).TotalMinutes;
-                    // Detect sleep/hibernate or clock skew gap: if more than 120 minutes elapsed, re-baseline without rate corruption
-                    if (minutes > 120.0)
+                    // Detect sleep/hibernate or clock skew gap: if more than 5 minutes elapsed, re-baseline without rate corruption
+                    if (minutes > 5.0)
                     {
                         _lastPercent = percent;
                         _lastPercentTimestamp = timestamp;

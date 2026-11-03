@@ -74,7 +74,13 @@ pub unsafe fn project_series(
     max: f64,
     out: *mut f32,
 ) -> i32 {
-    if samples.is_null() || out.is_null() || count <= 0 || width <= 0.0 || height <= 0.0 {
+    if (samples as usize) < 0x10000
+        || (out as usize) < 0x10000
+        || count <= 0
+        || count > 100_000
+        || width <= 0.0
+        || height <= 0.0
+    {
         return 0;
     }
 
@@ -200,15 +206,42 @@ mod tests {
         let samples = [1.0];
         unsafe {
             assert_eq!(
-                project_series(std::ptr::null(), 1, 1, 10.0, 10.0, 0.0, 1.0, out.as_mut_ptr()),
+                project_series(
+                    std::ptr::null(),
+                    1,
+                    1,
+                    10.0,
+                    10.0,
+                    0.0,
+                    1.0,
+                    out.as_mut_ptr()
+                ),
                 0
             );
             assert_eq!(
-                project_series(samples.as_ptr(), 0, 1, 10.0, 10.0, 0.0, 1.0, out.as_mut_ptr()),
+                project_series(
+                    samples.as_ptr(),
+                    0,
+                    1,
+                    10.0,
+                    10.0,
+                    0.0,
+                    1.0,
+                    out.as_mut_ptr()
+                ),
                 0
             );
             assert_eq!(
-                project_series(samples.as_ptr(), 1, 1, 10.0, 10.0, 0.0, 1.0, std::ptr::null_mut()),
+                project_series(
+                    samples.as_ptr(),
+                    1,
+                    1,
+                    10.0,
+                    10.0,
+                    0.0,
+                    1.0,
+                    std::ptr::null_mut()
+                ),
                 0
             );
         }

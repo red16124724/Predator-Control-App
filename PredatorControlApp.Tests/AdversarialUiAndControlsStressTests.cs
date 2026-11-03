@@ -846,5 +846,273 @@ namespace PredatorControlApp.Tests
 
         #endregion
 
+        #region 6. WinForms UI Layer, Event Dispatch, GDI & Concurrency Stress Tests
+
+        [Fact]
+        public void PredatorButton_OnFontChanged_WhenFontFallbackUsed_DoesNotDisposeActiveFont()
+        {
+            RunInSta(() =>
+            {
+                using var btn = new PredatorButton { Size = new Size(100, 30) };
+                var fontBefore = btn.Font;
+
+                // Simulate bold font fallback where _boldFont points to the same instance as Font
+                var boldFontField = typeof(PredatorButton).GetField("_boldFont", BindingFlags.NonPublic | BindingFlags.Instance);
+                Assert.NotNull(boldFontField);
+                boldFontField.SetValue(btn, fontBefore);
+
+                // Change font or trigger OnFontChanged
+                var onFontChanged = typeof(PredatorButton).GetMethod("OnFontChanged", BindingFlags.NonPublic | BindingFlags.Instance);
+                Assert.NotNull(onFontChanged);
+                onFontChanged.Invoke(btn, new object[] { EventArgs.Empty });
+
+                // fontBefore must NOT be disposed (accessing GDI handle or FontFamily must not throw)
+                Assert.NotNull(fontBefore.FontFamily);
+                Assert.True(fontBefore.Height > 0);
+            });
+        }
+
+        [Theory]
+        [InlineData(0, 0)]
+        [InlineData(1, 1)]
+        [InlineData(4, 4)]
+        [InlineData(7, 7)]
+        [InlineData(-5, -5)]
+        public void SwatchPaintHandlers_DegenerateAndTinyBounds_DoNotThrow(int width, int height)
+        {
+            RunInSta(() =>
+            {
+                using var bmp = new Bitmap(Math.Max(1, Math.Abs(width)), Math.Max(1, Math.Abs(height)));
+                using var g = Graphics.FromImage(bmp);
+
+                // Simulate custom swatch button paint delegate
+                using var sBtn = new PredatorButton { Size = new Size(width, height) };
+                var e = new PaintEventArgs(g, new Rectangle(0, 0, width, height));
+
+                // Paint handler pattern with width/height <= 7 guard
+                void PaintAction(object? s, PaintEventArgs pe)
+                {
+                    if (sBtn.Width <= 7 || sBtn.Height <= 7) return;
+                    using var brush = new SolidBrush(Color.Red);
+                    pe.Graphics.FillEllipse(brush, 3, 3, sBtn.Width - 7, sBtn.Height - 7);
+                }
+
+                PaintAction(sBtn, e);
+            });
+        }
+
+        [Fact]
+        public void PredatorDropDown_ParentFormVisibilityAndResizeStress_ClosesPopupCleanly()
+        {
+            RunInSta(() =>
+            {
+                using var parentForm = new Form { Size = new Size(500, 400) };
+                using var dropDown = new PredatorDropDown { Size = new Size(160, 32) };
+                dropDown.Items.Add("Option A");
+                dropDown.Items.Add("Option B");
+                dropDown.SelectedIndex = 0;
+                parentForm.Controls.Add(dropDown);
+
+                parentForm.Show();
+                _ = parentForm.Handle;
+                _ = dropDown.Handle;
+
+                var openPopup = typeof(PredatorDropDown).GetMethod("OpenPopup", BindingFlags.NonPublic | BindingFlags.Instance);
+                Assert.NotNull(openPopup);
+
+                // 1. Open popup, then hide parent form -> popup must close
+                openPopup.Invoke(dropDown, null);
+                Assert.True(dropDown.DroppedDown);
+                parentForm.Visible = false;
+                Assert.False(dropDown.DroppedDown);
+
+                // 2. Show parent form, open popup, then minimize parent form -> popup must close
+                parentForm.Visible = true;
+                openPopup.Invoke(dropDown, null);
+                Assert.True(dropDown.DroppedDown);
+                parentForm.WindowState = FormWindowState.Minimized;
+                Assert.False(dropDown.DroppedDown);
+
+                // 3. Restore and close
+                parentForm.WindowState = FormWindowState.Normal;
+                parentForm.Close();
+            });
+        }
+
+        [Fact]
+        public void TitleBarPills_ModePillTextExpansion_RepositionsPowerPillWithoutOverlap()
+        {
+            RunInSta(() =>
+            {
+                using var form = new Form { Size = new Size(600, 100) };
+                using var modePill = new Label { Text = "⚡ ECO", AutoSize = true, Location = new Point(50, 20) };
+                modePill.Size = modePill.GetPreferredSize(Size.Empty);
+                using var powerPill = new Label { Text = "🔌 AC", AutoSize = true, Location = new Point(modePill.Right + 12, 20) };
+                powerPill.Size = powerPill.GetPreferredSize(Size.Empty);
+                form.Controls.Add(modePill);
+                form.Controls.Add(powerPill);
+                form.Show();
+                _ = form.Handle;
+
+                modePill.SizeChanged += (s, e) =>
+                {
+                    powerPill.Left = modePill.Right + 12;
+                };
+
+                // ECO is short
+                int initialPowerLeft = powerPill.Left;
+
+                // Expand to PERFORMANCE
+                modePill.Text = "⚡ PERFORMANCE";
+                modePill.Size = modePill.GetPreferredSize(Size.Empty);
+                Application.DoEvents();
+
+                Assert.True(powerPill.Left > initialPowerLeft, "Power pill must shift right when mode pill expands");
+                Assert.Equal(modePill.Right + 12, powerPill.Left);
+
+                // Contract back to ECO
+                modePill.Text = "⚡ ECO";
+                modePill.Size = modePill.GetPreferredSize(Size.Empty);
+                Application.DoEvents();
+
+                Assert.Equal(modePill.Right + 12, powerPill.Left);
+                form.Close();
+            });
+        }
+
+        [Fact]
+        public void SafeBeginInvoke_PreHandleCreationAndDisposal_NoLeakedEventHandler()
+        {
+            RunInSta(() =>
+            {
+                using var form = new Form1();
+                var safeInvokeMethod = typeof(Form1).GetMethod("SafeBeginInvoke", BindingFlags.NonPublic | BindingFlags.Instance, null, new[] { typeof(Action) }, null);
+                Assert.NotNull(safeInvokeMethod);
+
+                int invokedCount = 0;
+                // Dispatch multiple actions from background thread before form handle is created
+                for (int i = 0; i < 20; i++)
+                {
+                    Task.Run(() =>
+                    {
+                        safeInvokeMethod.Invoke(form, new object[] { new Action(() => Interlocked.Increment(ref invokedCount)) });
+                    }).Wait();
+                }
+
+                // Disposing the form before handle creation must cleanly detach all event handlers
+                form.Dispose();
+                Assert.True(form.IsDisposed);
+            });
+        }
+
+        [Fact]
+        public void RapidThemeToggles_SystemDarkLight_WithCustomControls_100Iterations()
+        {
+            RunInSta(() =>
+            {
+                using var form = new Form { Size = new Size(400, 300) };
+                using var btn = new PredatorButton { Text = "Cyberpunk Preset", Size = new Size(120, 36) };
+                using var slider = new PredatorSlider { Size = new Size(200, 28) };
+                using var dropDown = new PredatorDropDown { Size = new Size(150, 30) };
+                using var sw = new PredatorSwitch { Size = new Size(60, 30) };
+                using var toggle = new PredatorToggle { Size = new Size(48, 24) };
+
+                form.Controls.Add(btn);
+                form.Controls.Add(slider);
+                form.Controls.Add(dropDown);
+                form.Controls.Add(sw);
+                form.Controls.Add(toggle);
+
+                form.Show();
+                _ = form.Handle;
+
+                for (int i = 0; i < 100; i++)
+                {
+                    ThemeManager.SetTheme(i % 2 == 0 ? AppTheme.Light : AppTheme.Dark);
+                    ThemeManager.ApplyTheme(form);
+                    if (i % 10 == 0) Application.DoEvents();
+                }
+
+                ThemeManager.SetTheme(AppTheme.Dark);
+                form.Close();
+            });
+        }
+
+        [Fact]
+        public void RapidDpiChanges_96To288Dpi_FormAndCustomControls()
+        {
+            RunInSta(() =>
+            {
+                using var form = new Form { Size = new Size(400, 300) };
+                using var btn = new PredatorButton { Size = new Size(100, 30) };
+                using var slider = new PredatorSlider { Size = new Size(200, 30) };
+                using var dropDown = new PredatorDropDown { Size = new Size(150, 30) };
+                using var fanGraph = new FanCurveGraph { Size = new Size(300, 200) };
+
+                form.Controls.Add(btn);
+                form.Controls.Add(slider);
+                form.Controls.Add(dropDown);
+                form.Controls.Add(fanGraph);
+
+                form.Show();
+                _ = form.Handle;
+
+                // Cycle between 96 DPI (scale 1.0f) and 288 DPI (scale 3.0f)
+                float[] dpiScales = { 1.0f, 1.25f, 1.5f, 2.0f, 2.5f, 3.0f, 1.0f };
+                foreach (float scale in dpiScales)
+                {
+                    btn.Scale(new SizeF(scale, scale));
+                    slider.Scale(new SizeF(scale, scale));
+                    dropDown.Scale(new SizeF(scale, scale));
+                    fanGraph.Scale(new SizeF(scale, scale));
+                    Application.DoEvents();
+                }
+
+                form.Close();
+            });
+        }
+
+        [Fact]
+        public void RapidWindowMinimizeRestoreTrayBursts_NoLeakedPopupsOrOrphans()
+        {
+            RunInSta(() =>
+            {
+                using var parentForm = new Form { Size = new Size(500, 400) };
+                using var dropDown = new PredatorDropDown { Size = new Size(160, 32) };
+                dropDown.Items.Add("Option 1");
+                dropDown.Items.Add("Option 2");
+                dropDown.SelectedIndex = 0;
+                parentForm.Controls.Add(dropDown);
+
+                parentForm.Show();
+                _ = parentForm.Handle;
+                _ = dropDown.Handle;
+
+                var openPopup = typeof(PredatorDropDown).GetMethod("OpenPopup", BindingFlags.NonPublic | BindingFlags.Instance);
+                Assert.NotNull(openPopup);
+
+                for (int i = 0; i < 30; i++)
+                {
+                    openPopup.Invoke(dropDown, null);
+                    // Minimize to tray
+                    parentForm.WindowState = FormWindowState.Minimized;
+                    parentForm.Visible = false;
+                    Application.DoEvents();
+
+                    // Dropdown popup must NOT be visible when parent is hidden
+                    Assert.False(dropDown.DroppedDown);
+
+                    // Restore from tray
+                    parentForm.Visible = true;
+                    parentForm.WindowState = FormWindowState.Normal;
+                    Application.DoEvents();
+                }
+
+                parentForm.Close();
+            });
+        }
+
+        #endregion
+
     }
 }

@@ -299,6 +299,14 @@ namespace PredatorControlApp
                 }
             };
 
+            txtShortcut.LostFocus += (s, e) =>
+            {
+                if (row.IsRecording)
+                {
+                    StopRecording(row);
+                }
+            };
+
             _pnlContainer.Controls.Add(btnRecord);
             _pnlContainer.Controls.Add(btnClear);
         }

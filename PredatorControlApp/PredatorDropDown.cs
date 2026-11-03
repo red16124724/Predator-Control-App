@@ -20,6 +20,8 @@ namespace PredatorControlApp
         private readonly List<string> _items = new();
         private Form? _popup;
         private ListBox? _listBox;
+        private Form? _parentFormRef;
+        private EventHandler? _parentStateChanged;
         private int _hoverIndex = -1;
         private static readonly Font s_defaultFont = new("Segoe UI", 9.25f, FontStyle.Regular);
         private readonly Action _themeHandler;
@@ -246,6 +248,12 @@ namespace PredatorControlApp
             base.OnMouseLeave(e);
         }
 
+        protected override void OnVisibleChanged(EventArgs e)
+        {
+            base.OnVisibleChanged(e);
+            if (!Visible && _isOpen) ClosePopup();
+        }
+
         protected override void OnEnabledChanged(EventArgs e)
         {
             Cursor = Enabled ? Cursors.Hand : Cursors.Default;
@@ -400,6 +408,18 @@ namespace PredatorControlApp
                 popup.Dispose();
                 return;
             }
+
+            _parentFormRef = parentForm;
+            _parentStateChanged = (s, e) =>
+            {
+                if (!Visible || parentForm.WindowState == FormWindowState.Minimized || !parentForm.Visible)
+                {
+                    ClosePopup();
+                }
+            };
+            parentForm.Resize += _parentStateChanged;
+            parentForm.VisibleChanged += _parentStateChanged;
+
             try
             {
                 if (!parentForm.Visible || !parentForm.IsHandleCreated || parentForm.WindowState == FormWindowState.Minimized)
@@ -439,6 +459,18 @@ namespace PredatorControlApp
                 var lb = _listBox;
                 _popup = null;
                 _listBox = null;
+
+                if (_parentFormRef != null && _parentStateChanged != null)
+                {
+                    try
+                    {
+                        _parentFormRef.Resize -= _parentStateChanged;
+                        _parentFormRef.VisibleChanged -= _parentStateChanged;
+                    }
+                    catch { }
+                    _parentFormRef = null;
+                    _parentStateChanged = null;
+                }
 
                 if (lb != null)
                 {

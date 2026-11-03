@@ -1,30 +1,27 @@
+use predator_core::curve::ControlPoint;
+use predator_core::thermal::NativeThermalDecision;
+use predator_core::{
+    predator_acpi_ppcc_entries, predator_acpi_ppcc_summary, predator_acpi_scan_tables,
+    predator_audio_beat_strength, predator_audio_create, predator_audio_destroy,
+    predator_audio_get_bands, predator_audio_get_level, predator_audio_is_beat,
+    predator_audio_push, predator_audio_render_zones, predator_audio_reset, predator_core_cleanup,
+    predator_core_init, predator_curve_create, predator_curve_destroy, predator_curve_interpolate,
+    predator_curve_reset, predator_curve_update, predator_echid_close, predator_echid_enumerate,
+    predator_echid_exchange, predator_echid_is_open, predator_echid_open,
+    predator_echid_report_length, predator_nvapi_get_gpu_count, predator_nvapi_get_gpu_load,
+    predator_nvapi_get_gpu_temperature, predator_nvapi_is_available, predator_nvapi_shutdown,
+    predator_pawnio_apply_power_limits, predator_pawnio_is_available, predator_pawnio_read_mmio32,
+    predator_pawnio_read_msr, predator_pawnio_write_mmio32, predator_pawnio_write_msr,
+    predator_rgb_apply_brightness, predator_rgb_blend, predator_rgb_create, predator_rgb_delay_ms,
+    predator_rgb_destroy, predator_rgb_frame_delay_ms, predator_rgb_hsv_to_rgb,
+    predator_rgb_next_frame, predator_rgb_render_frame, predator_rgb_reset,
+    predator_rgb_set_brightness, predator_telemetry_get_snapshot, predator_telemetry_set_interval,
+    predator_thermal_create, predator_thermal_destroy, predator_thermal_evaluate,
+    predator_thermal_reset, predator_thermal_set_profile,
+};
 use std::ptr::{null, null_mut};
 use std::sync::Arc;
 use std::thread;
-use predator_core::curve::ControlPoint;
-use predator_core::{
-    predator_core_init, predator_core_cleanup,
-    predator_curve_create, predator_curve_destroy, predator_curve_interpolate,
-    predator_curve_reset, predator_curve_update,
-    predator_pawnio_is_available, predator_pawnio_apply_power_limits,
-    predator_pawnio_read_mmio32, predator_pawnio_write_mmio32,
-    predator_pawnio_read_msr, predator_pawnio_write_msr,
-    predator_telemetry_get_snapshot, predator_telemetry_set_interval,
-    predator_thermal_evaluate, predator_thermal_create, predator_thermal_destroy,
-    predator_thermal_reset, predator_thermal_set_profile,
-    predator_rgb_create, predator_rgb_next_frame, predator_rgb_render_frame, predator_rgb_frame_delay_ms, predator_rgb_delay_ms,
-    predator_rgb_set_brightness, predator_rgb_reset, predator_rgb_destroy, predator_rgb_hsv_to_rgb,
-    predator_rgb_blend, predator_rgb_apply_brightness,
-    predator_audio_create, predator_audio_destroy, predator_audio_push, predator_audio_get_bands,
-    predator_audio_get_level, predator_audio_is_beat, predator_audio_beat_strength,
-    predator_audio_render_zones, predator_audio_reset,
-    predator_nvapi_is_available, predator_nvapi_get_gpu_load, predator_nvapi_get_gpu_temperature,
-    predator_nvapi_get_gpu_count, predator_nvapi_shutdown,
-    predator_acpi_ppcc_entries, predator_acpi_ppcc_summary, predator_acpi_scan_tables,
-    predator_echid_open, predator_echid_close, predator_echid_is_open, predator_echid_report_length,
-    predator_echid_exchange, predator_echid_enumerate,
-};
-use predator_core::thermal::NativeThermalDecision;
 
 #[test]
 fn test_ffi_null_safety_guards() {
@@ -39,11 +36,17 @@ fn test_ffi_null_safety_guards() {
         assert_eq!(predator_curve_update(handle, 50.0, null(), 4, 0), 50);
 
         // Zero point count with valid pointer
-        let pts = [ControlPoint { temp: 40, speed: 30 }];
+        let pts = [ControlPoint {
+            temp: 40,
+            speed: 30,
+        }];
         assert_eq!(predator_curve_update(handle, 50.0, pts.as_ptr(), 0, 0), 50);
 
         // Null handle with valid points
-        assert_eq!(predator_curve_update(null_mut(), 50.0, pts.as_ptr(), pts.len(), 0), 50);
+        assert_eq!(
+            predator_curve_update(null_mut(), 50.0, pts.as_ptr(), pts.len(), 0),
+            50
+        );
 
         // Reset and destroy with null handle must not panic or fault
         predator_curve_reset(null_mut());
@@ -56,9 +59,15 @@ fn test_ffi_null_safety_guards() {
         assert_eq!(predator_curve_interpolate(null(), 5, 50), 50);
 
         // Thermal evaluate with null handle / null decision pointer
-        assert_eq!(predator_thermal_evaluate(null_mut(), 50.0, 50.0, 45, 15, 45, null_mut()), -1);
+        assert_eq!(
+            predator_thermal_evaluate(null_mut(), 50.0, 50.0, 45, 15, 45, null_mut()),
+            -1
+        );
         let thermal = predator_thermal_create();
-        assert_eq!(predator_thermal_evaluate(thermal, 50.0, 50.0, 45, 15, 45, null_mut()), -1);
+        assert_eq!(
+            predator_thermal_evaluate(thermal, 50.0, 50.0, 45, 15, 45, null_mut()),
+            -1
+        );
         assert_eq!(predator_thermal_reset(null_mut()), -1);
         predator_thermal_destroy(null_mut());
         predator_thermal_destroy(thermal);
@@ -80,10 +89,22 @@ fn test_ffi_extreme_fuzz_temperatures() {
         assert!(!handle.is_null());
 
         let pts = [
-            ControlPoint { temp: 30, speed: 20 },
-            ControlPoint { temp: 50, speed: 40 },
-            ControlPoint { temp: 70, speed: 70 },
-            ControlPoint { temp: 90, speed: 100 },
+            ControlPoint {
+                temp: 30,
+                speed: 20,
+            },
+            ControlPoint {
+                temp: 50,
+                speed: 40,
+            },
+            ControlPoint {
+                temp: 70,
+                speed: 70,
+            },
+            ControlPoint {
+                temp: 90,
+                speed: 100,
+            },
         ];
 
         let extremes = [
@@ -127,11 +148,29 @@ fn test_ffi_thermal_coordinator_fuzzing() {
         let thermal = predator_thermal_create();
         assert!(!thermal.is_null());
         let mut decision = NativeThermalDecision::idle();
-        let temps = [-50.0, 0.0, 40.0, 85.0, 92.0, 98.0, 105.0, f64::NAN, f64::INFINITY];
+        let temps = [
+            -50.0,
+            0.0,
+            40.0,
+            85.0,
+            92.0,
+            98.0,
+            105.0,
+            f64::NAN,
+            f64::INFINITY,
+        ];
 
         for &cpu in &temps {
             for &gpu in &temps {
-                let res = predator_thermal_evaluate(thermal, cpu, gpu, 55, 15, 45, &mut decision as *mut _);
+                let res = predator_thermal_evaluate(
+                    thermal,
+                    cpu,
+                    gpu,
+                    55,
+                    15,
+                    45,
+                    &mut decision as *mut _,
+                );
                 assert_eq!(res, 0);
                 assert!((0..=3).contains(&decision.stage));
                 assert!((0..=100).contains(&decision.cpu_fan_floor));
@@ -140,8 +179,16 @@ fn test_ffi_thermal_coordinator_fuzzing() {
         }
 
         assert_eq!(predator_thermal_reset(thermal), 0);
-        assert_eq!(predator_thermal_set_profile(thermal, 1, 70.0, 90.0, 98.0, 65.0, 82.0, 88.0, 2.0, 90, 40, 12, 1, 0.4), 0);
-        assert_eq!(predator_thermal_evaluate(thermal, 99.0, 50.0, 55, 15, 45, &mut decision as *mut _), 0);
+        assert_eq!(
+            predator_thermal_set_profile(
+                thermal, 1, 70.0, 90.0, 98.0, 65.0, 82.0, 88.0, 2.0, 90, 40, 12, 1, 0.4
+            ),
+            0
+        );
+        assert_eq!(
+            predator_thermal_evaluate(thermal, 99.0, 50.0, 55, 15, 45, &mut decision as *mut _),
+            0
+        );
         assert_eq!(decision.stage, 3);
         predator_thermal_destroy(thermal);
     }
@@ -176,11 +223,26 @@ fn test_ffi_concurrent_multithreaded_stress() {
     const ITERATIONS: usize = 1000;
 
     let pts = Arc::new(vec![
-        ControlPoint { temp: 20, speed: 10 },
-        ControlPoint { temp: 40, speed: 30 },
-        ControlPoint { temp: 60, speed: 50 },
-        ControlPoint { temp: 80, speed: 80 },
-        ControlPoint { temp: 100, speed: 100 },
+        ControlPoint {
+            temp: 20,
+            speed: 10,
+        },
+        ControlPoint {
+            temp: 40,
+            speed: 30,
+        },
+        ControlPoint {
+            temp: 60,
+            speed: 50,
+        },
+        ControlPoint {
+            temp: 80,
+            speed: 80,
+        },
+        ControlPoint {
+            temp: 100,
+            speed: 100,
+        },
     ]);
 
     let mut handles = Vec::with_capacity(NUM_THREADS);
@@ -237,22 +299,36 @@ fn test_ffi_concurrent_multithreaded_stress() {
     }
 }
 
-
 #[test]
 fn test_ffi_unaligned_and_extreme_buffer_stress() {
     unsafe {
         // 1. Extreme buffer length (usize::MAX) must be rejected safely without crash
-        let pts = [ControlPoint { temp: 40, speed: 20 }];
+        let pts = [ControlPoint {
+            temp: 40,
+            speed: 20,
+        }];
         assert_eq!(predator_curve_interpolate(pts.as_ptr(), usize::MAX, 50), 50);
 
         let handle = predator_curve_create(2);
-        assert_eq!(predator_curve_update(handle, 50.0, pts.as_ptr(), usize::MAX, 0), 50);
+        assert_eq!(
+            predator_curve_update(handle, 50.0, pts.as_ptr(), usize::MAX, 0),
+            50
+        );
 
         // 2. Unaligned point buffer
         let pts_array = [
-            ControlPoint { temp: 30, speed: 20 },
-            ControlPoint { temp: 60, speed: 50 },
-            ControlPoint { temp: 90, speed: 90 },
+            ControlPoint {
+                temp: 30,
+                speed: 20,
+            },
+            ControlPoint {
+                temp: 60,
+                speed: 50,
+            },
+            ControlPoint {
+                temp: 90,
+                speed: 90,
+            },
         ];
         let mut unaligned_mem = [0u8; 64];
         let unaligned_ptr = unaligned_mem.as_mut_ptr().add(1) as *mut ControlPoint;
@@ -277,20 +353,41 @@ fn test_ffi_inverted_and_duplicate_curve_stress() {
     unsafe {
         // Inverted points
         let inv = [
-            ControlPoint { temp: 95, speed: 100 },
-            ControlPoint { temp: 80, speed: 80 },
-            ControlPoint { temp: 60, speed: 50 },
-            ControlPoint { temp: 40, speed: 20 },
+            ControlPoint {
+                temp: 95,
+                speed: 100,
+            },
+            ControlPoint {
+                temp: 80,
+                speed: 80,
+            },
+            ControlPoint {
+                temp: 60,
+                speed: 50,
+            },
+            ControlPoint {
+                temp: 40,
+                speed: 20,
+            },
         ];
         assert_eq!(predator_curve_interpolate(inv.as_ptr(), inv.len(), 30), 20);
         assert_eq!(predator_curve_interpolate(inv.as_ptr(), inv.len(), 50), 35);
         assert_eq!(predator_curve_interpolate(inv.as_ptr(), inv.len(), 70), 65);
-        assert_eq!(predator_curve_interpolate(inv.as_ptr(), inv.len(), 100), 100);
+        assert_eq!(
+            predator_curve_interpolate(inv.as_ptr(), inv.len(), 100),
+            100
+        );
 
         // Duplicate points with step jump
         let dup = [
-            ControlPoint { temp: 50, speed: 20 },
-            ControlPoint { temp: 50, speed: 80 },
+            ControlPoint {
+                temp: 50,
+                speed: 20,
+            },
+            ControlPoint {
+                temp: 50,
+                speed: 80,
+            },
         ];
         // At 50°C, fan jumps to 80% for safety
         assert_eq!(predator_curve_interpolate(dup.as_ptr(), dup.len(), 50), 80);
@@ -298,16 +395,27 @@ fn test_ffi_inverted_and_duplicate_curve_stress() {
         assert_eq!(predator_curve_interpolate(dup.as_ptr(), dup.len(), 60), 80);
 
         // Single point
-        let single = [ControlPoint { temp: 55, speed: 45 }];
-        assert_eq!(predator_curve_interpolate(single.as_ptr(), single.len(), 20), 45);
-        assert_eq!(predator_curve_interpolate(single.as_ptr(), single.len(), 55), 45);
-        assert_eq!(predator_curve_interpolate(single.as_ptr(), single.len(), 90), 45);
+        let single = [ControlPoint {
+            temp: 55,
+            speed: 45,
+        }];
+        assert_eq!(
+            predator_curve_interpolate(single.as_ptr(), single.len(), 20),
+            45
+        );
+        assert_eq!(
+            predator_curve_interpolate(single.as_ptr(), single.len(), 55),
+            45
+        );
+        assert_eq!(
+            predator_curve_interpolate(single.as_ptr(), single.len(), 90),
+            45
+        );
 
         // Empty points
         assert_eq!(predator_curve_interpolate(single.as_ptr(), 0, 50), 50);
     }
 }
-
 
 #[test]
 #[ignore = "writes real CPU power limits and registers; use designated test hardware"]
@@ -320,8 +428,8 @@ fn test_ffi_pawnio_fuzz_and_hazard_limits() {
         // Fuzz apply power limits with directional write hazards and extreme values
         let test_pairs: &[(u32, u32)] = &[
             (0, 0),
-            (45, 90),     // Normal condition: PL1 <= PL2
-            (120, 115),   // Hazard condition: New PL1 > Old PL2
+            (45, 90),   // Normal condition: PL1 <= PL2
+            (120, 115), // Hazard condition: New PL1 > Old PL2
             (150, 150),
             (250, 250),
             (10, 10),
@@ -395,7 +503,8 @@ fn test_ffi_curve_fuzz_random_floats_and_densities() {
 
         // Fuzz interpolation across dense heap-sorted slice
         for temp in -50..=150 {
-            let speed = predator_curve_update(handle, temp as f64, dense_pts.as_ptr(), dense_pts.len(), 0);
+            let speed =
+                predator_curve_update(handle, temp as f64, dense_pts.as_ptr(), dense_pts.len(), 0);
             assert!((10..=100).contains(&speed));
 
             let interp = predator_curve_interpolate(dense_pts.as_ptr(), dense_pts.len(), temp);
@@ -415,7 +524,10 @@ fn test_ffi_rgb_audio_nvapi_acpi_fuzz() {
         let mut frame_buf = [0u8; 32];
         let written = predator_rgb_next_frame(anim, frame_buf.as_mut_ptr(), 4);
         assert!(written >= 0);
-        assert_eq!(predator_rgb_render_frame(1, 10, 255, 0, 0, 255, frame_buf.as_mut_ptr(), 4), 4);
+        assert_eq!(
+            predator_rgb_render_frame(1, 10, 255, 0, 0, 255, frame_buf.as_mut_ptr(), 4),
+            4
+        );
         assert!(predator_rgb_frame_delay_ms(50) > 0);
         predator_rgb_set_brightness(anim, 200);
         predator_rgb_reset(anim);
@@ -423,17 +535,29 @@ fn test_ffi_rgb_audio_nvapi_acpi_fuzz() {
 
         // RGB helpers
         let mut out_rgb = [0u8; 3];
-        assert_eq!(predator_rgb_hsv_to_rgb(180.0, 1.0, 1.0, out_rgb.as_mut_ptr()), 0);
+        assert_eq!(
+            predator_rgb_hsv_to_rgb(180.0, 1.0, 1.0, out_rgb.as_mut_ptr()),
+            0
+        );
         let mut cur_buf = [10u8; 12];
         let tgt_buf = [20u8; 12];
-        assert_eq!(predator_rgb_blend(cur_buf.as_mut_ptr(), tgt_buf.as_ptr(), 4, 0.5), 0);
-        assert_eq!(predator_rgb_apply_brightness(cur_buf.as_mut_ptr(), 4, 128), 0);
+        assert_eq!(
+            predator_rgb_blend(cur_buf.as_mut_ptr(), tgt_buf.as_ptr(), 4, 0.5),
+            0
+        );
+        assert_eq!(
+            predator_rgb_apply_brightness(cur_buf.as_mut_ptr(), 4, 128),
+            0
+        );
 
         // 2. Audio
         let audio = predator_audio_create(44100, 256, 8);
         if !audio.is_null() {
             let samples = [0.1f32, 0.5f32, -0.3f32, 0.0f32, f32::NAN, f32::INFINITY];
-            assert_eq!(predator_audio_push(audio, samples.as_ptr(), samples.len(), 2), 0);
+            assert_eq!(
+                predator_audio_push(audio, samples.as_ptr(), samples.len(), 2),
+                0
+            );
             let mut bands = [0.0f32; 8];
             let bands_n = predator_audio_get_bands(audio, bands.as_mut_ptr(), 8);
             assert!(bands_n >= 0);
@@ -441,7 +565,8 @@ fn test_ffi_rgb_audio_nvapi_acpi_fuzz() {
             let _ = predator_audio_is_beat(audio);
             let _ = predator_audio_beat_strength(audio);
             let mut render_buf = [0u8; 24];
-            let _ = predator_audio_render_zones(audio, 255, 255, 255, 100, render_buf.as_mut_ptr(), 8);
+            let _ =
+                predator_audio_render_zones(audio, 255, 255, 255, 100, render_buf.as_mut_ptr(), 8);
             predator_audio_reset(audio);
             predator_audio_destroy(audio);
         }
@@ -458,12 +583,17 @@ fn test_ffi_rgb_audio_nvapi_acpi_fuzz() {
         // 4. ACPI
         let dummy_aml = [0x50, 0x50, 0x43, 0x43, 0x12, 0x0A, 0x04]; // PPCC signature prefix
         let mut entries = [predator_core::acpi::PpccEntry::default(); 4];
-        let _ = predator_acpi_ppcc_entries(dummy_aml.as_ptr(), dummy_aml.len(), entries.as_mut_ptr(), 4);
+        let _ = predator_acpi_ppcc_entries(
+            dummy_aml.as_ptr(),
+            dummy_aml.len(),
+            entries.as_mut_ptr(),
+            4,
+        );
         let mut summary = predator_core::acpi::PpccSummary::default();
         let _ = predator_acpi_ppcc_summary(dummy_aml.as_ptr(), dummy_aml.len(), &mut summary);
         let mut tables = [predator_core::acpi::AcpiTable::default(); 4];
-        let _ = predator_acpi_scan_tables(dummy_aml.as_ptr(), dummy_aml.len(), tables.as_mut_ptr(), 4);
-
+        let _ =
+            predator_acpi_scan_tables(dummy_aml.as_ptr(), dummy_aml.len(), tables.as_mut_ptr(), 4);
     }
 }
 
@@ -484,14 +614,17 @@ fn test_ffi_echid_hardware_exchange() {
 
 #[test]
 fn test_ffi_misaligned_handles_and_migration_stress() {
-    use predator_core::migration_exports::*;
     use predator_core::hook::ShortcutEntry;
+    use predator_core::migration_exports::*;
 
     unsafe {
         // 1. Misaligned handle safety (must never crash, segfault, or panic)
         let bad_rgb = 0x1 as *mut predator_core::rgb::RgbAnimator;
         let mut rgb_buf = [0u8; 12];
-        assert_eq!(predator_rgb_next_frame(bad_rgb, rgb_buf.as_mut_ptr(), 4), -1);
+        assert_eq!(
+            predator_rgb_next_frame(bad_rgb, rgb_buf.as_mut_ptr(), 4),
+            -1
+        );
         assert_eq!(predator_rgb_delay_ms(bad_rgb), 0);
         predator_rgb_set_brightness(bad_rgb, 50);
         predator_rgb_reset(bad_rgb);
@@ -499,12 +632,21 @@ fn test_ffi_misaligned_handles_and_migration_stress() {
 
         let bad_audio = 0x3 as *mut predator_core::audio::SpectrumAnalyzer;
         let mut bands_buf = [0.0f32; 16];
-        assert_eq!(predator_audio_push(bad_audio, bands_buf.as_ptr(), 16, 2), -1);
-        assert_eq!(predator_audio_get_bands(bad_audio, bands_buf.as_mut_ptr(), 16), -1);
+        assert_eq!(
+            predator_audio_push(bad_audio, bands_buf.as_ptr(), 16, 2),
+            -1
+        );
+        assert_eq!(
+            predator_audio_get_bands(bad_audio, bands_buf.as_mut_ptr(), 16),
+            -1
+        );
         assert_eq!(predator_audio_get_level(bad_audio), 0.0);
         assert_eq!(predator_audio_is_beat(bad_audio), 0);
         assert_eq!(predator_audio_beat_strength(bad_audio), 0.0);
-        assert_eq!(predator_audio_render_zones(bad_audio, 255, 0, 0, 100, rgb_buf.as_mut_ptr(), 4), -1);
+        assert_eq!(
+            predator_audio_render_zones(bad_audio, 255, 0, 0, 100, rgb_buf.as_mut_ptr(), 4),
+            -1
+        );
         predator_audio_reset(bad_audio);
         predator_audio_destroy(bad_audio);
 
@@ -518,7 +660,10 @@ fn test_ffi_misaligned_handles_and_migration_stress() {
         assert_eq!(predator_history_average(bad_history, &mut out_val), 0);
         assert_eq!(predator_history_latest(bad_history, &mut out_val), 0);
         let mut hist_snap = [0.0f64; 8];
-        assert_eq!(predator_history_snapshot(bad_history, hist_snap.as_mut_ptr(), 8), 0);
+        assert_eq!(
+            predator_history_snapshot(bad_history, hist_snap.as_mut_ptr(), 8),
+            0
+        );
         predator_history_clear(bad_history);
         predator_history_destroy(bad_history);
 
@@ -582,19 +727,46 @@ fn test_ffi_misaligned_handles_and_migration_stress() {
         for i in 0..16 {
             std::ptr::write_unaligned(unaligned_audio_ptr.add(i), 0.5f32);
         }
-        assert_eq!(predator_audio_push(audio_handle, unaligned_audio_ptr, 16, 1), 0);
+        assert_eq!(
+            predator_audio_push(audio_handle, unaligned_audio_ptr, 16, 1),
+            0
+        );
         predator_audio_destroy(audio_handle);
 
         // 6. Non-ASCII and invalid UTF-8 stress through procsync & pipeguard FFI
         let invalid_bytes = [0xFF, 0xFE, 0xFD, 0x80];
         let mut out_str_buf = [0u8; 32];
-        assert_eq!(predator_procsync_executable_name(invalid_bytes.as_ptr(), invalid_bytes.len() as i32, out_str_buf.as_mut_ptr(), 32), 0);
-        assert_eq!(predator_procsync_process_name(invalid_bytes.as_ptr(), invalid_bytes.len() as i32, out_str_buf.as_mut_ptr(), 32), 0);
-        assert_eq!(predator_pipeguard_is_valid(invalid_bytes.as_ptr(), invalid_bytes.len() as i32), 0);
+        assert_eq!(
+            predator_procsync_executable_name(
+                invalid_bytes.as_ptr(),
+                invalid_bytes.len() as i32,
+                out_str_buf.as_mut_ptr(),
+                32
+            ),
+            0
+        );
+        assert_eq!(
+            predator_procsync_process_name(
+                invalid_bytes.as_ptr(),
+                invalid_bytes.len() as i32,
+                out_str_buf.as_mut_ptr(),
+                32
+            ),
+            0
+        );
+        assert_eq!(
+            predator_pipeguard_is_valid(invalid_bytes.as_ptr(), invalid_bytes.len() as i32),
+            0
+        );
 
         // Multibyte process name
         let unicode_proc = "a🎮b.exe".as_bytes();
-        let written = predator_procsync_process_name(unicode_proc.as_ptr(), unicode_proc.len() as i32, out_str_buf.as_mut_ptr(), 32);
+        let written = predator_procsync_process_name(
+            unicode_proc.as_ptr(),
+            unicode_proc.len() as i32,
+            out_str_buf.as_mut_ptr(),
+            32,
+        );
         assert!(written > 0);
         let extracted = std::str::from_utf8(&out_str_buf[..written as usize]).unwrap();
         assert_eq!(extracted, "a🎮b");
@@ -603,7 +775,7 @@ fn test_ffi_misaligned_handles_and_migration_stress() {
 
 #[test]
 fn test_ffi_null_partition_pointer_protection() {
-        use predator_core::migration_exports::*;
+    use predator_core::migration_exports::*;
     use predator_core::thermal::NativeThermalDecision;
 
     unsafe {
@@ -612,18 +784,50 @@ fn test_ffi_null_partition_pointer_protection() {
         for &addr in &low_ptrs {
             // Curve follower
             let curve_handle = addr as *mut predator_core::curve::FanCurveFollower;
-            let pts = [ControlPoint { temp: 40, speed: 20 }];
-            assert_eq!(predator_curve_update(curve_handle, 50.0, pts.as_ptr(), pts.len(), 0), 50);
-            assert_eq!(predator_curve_update(std::ptr::null_mut(), 50.0, addr as *const ControlPoint, 1, 0), 50);
-            assert_eq!(predator_curve_interpolate(addr as *const ControlPoint, 1, 50), 50);
+            let pts = [ControlPoint {
+                temp: 40,
+                speed: 20,
+            }];
+            assert_eq!(
+                predator_curve_update(curve_handle, 50.0, pts.as_ptr(), pts.len(), 0),
+                50
+            );
+            assert_eq!(
+                predator_curve_update(
+                    std::ptr::null_mut(),
+                    50.0,
+                    addr as *const ControlPoint,
+                    1,
+                    0
+                ),
+                50
+            );
+            assert_eq!(
+                predator_curve_interpolate(addr as *const ControlPoint, 1, 50),
+                50
+            );
             predator_curve_reset(curve_handle);
             predator_curve_destroy(curve_handle);
 
             // Thermal coordinator
             let th_handle = addr as *mut predator_core::thermal::ThermalCoordinator;
-            assert_eq!(predator_thermal_evaluate(th_handle, 50.0, 50.0, 45, 15, 45, std::ptr::null_mut()), -1);
+            assert_eq!(
+                predator_thermal_evaluate(th_handle, 50.0, 50.0, 45, 15, 45, std::ptr::null_mut()),
+                -1
+            );
             let real_th = predator_thermal_create();
-            assert_eq!(predator_thermal_evaluate(real_th, 50.0, 50.0, 45, 15, 45, addr as *mut NativeThermalDecision), -1);
+            assert_eq!(
+                predator_thermal_evaluate(
+                    real_th,
+                    50.0,
+                    50.0,
+                    45,
+                    15,
+                    45,
+                    addr as *mut NativeThermalDecision
+                ),
+                -1
+            );
             predator_thermal_destroy(real_th);
             assert_eq!(predator_thermal_reset(th_handle), -1);
             predator_thermal_destroy(th_handle);
@@ -636,17 +840,29 @@ fn test_ffi_null_partition_pointer_protection() {
             predator_rgb_reset(rgb_handle);
             predator_rgb_destroy(rgb_handle);
             assert_eq!(predator_rgb_hsv_to_rgb(0.0, 1.0, 1.0, addr as *mut u8), -1);
-            assert_eq!(predator_rgb_blend(addr as *mut u8, addr as *const u8, 4, 0.5), -1);
+            assert_eq!(
+                predator_rgb_blend(addr as *mut u8, addr as *const u8, 4, 0.5),
+                -1
+            );
             assert_eq!(predator_rgb_apply_brightness(addr as *mut u8, 4, 128), -1);
 
             // Audio analyzer
             let audio_handle = addr as *mut predator_core::audio::SpectrumAnalyzer;
-            assert_eq!(predator_audio_push(audio_handle, addr as *const f32, 16, 2), -1);
-            assert_eq!(predator_audio_get_bands(audio_handle, addr as *mut f32, 16), -1);
+            assert_eq!(
+                predator_audio_push(audio_handle, addr as *const f32, 16, 2),
+                -1
+            );
+            assert_eq!(
+                predator_audio_get_bands(audio_handle, addr as *mut f32, 16),
+                -1
+            );
             assert_eq!(predator_audio_get_level(audio_handle), 0.0);
             assert_eq!(predator_audio_is_beat(audio_handle), 0);
             assert_eq!(predator_audio_beat_strength(audio_handle), 0.0);
-            assert_eq!(predator_audio_render_zones(audio_handle, 255, 255, 255, 100, addr as *mut u8, 4), -1);
+            assert_eq!(
+                predator_audio_render_zones(audio_handle, 255, 255, 255, 100, addr as *mut u8, 4),
+                -1
+            );
             predator_audio_reset(audio_handle);
             predator_audio_destroy(audio_handle);
 
@@ -659,14 +875,25 @@ fn test_ffi_null_partition_pointer_protection() {
             assert_eq!(predator_history_max(hist_handle, addr as *mut f64), 0);
             assert_eq!(predator_history_average(hist_handle, addr as *mut f64), 0);
             assert_eq!(predator_history_latest(hist_handle, addr as *mut f64), 0);
-            assert_eq!(predator_history_snapshot(hist_handle, addr as *mut f64, 8), 0);
+            assert_eq!(
+                predator_history_snapshot(hist_handle, addr as *mut f64, 8),
+                0
+            );
             predator_history_clear(hist_handle);
             predator_history_destroy(hist_handle);
 
             // PawnIO & Telemetry & NVAPI out pointers
             assert_eq!(predator_pawnio_read_msr(0x610, addr as *mut u64), -1);
-            assert_eq!(predator_pawnio_read_mmio32(0xFED159A0, addr as *mut u32), -1);
-            assert_eq!(predator_telemetry_get_snapshot(addr as *mut predator_core::telemetry::NativeTelemetrySnapshot), -1);
+            assert_eq!(
+                predator_pawnio_read_mmio32(0xFED159A0, addr as *mut u32),
+                -1
+            );
+            assert_eq!(
+                predator_telemetry_get_snapshot(
+                    addr as *mut predator_core::telemetry::NativeTelemetrySnapshot
+                ),
+                -1
+            );
             assert_eq!(predator_nvapi_get_gpu_load(addr as *mut f64), -1);
             assert_eq!(predator_nvapi_get_gpu_temperature(addr as *mut f64), -1);
         }
@@ -681,7 +908,12 @@ fn test_audio_band_edges_exhaustive_monotonicity() {
     for &fft_size in &fft_sizes {
         for band_count in 1..=64 {
             let analyzer = SpectrumAnalyzer::new(48000, fft_size, band_count);
-            assert!(analyzer.is_some(), "Failed for fft_size: {}, band_count: {}", fft_size, band_count);
+            assert!(
+                analyzer.is_some(),
+                "Failed for fft_size: {}, band_count: {}",
+                fft_size,
+                band_count
+            );
             let mut analyzer = analyzer.unwrap();
             let bands = analyzer.bands();
             assert_eq!(bands.len(), band_count);
@@ -705,7 +937,10 @@ fn test_history_buffer_extreme_capacity_clamp() {
 #[test]
 fn test_curve_point_count_excessive_length() {
     unsafe {
-        let pts = [ControlPoint { temp: 40, speed: 20 }];
+        let pts = [ControlPoint {
+            temp: 40,
+            speed: 20,
+        }];
         let handle = predator_curve_create(2);
         assert!(!handle.is_null());
 
@@ -717,5 +952,366 @@ fn test_curve_point_count_excessive_length() {
         assert_eq!(interp, 50);
 
         predator_curve_destroy(handle);
+    }
+}
+
+#[test]
+fn test_multithreaded_audio_spectrum_analyzer_high_load() {
+    unsafe {
+        let audio = predator_audio_create(48000, 1024, 16);
+        assert!(!audio.is_null());
+
+        let audio_addr = audio as usize;
+        let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
+
+        let mut handles = Vec::new();
+
+        // 4 Producer threads pushing audio samples concurrently
+        for t in 0..4 {
+            let running_clone = Arc::clone(&running);
+            handles.push(thread::spawn(move || {
+                let handle = audio_addr as *mut predator_core::audio::SpectrumAnalyzer;
+                let mut samples = [0.0f32; 512];
+                for i in 0..512 {
+                    samples[i] = ((i + t * 30) as f32 * 0.1).sin();
+                }
+                while running_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                    assert_eq!(
+                        predator_audio_push(handle, samples.as_ptr(), samples.len(), 2),
+                        0
+                    );
+                    thread::yield_now();
+                }
+            }));
+        }
+
+        // 4 Consumer threads polling bands, level, and zones
+        for _ in 0..4 {
+            let running_clone = Arc::clone(&running);
+            handles.push(thread::spawn(move || {
+                let handle = audio_addr as *mut predator_core::audio::SpectrumAnalyzer;
+                let mut bands = [0.0f32; 16];
+                let mut zones = [0u8; 16 * 3];
+                while running_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                    let n = predator_audio_get_bands(handle, bands.as_mut_ptr(), 16);
+                    assert!(n >= 0);
+                    let _ = predator_audio_get_level(handle);
+                    let _ = predator_audio_is_beat(handle);
+                    let _ = predator_audio_beat_strength(handle);
+                    let z = predator_audio_render_zones(
+                        handle,
+                        255,
+                        128,
+                        64,
+                        80,
+                        zones.as_mut_ptr(),
+                        16,
+                    );
+                    assert!(z >= 0);
+                    thread::yield_now();
+                }
+            }));
+        }
+
+        // 1 Reset thread periodically resetting
+        {
+            let running_clone = Arc::clone(&running);
+            handles.push(thread::spawn(move || {
+                let handle = audio_addr as *mut predator_core::audio::SpectrumAnalyzer;
+                while running_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                    predator_audio_reset(handle);
+                    thread::sleep(std::time::Duration::from_millis(5));
+                }
+            }));
+        }
+
+        thread::sleep(std::time::Duration::from_millis(150));
+        running.store(false, std::sync::atomic::Ordering::Relaxed);
+
+        for h in handles {
+            h.join()
+                .expect("Audio analyzer thread panicked under high concurrent load!");
+        }
+
+        predator_audio_destroy(audio);
+    }
+}
+
+#[test]
+fn test_multithreaded_thermal_history_ring_buffer_high_load() {
+    use predator_core::migration_exports::*;
+
+    unsafe {
+        let hist = predator_history_create(100);
+        assert!(!hist.is_null());
+
+        let hist_addr = hist as usize;
+        let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
+
+        let mut handles = Vec::new();
+
+        // 4 Producer threads adding samples concurrently
+        for t in 0..4 {
+            let running_clone = Arc::clone(&running);
+            handles.push(thread::spawn(move || {
+                let handle = hist_addr as *mut std::ffi::c_void;
+                let mut counter = 0.0;
+                while running_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                    predator_history_add(handle, counter + (t as f64 * 10.0), 1);
+                    counter += 0.5;
+                    thread::yield_now();
+                }
+            }));
+        }
+
+        // 4 Consumer threads reading stats & snapshots
+        for _ in 0..4 {
+            let running_clone = Arc::clone(&running);
+            handles.push(thread::spawn(move || {
+                let handle = hist_addr as *mut std::ffi::c_void;
+                let mut snap = [0.0f64; 32];
+                let mut val = 0.0f64;
+                while running_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                    let _ = predator_history_count(handle);
+                    let _ = predator_history_min(handle, &mut val);
+                    let _ = predator_history_max(handle, &mut val);
+                    let _ = predator_history_average(handle, &mut val);
+                    let _ = predator_history_latest(handle, &mut val);
+                    let n = predator_history_snapshot(handle, snap.as_mut_ptr(), snap.len() as i32);
+                    assert!(n >= 0);
+                    thread::yield_now();
+                }
+            }));
+        }
+
+        // 1 Cleaner thread periodically clearing
+        {
+            let running_clone = Arc::clone(&running);
+            handles.push(thread::spawn(move || {
+                let handle = hist_addr as *mut std::ffi::c_void;
+                while running_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                    predator_history_clear(handle);
+                    thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }));
+        }
+
+        thread::sleep(std::time::Duration::from_millis(150));
+        running.store(false, std::sync::atomic::Ordering::Relaxed);
+
+        for h in handles {
+            h.join()
+                .expect("History ring buffer thread panicked under high concurrent load!");
+        }
+
+        predator_history_destroy(hist);
+    }
+}
+
+#[test]
+fn test_ffi_exhaustive_low_partition_guards() {
+    use predator_core::lighting_rules::*;
+    use predator_core::migration_exports::*;
+    use predator_core::protocol_migration::*;
+    use predator_core::smbios::*;
+
+    unsafe {
+        let low_addrs = [0x1usize, 0x8, 0x10, 0x100, 0x1000, 0xFFF0];
+
+        for &addr in &low_addrs {
+            eprintln!("addr: {:x}", addr);
+            // Lighting rules
+            let mut out_u32 = 0u32;
+            eprintln!("L1");
+            assert_eq!(
+                predator_lighting_parse_hex(addr as *const u8, 4, &mut out_u32),
+                0
+            );
+            eprintln!("L2");
+            assert_eq!(
+                predator_lighting_parse_hex(b"ff00".as_ptr(), 4, addr as *mut u32),
+                0
+            );
+            eprintln!("L3");
+            assert_eq!(
+                predator_lighting_blend(0xFF000000, 0xFFFFFFFF, 0.5, addr as *mut u32),
+                0
+            );
+
+            // Protocol migration
+            eprintln!("PM1");
+            assert_eq!(
+                predator_protocol_encode(0, 10, 0, 0, 0, addr as *mut u64),
+                0
+            );
+
+            // SMBIOS
+            eprintln!("SM1");
+            let mut smbios_out = [0u32; 10];
+            let mut smbios_ver = 0i32;
+            let dummy_table = [172u8, 6, 0, 0, 1, 2, 0, 0];
+            assert_eq!(
+                predator_smbios_parse(
+                    addr as *const u8,
+                    dummy_table.len(),
+                    smbios_out.as_mut_ptr(),
+                    10,
+                    &mut smbios_ver
+                ),
+                -1
+            );
+            eprintln!("SM2");
+            assert_eq!(
+                predator_smbios_parse(
+                    dummy_table.as_ptr(),
+                    dummy_table.len(),
+                    addr as *mut u32,
+                    10,
+                    &mut smbios_ver
+                ),
+                -1
+            );
+            eprintln!("SM3");
+            assert_eq!(
+                predator_smbios_parse(
+                    dummy_table.as_ptr(),
+                    dummy_table.len(),
+                    smbios_out.as_mut_ptr(),
+                    10,
+                    addr as *mut i32
+                ),
+                -1
+            );
+
+            // ACPI
+            eprintln!("AC1");
+            let mut ppcc_entry = predator_core::acpi::PpccEntry::default();
+            assert_eq!(
+                predator_acpi_ppcc_entries(addr as *const u8, 10, &mut ppcc_entry, 1),
+                -1
+            );
+            eprintln!("AC2");
+            assert_eq!(
+                predator_acpi_ppcc_entries(
+                    dummy_table.as_ptr(),
+                    0,
+                    addr as *mut predator_core::acpi::PpccEntry,
+                    1
+                ),
+                -1
+            );
+            eprintln!("AC3");
+            assert_eq!(
+                predator_acpi_ppcc_summary(addr as *const u8, 10, std::ptr::null_mut()),
+                -1
+            );
+            eprintln!("AC4");
+            let mut table_entry = predator_core::acpi::AcpiTable::default();
+            assert_eq!(
+                predator_acpi_scan_tables(addr as *const u8, 10, &mut table_entry, 1),
+                -1
+            );
+
+            // ECHID
+            eprintln!("EC1");
+            let mut rep = [0u8; 16];
+            assert_eq!(
+                predator_echid_exchange(addr as *const u8, 16, rep.as_mut_ptr(), 16),
+                -1
+            );
+            eprintln!("EC2");
+            let req = [1u8, 2];
+            assert_eq!(
+                predator_echid_exchange(req.as_ptr(), req.len(), addr as *mut u8, 16),
+                -1
+            );
+
+            // Graph projection
+            eprintln!("GP1");
+            let samples = [10.0f64, 20.0];
+            let mut xy_out = [0.0f32; 4];
+            assert_eq!(
+                predator_graph_project_series(
+                    addr as *const f64,
+                    2,
+                    10,
+                    100.0,
+                    100.0,
+                    0.0,
+                    50.0,
+                    xy_out.as_mut_ptr()
+                ),
+                0
+            );
+            eprintln!("GP2");
+            assert_eq!(
+                predator_graph_project_series(
+                    samples.as_ptr(),
+                    2,
+                    10,
+                    100.0,
+                    100.0,
+                    0.0,
+                    50.0,
+                    addr as *mut f32
+                ),
+                0
+            );
+
+            // Procsync
+            eprintln!("PS1");
+            let mut str_buf = [0u8; 32];
+            assert_eq!(
+                predator_procsync_executable_name(addr as *const u8, 10, str_buf.as_mut_ptr(), 32),
+                0
+            );
+            eprintln!("PS2");
+            assert_eq!(
+                predator_procsync_executable_name(b"game.exe".as_ptr(), 8, addr as *mut u8, 32),
+                -1
+            );
+            eprintln!("PS3");
+            assert_eq!(
+                predator_procsync_process_name(addr as *const u8, 10, str_buf.as_mut_ptr(), 32),
+                0
+            );
+            eprintln!("PS4");
+            assert_eq!(
+                predator_procsync_process_name(b"game.exe".as_ptr(), 8, addr as *mut u8, 32),
+                -1
+            );
+            eprintln!("PS5");
+            assert_eq!(
+                predator_procsync_same_process(addr as *const u8, 10, b"game.exe".as_ptr(), 8),
+                0
+            );
+            eprintln!("PS6");
+            assert_eq!(
+                predator_procsync_matches_running(addr as *const u8, 10, b"game.exe".as_ptr(), 8),
+                0
+            );
+
+            // Pipeguard
+            eprintln!("PG1");
+            assert_eq!(
+                predator_pipeguard_sanitize(addr as *const u8, 10, str_buf.as_mut_ptr(), 32),
+                0
+            );
+            eprintln!("PG2");
+            assert_eq!(
+                predator_pipeguard_sanitize(b"msg".as_ptr(), 3, addr as *mut u8, 32),
+                -1
+            );
+            eprintln!("PG3");
+            assert_eq!(predator_pipeguard_is_valid(addr as *const u8, 10), 0);
+
+            // Hook
+            eprintln!("HK1");
+            assert_eq!(
+                predator_hook_set_shortcuts(addr as *const predator_core::hook::ShortcutEntry, 5),
+                0
+            );
+            eprintln!("DONE addr");
+        }
     }
 }

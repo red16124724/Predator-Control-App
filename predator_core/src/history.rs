@@ -146,7 +146,10 @@ pub fn create(capacity: i32) -> *mut HistoryHandle {
 /// # Safety
 /// `handle` must be a pointer returned by [`create`] and not already freed.
 pub unsafe fn destroy(handle: *mut HistoryHandle) {
-    if !handle.is_null() && (handle as usize) >= 0x10000 && (handle as usize) % std::mem::align_of::<HistoryHandle>() == 0 {
+    if !handle.is_null()
+        && (handle as usize) >= 0x10000
+        && (handle as usize) % std::mem::align_of::<HistoryHandle>() == 0
+    {
         drop(Box::from_raw(handle));
     }
 }
@@ -154,7 +157,10 @@ pub unsafe fn destroy(handle: *mut HistoryHandle) {
 /// # Safety
 /// `handle` must be a live pointer from [`create`].
 pub unsafe fn as_ref<'a>(handle: *const HistoryHandle) -> Option<&'a HistoryBuffer> {
-    if handle.is_null() || (handle as usize) < 0x10000 || (handle as usize) % std::mem::align_of::<HistoryHandle>() != 0 {
+    if handle.is_null()
+        || (handle as usize) < 0x10000
+        || (handle as usize) % std::mem::align_of::<HistoryHandle>() != 0
+    {
         return None;
     }
     handle.as_ref().map(|h| &h.buffer)
@@ -163,7 +169,10 @@ pub unsafe fn as_ref<'a>(handle: *const HistoryHandle) -> Option<&'a HistoryBuff
 /// # Safety
 /// `handle` must be a live pointer from [`create`].
 pub unsafe fn as_mut<'a>(handle: *mut HistoryHandle) -> Option<&'a mut HistoryBuffer> {
-    if handle.is_null() || (handle as usize) < 0x10000 || (handle as usize) % std::mem::align_of::<HistoryHandle>() != 0 {
+    if handle.is_null()
+        || (handle as usize) < 0x10000
+        || (handle as usize) % std::mem::align_of::<HistoryHandle>() != 0
+    {
         return None;
     }
     handle.as_mut().map(|h| &mut h.buffer)
@@ -218,11 +227,17 @@ mod tests {
         b.add(Some(2.0));
         b.add(Some(3.0));
         assert_eq!(b.count(), 3);
-        assert_eq!((b.get(0), b.get(1), b.get(2)), (Some(1.0), Some(2.0), Some(3.0)));
+        assert_eq!(
+            (b.get(0), b.get(1), b.get(2)),
+            (Some(1.0), Some(2.0), Some(3.0))
+        );
 
         b.add(Some(4.0));
         assert_eq!(b.count(), 3);
-        assert_eq!((b.get(0), b.get(1), b.get(2)), (Some(2.0), Some(3.0), Some(4.0)));
+        assert_eq!(
+            (b.get(0), b.get(1), b.get(2)),
+            (Some(2.0), Some(3.0), Some(4.0))
+        );
     }
 
     #[test]
@@ -315,7 +330,10 @@ mod tests {
             assert!(as_ref(std::ptr::null()).is_none());
             assert!(as_mut(std::ptr::null_mut()).is_none());
             destroy(std::ptr::null_mut());
-            assert_eq!(write_snapshot(&HistoryBuffer::new(2), std::ptr::null_mut(), 0), 0);
+            assert_eq!(
+                write_snapshot(&HistoryBuffer::new(2), std::ptr::null_mut(), 0),
+                0
+            );
         }
     }
 }

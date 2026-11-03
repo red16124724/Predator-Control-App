@@ -5,7 +5,10 @@
 //! Out-parameters are written with `write_unaligned` because managed callers
 //! may hand over buffers that are not naturally aligned.
 
-use crate::{battery, graphproj, history, hook, pipeguard, procsync, shortcuts, is_valid_buffer, is_valid_mut_buffer};
+use crate::{
+    battery, graphproj, history, hook, is_valid_buffer, is_valid_mut_buffer, pipeguard, procsync,
+    shortcuts,
+};
 
 // ============================================================================
 // Shortcut validation (ModeShortcutValidator)
@@ -69,7 +72,13 @@ pub unsafe extern "C" fn predator_shortcut_is_modifier_key(vk: u32) -> i32 {
 /// Returns 1 when `vk` is a reserved Ctrl editing/application chord.
 #[no_mangle]
 pub unsafe extern "C" fn predator_shortcut_is_reserved_ctrl_key(vk: u32) -> i32 {
-    crate::safe_ffi(0, || if shortcuts::is_reserved_ctrl_key(vk) { 1 } else { 0 })
+    crate::safe_ffi(0, || {
+        if shortcuts::is_reserved_ctrl_key(vk) {
+            1
+        } else {
+            0
+        }
+    })
 }
 
 // ============================================================================
@@ -414,6 +423,9 @@ pub unsafe extern "C" fn predator_hook_set_shortcuts(
     count: i32,
 ) -> i32 {
     crate::safe_ffi(0, || {
+        if (entries as usize) < 0x10000 || count <= 0 {
+            return 0;
+        }
         hook::with_hook(0, |state| {
             state.set_shortcuts(entries, count);
             state.shortcut_count() as i32

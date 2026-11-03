@@ -71,7 +71,10 @@ namespace PredatorControlApp
 
         protected override void OnFontChanged(EventArgs e)
         {
-            _boldFont?.Dispose();
+            if (_boldFont != null && _boldFont != Font)
+            {
+                _boldFont.Dispose();
+            }
             _boldFont = null;
             base.OnFontChanged(e);
         }

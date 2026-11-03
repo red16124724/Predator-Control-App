@@ -1,32 +1,32 @@
-pub mod migration_exports;
-pub mod lighting_rules;
-pub mod protocol_migration;
-pub mod smbios;
 pub mod acpi;
 pub mod audio;
 pub mod battery;
 pub mod curve;
+pub mod ec_hid;
 pub mod graphproj;
 pub mod history;
 pub mod hook;
-pub mod pipeguard;
-pub mod procsync;
-pub mod shortcuts;
-pub mod ec_hid;
+pub mod lighting_rules;
+pub mod migration_exports;
 pub mod nvapi;
 pub mod pawnio;
+pub mod pipeguard;
+pub mod procsync;
+pub mod protocol_migration;
 pub mod rgb;
+pub mod shortcuts;
+pub mod smbios;
 pub mod telemetry;
 pub mod thermal;
 
-use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::Mutex;
 use acpi::{AcpiTable, PpccEntry, PpccSummary};
 use audio::SpectrumAnalyzer;
 use curve::{ControlPoint, FanCurveFollower};
 use ec_hid::EcHid;
-use pawnio::{PawnIoDriver, MchbarWritePlan};
-use rgb::{RgbAnimator, Rgb8};
+use pawnio::{MchbarWritePlan, PawnIoDriver};
+use rgb::{Rgb8, RgbAnimator};
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::Mutex;
 use telemetry::{NativeTelemetrySnapshot, TelemetryWorker};
 use thermal::{NativeThermalDecision, ThermalCoordinator, ThermalSafetyProfile};
 
@@ -96,7 +96,6 @@ where
         default
     }
 }
-
 
 #[no_mangle]
 pub unsafe extern "C" fn predator_core_init() -> i32 {
@@ -276,7 +275,9 @@ pub unsafe extern "C" fn predator_pawnio_apply_power_limits(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn predator_telemetry_get_snapshot(out_snapshot: *mut NativeTelemetrySnapshot) -> i32 {
+pub unsafe extern "C" fn predator_telemetry_get_snapshot(
+    out_snapshot: *mut NativeTelemetrySnapshot,
+) -> i32 {
     safe_ffi(-1, || {
         if !is_valid_mut_buffer(out_snapshot) {
             return -1;
@@ -323,7 +324,11 @@ pub unsafe extern "C" fn predator_curve_update(
 ) -> i32 {
     safe_ffi(safety_floor.clamp(0, 100).max(50), || {
         let fallback = safety_floor.clamp(0, 100).max(50);
-        if !is_valid_mut_ptr(handle) || !is_valid_buffer(points_ptr) || point_count == 0 || point_count > 1024 {
+        if !is_valid_mut_ptr(handle)
+            || !is_valid_buffer(points_ptr)
+            || point_count == 0
+            || point_count > 1024
+        {
             return fallback;
         }
 
@@ -416,7 +421,9 @@ pub unsafe extern "C" fn predator_curve_destroy(handle: *mut FanCurveFollower) {
 #[no_mangle]
 pub unsafe extern "C" fn predator_thermal_create() -> *mut ThermalCoordinator {
     safe_ffi(std::ptr::null_mut(), || {
-        Box::into_raw(Box::new(ThermalCoordinator::new(ThermalSafetyProfile::default())))
+        Box::into_raw(Box::new(ThermalCoordinator::new(
+            ThermalSafetyProfile::default(),
+        )))
     })
 }
 
@@ -506,7 +513,8 @@ pub unsafe extern "C" fn predator_thermal_evaluate(
             return -1;
         }
         with_thermal(handle, -1, |coordinator| {
-            let decision = coordinator.evaluate(cpu_temp, gpu_temp, target_pl1, min_power, base_tdp);
+            let decision =
+                coordinator.evaluate(cpu_temp, gpu_temp, target_pl1, min_power, base_tdp);
             std::ptr::write_unaligned(out_decision, decision);
             0
         })
@@ -623,7 +631,12 @@ pub unsafe extern "C" fn predator_rgb_destroy(handle: *mut RgbAnimator) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn predator_rgb_hsv_to_rgb(hue: f64, saturation: f64, value: f64, out: *mut u8) -> i32 {
+pub unsafe extern "C" fn predator_rgb_hsv_to_rgb(
+    hue: f64,
+    saturation: f64,
+    value: f64,
+    out: *mut u8,
+) -> i32 {
     safe_ffi(-1, || {
         if !is_valid_mut_buffer(out) {
             return -1;
@@ -656,7 +669,11 @@ pub unsafe extern "C" fn predator_rgb_blend(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn predator_rgb_apply_brightness(zones: *mut u8, count: usize, brightness: u8) -> i32 {
+pub unsafe extern "C" fn predator_rgb_apply_brightness(
+    zones: *mut u8,
+    count: usize,
+    brightness: u8,
+) -> i32 {
     safe_ffi(-1, || {
         if !is_valid_mut_buffer(zones) || count == 0 {
             return -1;
@@ -677,9 +694,11 @@ pub unsafe extern "C" fn predator_audio_create(
     fft_size: usize,
     band_count: usize,
 ) -> *mut SpectrumAnalyzer {
-    safe_ffi(std::ptr::null_mut(), || match SpectrumAnalyzer::new(sample_rate, fft_size, band_count) {
-        Some(analyzer) => Box::into_raw(Box::new(analyzer)),
-        None => std::ptr::null_mut(),
+    safe_ffi(std::ptr::null_mut(), || {
+        match SpectrumAnalyzer::new(sample_rate, fft_size, band_count) {
+            Some(analyzer) => Box::into_raw(Box::new(analyzer)),
+            None => std::ptr::null_mut(),
+        }
     })
 }
 
@@ -730,13 +749,8 @@ pub unsafe extern "C" fn predator_audio_get_bands(
         if !is_valid_mut_ptr(handle) || !is_valid_mut_buffer(out) || cap == 0 {
             return -1;
         }
-        let analyzer = &mut *handle;
-        let bands = analyzer.bands();
-        let count = cap.min(bands.len());
-        for (i, v) in bands[..count].iter().enumerate() {
-            std::ptr::write_unaligned(out.add(i), *v);
-        }
-        count as i32
+        let analyzer = &*handle;
+        analyzer.copy_bands_unaligned(out, cap) as i32
     })
 }
 
@@ -756,7 +770,11 @@ pub unsafe extern "C" fn predator_audio_is_beat(handle: *mut SpectrumAnalyzer) -
         if !is_valid_mut_ptr(handle) {
             return 0;
         }
-        if (*handle).is_beat() { 1 } else { 0 }
+        if (*handle).is_beat() {
+            1
+        } else {
+            0
+        }
     })
 }
 
@@ -951,7 +969,11 @@ pub unsafe extern "C" fn predator_echid_open(
                 }
             }
             *slot = EcHid::open(vendor_id, product_id, usage_page, usage);
-            if slot.is_some() { 1 } else { 0 }
+            if slot.is_some() {
+                1
+            } else {
+                0
+            }
         })
     })
 }
@@ -995,7 +1017,11 @@ pub unsafe extern "C" fn predator_echid_exchange(
     out_cap: usize,
 ) -> i32 {
     safe_ffi(-1, || {
-        if !is_valid_buffer(request) || request_len == 0 || !is_valid_mut_buffer(out) || out_cap == 0 {
+        if !is_valid_buffer(request)
+            || request_len == 0
+            || !is_valid_mut_buffer(out)
+            || out_cap == 0
+        {
             return -1;
         }
         let req = std::slice::from_raw_parts(request, request_len);
@@ -1025,10 +1051,22 @@ mod tests {
     fn test_curve_interpolation_and_deadband() {
         let mut follower = FanCurveFollower::new(2);
         let pts = [
-            ControlPoint { temp: 40, speed: 20 },
-            ControlPoint { temp: 60, speed: 50 },
-            ControlPoint { temp: 80, speed: 80 },
-            ControlPoint { temp: 95, speed: 100 },
+            ControlPoint {
+                temp: 40,
+                speed: 20,
+            },
+            ControlPoint {
+                temp: 60,
+                speed: 50,
+            },
+            ControlPoint {
+                temp: 80,
+                speed: 80,
+            },
+            ControlPoint {
+                temp: 95,
+                speed: 100,
+            },
         ];
 
         // Below lowest point clamped to lowest speed
@@ -1102,19 +1140,28 @@ mod tests {
             assert_ne!(hot, cold);
 
             let mut dec = NativeThermalDecision::default();
-            assert_eq!(predator_thermal_evaluate(hot, 105.0, 95.0, 65, 15, 45, &mut dec), 0);
+            assert_eq!(
+                predator_thermal_evaluate(hot, 105.0, 95.0, 65, 15, 45, &mut dec),
+                0
+            );
             assert_eq!(dec.stage, 3);
             assert_eq!(dec.cpu_fan_floor, 100);
 
             // The untouched handle must still report a normal stage and no floor.
-            assert_eq!(predator_thermal_evaluate(cold, 45.0, 40.0, 65, 15, 45, &mut dec), 0);
+            assert_eq!(
+                predator_thermal_evaluate(cold, 45.0, 40.0, 65, 15, 45, &mut dec),
+                0
+            );
             assert_eq!(dec.stage, 0);
             assert_eq!(dec.cpu_fan_floor, 0);
             assert!(!dec.active);
 
             // Resetting the hot handle must not disturb the cold one.
             assert_eq!(predator_thermal_reset(hot), 0);
-            assert_eq!(predator_thermal_evaluate(hot, 45.0, 40.0, 65, 15, 45, &mut dec), 0);
+            assert_eq!(
+                predator_thermal_evaluate(hot, 45.0, 40.0, 65, 15, 45, &mut dec),
+                0
+            );
             assert_eq!(dec.stage, 0);
 
             predator_thermal_destroy(hot);
@@ -1148,26 +1195,59 @@ mod tests {
         assert!(!handle.is_null());
 
         let pts = [
-            ControlPoint { temp: 40, speed: 20 },
-            ControlPoint { temp: 60, speed: 50 },
-            ControlPoint { temp: 80, speed: 80 },
-            ControlPoint { temp: 95, speed: 100 },
+            ControlPoint {
+                temp: 40,
+                speed: 20,
+            },
+            ControlPoint {
+                temp: 60,
+                speed: 50,
+            },
+            ControlPoint {
+                temp: 80,
+                speed: 80,
+            },
+            ControlPoint {
+                temp: 95,
+                speed: 100,
+            },
         ];
 
         // Test predator_curve_interpolate
-        assert_eq!(unsafe { predator_curve_interpolate(std::ptr::null(), 0, 50) }, 50);
-        assert_eq!(unsafe { predator_curve_interpolate(pts.as_ptr(), pts.len(), 30) }, 20);
-        assert_eq!(unsafe { predator_curve_interpolate(pts.as_ptr(), pts.len(), 50) }, 35);
-        assert_eq!(unsafe { predator_curve_interpolate(pts.as_ptr(), pts.len(), 100) }, 100);
+        assert_eq!(
+            unsafe { predator_curve_interpolate(std::ptr::null(), 0, 50) },
+            50
+        );
+        assert_eq!(
+            unsafe { predator_curve_interpolate(pts.as_ptr(), pts.len(), 30) },
+            20
+        );
+        assert_eq!(
+            unsafe { predator_curve_interpolate(pts.as_ptr(), pts.len(), 50) },
+            35
+        );
+        assert_eq!(
+            unsafe { predator_curve_interpolate(pts.as_ptr(), pts.len(), 100) },
+            100
+        );
 
         // Test predator_curve_update with f64 temp
-        assert_eq!(unsafe { predator_curve_update(std::ptr::null_mut(), 50.0, pts.as_ptr(), pts.len(), 0) }, 50);
-        assert_eq!(unsafe { predator_curve_update(handle, 50.0, std::ptr::null(), 0, 0) }, 50);
+        assert_eq!(
+            unsafe {
+                predator_curve_update(std::ptr::null_mut(), 50.0, pts.as_ptr(), pts.len(), 0)
+            },
+            50
+        );
+        assert_eq!(
+            unsafe { predator_curve_update(handle, 50.0, std::ptr::null(), 0, 0) },
+            50
+        );
 
         let speed = unsafe { predator_curve_update(handle, 50.0, pts.as_ptr(), pts.len(), 0) };
         assert_eq!(speed, 35);
 
-        let speed_floor = unsafe { predator_curve_update(handle, 50.0, pts.as_ptr(), pts.len(), 60) };
+        let speed_floor =
+            unsafe { predator_curve_update(handle, 50.0, pts.as_ptr(), pts.len(), 60) };
         assert_eq!(speed_floor, 60);
 
         unsafe {
@@ -1181,12 +1261,47 @@ mod tests {
         let _test_guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             assert_eq!(predator_pawnio_read_msr(0x606, std::ptr::null_mut()), -1);
-            assert_eq!(predator_pawnio_read_mmio32(0xFED159A0, std::ptr::null_mut()), -1);
+            assert_eq!(
+                predator_pawnio_read_mmio32(0xFED159A0, std::ptr::null_mut()),
+                -1
+            );
             assert_eq!(predator_telemetry_get_snapshot(std::ptr::null_mut()), -1);
             assert_eq!(predator_curve_interpolate(std::ptr::null(), 0, 50), 50);
-            assert_eq!(predator_curve_update(std::ptr::null_mut(), 50.0, std::ptr::null(), 0, 0), 50);
-            assert_eq!(predator_thermal_evaluate(std::ptr::null_mut(), 50.0, 50.0, 45, 15, 45, std::ptr::null_mut()), -1);
-            assert_eq!(predator_thermal_set_profile(std::ptr::null_mut(), 1, 75.0, 95.0, 100.0, 70.0, 87.0, 90.0, 3.0, 100, 45, 15, 1, 0.35), -1);
+            assert_eq!(
+                predator_curve_update(std::ptr::null_mut(), 50.0, std::ptr::null(), 0, 0),
+                50
+            );
+            assert_eq!(
+                predator_thermal_evaluate(
+                    std::ptr::null_mut(),
+                    50.0,
+                    50.0,
+                    45,
+                    15,
+                    45,
+                    std::ptr::null_mut()
+                ),
+                -1
+            );
+            assert_eq!(
+                predator_thermal_set_profile(
+                    std::ptr::null_mut(),
+                    1,
+                    75.0,
+                    95.0,
+                    100.0,
+                    70.0,
+                    87.0,
+                    90.0,
+                    3.0,
+                    100,
+                    45,
+                    15,
+                    1,
+                    0.35
+                ),
+                -1
+            );
             assert_eq!(predator_thermal_reset(std::ptr::null_mut()), -1);
             predator_thermal_destroy(std::ptr::null_mut());
             predator_curve_reset(std::ptr::null_mut());
@@ -1208,17 +1323,28 @@ mod tests {
 
             // Test unaligned out_val for read_mmio32
             let unaligned_u32 = buf.as_mut_ptr().add(3) as *mut u32;
-            let res_mmio = predator_pawnio_read_mmio32(pawnio::MMIO_PKG_RAPL_LIMIT_ADDRESS, unaligned_u32);
+            let res_mmio =
+                predator_pawnio_read_mmio32(pawnio::MMIO_PKG_RAPL_LIMIT_ADDRESS, unaligned_u32);
             assert_eq!(res_mmio, 0);
 
             // Test unaligned points buffer for curve interpolation
             let pts = [
-                ControlPoint { temp: 40, speed: 20 },
-                ControlPoint { temp: 80, speed: 80 },
+                ControlPoint {
+                    temp: 40,
+                    speed: 20,
+                },
+                ControlPoint {
+                    temp: 80,
+                    speed: 80,
+                },
             ];
             let mut byte_buf = [0u8; 32];
             let unaligned_pts = byte_buf.as_mut_ptr().add(1) as *mut ControlPoint;
-            std::ptr::copy_nonoverlapping(pts.as_ptr() as *const u8, unaligned_pts as *mut u8, std::mem::size_of_val(&pts));
+            std::ptr::copy_nonoverlapping(
+                pts.as_ptr() as *const u8,
+                unaligned_pts as *mut u8,
+                std::mem::size_of_val(&pts),
+            );
 
             let interp = predator_curve_interpolate(unaligned_pts, 2, 60);
             assert_eq!(interp, 50);
@@ -1244,9 +1370,18 @@ mod tests {
     fn test_numerical_robustness_extremes_and_invalids() {
         let _test_guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let pts = [
-            ControlPoint { temp: 40, speed: 20 },
-            ControlPoint { temp: 60, speed: 50 },
-            ControlPoint { temp: 80, speed: 80 },
+            ControlPoint {
+                temp: 40,
+                speed: 20,
+            },
+            ControlPoint {
+                temp: 60,
+                speed: 50,
+            },
+            ControlPoint {
+                temp: 80,
+                speed: 80,
+            },
         ];
 
         let handle = unsafe { predator_curve_create(2) };
@@ -1264,23 +1399,30 @@ mod tests {
         assert!(s_nan >= 10 && s_nan <= 100);
 
         // 4. +Infinity / -Infinity
-        let s_inf = unsafe { predator_curve_update(handle, f64::INFINITY, pts.as_ptr(), pts.len(), 0) };
+        let s_inf =
+            unsafe { predator_curve_update(handle, f64::INFINITY, pts.as_ptr(), pts.len(), 0) };
         assert!(s_inf >= 10 && s_inf <= 100);
-        let s_ninf = unsafe { predator_curve_update(handle, f64::NEG_INFINITY, pts.as_ptr(), pts.len(), 0) };
+        let s_ninf =
+            unsafe { predator_curve_update(handle, f64::NEG_INFINITY, pts.as_ptr(), pts.len(), 0) };
         assert!(s_ninf >= 10 && s_ninf <= 100);
 
         // 5. Thermal evaluate at critical temperature (105°C) -> triggers critical stage 3
         let thermal = unsafe { predator_thermal_create() };
         let mut decision = NativeThermalDecision::default();
-        let eval_res = unsafe { predator_thermal_evaluate(thermal, 105.0, 50.0, 65, 15, 45, &mut decision) };
+        let eval_res =
+            unsafe { predator_thermal_evaluate(thermal, 105.0, 50.0, 65, 15, 45, &mut decision) };
         assert_eq!(eval_res, 0);
         assert_eq!(decision.stage, 3);
         assert!(decision.critical);
         assert_eq!(decision.cpu_fan_floor, 100);
         assert_eq!(decision.cpu_power_cap_watts, 15);
-        unsafe { predator_thermal_destroy(thermal); }
+        unsafe {
+            predator_thermal_destroy(thermal);
+        }
 
-        unsafe { predator_curve_destroy(handle); }
+        unsafe {
+            predator_curve_destroy(handle);
+        }
     }
 
     #[test]
@@ -1288,28 +1430,67 @@ mod tests {
         let _test_guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         // Inverted points (descending order)
         let inv_pts = [
-            ControlPoint { temp: 90, speed: 90 },
-            ControlPoint { temp: 70, speed: 70 },
-            ControlPoint { temp: 50, speed: 50 },
-            ControlPoint { temp: 30, speed: 30 },
+            ControlPoint {
+                temp: 90,
+                speed: 90,
+            },
+            ControlPoint {
+                temp: 70,
+                speed: 70,
+            },
+            ControlPoint {
+                temp: 50,
+                speed: 50,
+            },
+            ControlPoint {
+                temp: 30,
+                speed: 30,
+            },
         ];
-        assert_eq!(unsafe { predator_curve_interpolate(inv_pts.as_ptr(), inv_pts.len(), 20) }, 30);
-        assert_eq!(unsafe { predator_curve_interpolate(inv_pts.as_ptr(), inv_pts.len(), 60) }, 60);
-        assert_eq!(unsafe { predator_curve_interpolate(inv_pts.as_ptr(), inv_pts.len(), 100) }, 90);
+        assert_eq!(
+            unsafe { predator_curve_interpolate(inv_pts.as_ptr(), inv_pts.len(), 20) },
+            30
+        );
+        assert_eq!(
+            unsafe { predator_curve_interpolate(inv_pts.as_ptr(), inv_pts.len(), 60) },
+            60
+        );
+        assert_eq!(
+            unsafe { predator_curve_interpolate(inv_pts.as_ptr(), inv_pts.len(), 100) },
+            90
+        );
 
         // Duplicate temperatures (step curve)
         let dup_pts = [
-            ControlPoint { temp: 40, speed: 20 },
-            ControlPoint { temp: 60, speed: 30 },
-            ControlPoint { temp: 60, speed: 70 },
-            ControlPoint { temp: 80, speed: 100 },
+            ControlPoint {
+                temp: 40,
+                speed: 20,
+            },
+            ControlPoint {
+                temp: 60,
+                speed: 30,
+            },
+            ControlPoint {
+                temp: 60,
+                speed: 70,
+            },
+            ControlPoint {
+                temp: 80,
+                speed: 100,
+            },
         ];
         // At 59°C: interpolating 40->60 (20->30)
         assert!(unsafe { predator_curve_interpolate(dup_pts.as_ptr(), dup_pts.len(), 59) } <= 30);
         // At 60°C: step jumps up to 70 for thermal safety!
-        assert_eq!(unsafe { predator_curve_interpolate(dup_pts.as_ptr(), dup_pts.len(), 60) }, 70);
+        assert_eq!(
+            unsafe { predator_curve_interpolate(dup_pts.as_ptr(), dup_pts.len(), 60) },
+            70
+        );
         // At 70°C: interpolating 60->80 (70->100) -> 85
-        assert_eq!(unsafe { predator_curve_interpolate(dup_pts.as_ptr(), dup_pts.len(), 70) }, 85);
+        assert_eq!(
+            unsafe { predator_curve_interpolate(dup_pts.as_ptr(), dup_pts.len(), 70) },
+            85
+        );
     }
 
     #[test]
@@ -1326,7 +1507,11 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_millis() as u64;
-        assert!(snap.timestamp_ms > 1_700_000_000_000, "Timestamp must be real epoch ms, got {}", snap.timestamp_ms);
+        assert!(
+            snap.timestamp_ms > 1_700_000_000_000,
+            "Timestamp must be real epoch ms, got {}",
+            snap.timestamp_ms
+        );
         assert!(snap.timestamp_ms <= now_ms);
     }
 }

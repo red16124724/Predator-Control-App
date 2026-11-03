@@ -153,9 +153,12 @@ namespace PredatorControlApp
                     {
                         int executed = 0;
                         EventHandler? onHandle = null;
+                        EventHandler? onDisposed = null;
+
                         onHandle = (s, e) =>
                         {
                             HandleCreated -= onHandle;
+                            Disposed -= onDisposed;
                             if (Interlocked.Exchange(ref executed, 1) != 0) return;
                             try
                             {
@@ -174,10 +177,21 @@ namespace PredatorControlApp
                             }
                             catch { }
                         };
+
+                        onDisposed = (s, e) =>
+                        {
+                            Disposed -= onDisposed;
+                            HandleCreated -= onHandle;
+                            Interlocked.Exchange(ref executed, 1);
+                        };
+
                         HandleCreated += onHandle;
+                        Disposed += onDisposed;
+
                         if (IsHandleCreated && Interlocked.Exchange(ref executed, 1) == 0)
                         {
                             HandleCreated -= onHandle;
+                            Disposed -= onDisposed;
                             try
                             {
                                 BeginInvoke(new Action(() =>
@@ -1788,10 +1802,14 @@ namespace PredatorControlApp
                         {
 
                             _suppressStartupToggle = true;
-
-                            _switchStartWithWindows.Checked = enabled;
-
-                            _suppressStartupToggle = false;
+                            try
+                            {
+                                _switchStartWithWindows.Checked = enabled;
+                            }
+                            finally
+                            {
+                                _suppressStartupToggle = false;
+                            }
 
                         });
 
@@ -1961,8 +1979,12 @@ namespace PredatorControlApp
 
                 SafeBeginInvoke(async () =>
                 {
-                    if (_isClosing || IsDisposed) return;
-                    await CheckForUpdatesAsync(userInitiated: false);
+                    try
+                    {
+                        if (_isClosing || IsDisposed) return;
+                        await CheckForUpdatesAsync(userInitiated: false);
+                    }
+                    catch { }
                 });
             }
             catch (OperationCanceledException) { }
@@ -4020,6 +4042,13 @@ namespace PredatorControlApp
             };
 
             _lblModePill.MouseDown += TitleBar_MouseDown;
+            _lblModePill.SizeChanged += (s, e) =>
+            {
+                if (_lblPowerPill != null && !_lblPowerPill.IsDisposed)
+                {
+                    _lblPowerPill.Left = _lblModePill.Right + S(12);
+                }
+            };
 
             _pnlTitle.Controls.Add(_lblModePill);
 
@@ -7478,6 +7507,7 @@ namespace PredatorControlApp
                 };
                 tBtn.Paint += (s, e) =>
                 {
+                    if (tBtn.Width <= 7 || tBtn.Height <= 7) return;
                     var g = e.Graphics;
                     g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
                     bool isCur = (tintColor.R == _colorPicker.Color.R && tintColor.G == _colorPicker.Color.G && tintColor.B == _colorPicker.Color.B);
@@ -7934,6 +7964,7 @@ namespace PredatorControlApp
                 sBtn.Paint += (s, e) =>
 
                 {
+                    if (sBtn.Width <= 7 || sBtn.Height <= 7) return;
 
                     var g = e.Graphics;
 
@@ -8263,6 +8294,7 @@ namespace PredatorControlApp
                 btn.Paint += (s, e) =>
 
                 {
+                    if (btn.Width <= 7 || btn.Height <= 7) return;
 
                     var g = e.Graphics;
 
@@ -10632,10 +10664,14 @@ namespace PredatorControlApp
                 if (_isClosing || IsDisposed) return;
 
                 _suppressStartupToggle = true;
-
-                _switchStartWithWindows.Checked = !wanted;
-
-                _suppressStartupToggle = false;
+                try
+                {
+                    _switchStartWithWindows.Checked = !wanted;
+                }
+                finally
+                {
+                    _suppressStartupToggle = false;
+                }
 
                 MessageBox.Show(this, wanted ? "Could not register Predator Control to start with Windows. Scheduled task could not be created." : "Could not remove startup task.", "Start with Windows", MessageBoxButtons.OK, MessageBoxIcon.Warning);
 
@@ -10805,6 +10841,15 @@ namespace PredatorControlApp
                     if (rowControls.IsRecording)
                     {
                         HandleShortcutKeyRecord(rowControls, e);
+                    }
+                };
+
+                txtShortcut.LostFocus += (s, e) =>
+                {
+                    if (rowControls.IsRecording)
+                    {
+                        StopShortcutRecording(rowControls);
+                        SetShortcutStatus("Recording cancelled.", ThemeManager.TextSecondary);
                     }
                 };
 
@@ -11276,8 +11321,13 @@ namespace PredatorControlApp
             };
 
             _lblModePill.Text = $"⚡ {modeName.ToUpperInvariant()}";
+            _lblModePill.Size = _lblModePill.GetPreferredSize(Size.Empty);
 
             _lblModePill.ForeColor = GetPowerModeColor(mode);
+            if (_lblPowerPill != null && !_lblPowerPill.IsDisposed)
+            {
+                _lblPowerPill.Left = _lblModePill.Right + S(12);
+            }
 
 
 
@@ -12601,7 +12651,7 @@ namespace PredatorControlApp
         private void BuildCalibrationOverlay()
 
         {
-
+            try { _tipCalibration?.Dispose(); } catch { }
             _tipCalibration = new ToolTip();
 
             _pnlCalibrationOverlay = new Panel
@@ -15636,7 +15686,7 @@ namespace PredatorControlApp
 
                 // Re-apply battery charge limit
 
-                if (_switchBatteryLimit.Checked)
+                if (_switchBatteryLimit?.Checked == true && _wmi != null)
 
                 {
 
@@ -17398,6 +17448,10 @@ namespace PredatorControlApp
                         {
                             try { f.Hide(); } catch { }
                         }
+                        else
+                        {
+                            try { f.Close(); } catch { }
+                        }
                     }
                 }
             }
@@ -17574,6 +17628,11 @@ namespace PredatorControlApp
                     _trayIcon = null!;
 
                 }
+                if (this.Icon != null && !ReferenceEquals(this.Icon, SystemIcons.Application))
+                {
+                    try { this.Icon.Dispose(); } catch { }
+                }
+                try { _tipCalibration?.Dispose(); _tipCalibration = null; } catch { }
 
                 try { _trayMenu?.Dispose(); } catch { }
                 _trayMenu = null!;

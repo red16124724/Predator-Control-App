@@ -138,7 +138,7 @@ impl HookState {
     pub unsafe fn set_shortcuts(&mut self, entries: *const ShortcutEntry, count: i32) {
         self.shortcuts = [ShortcutEntry::EMPTY; MAX_SHORTCUTS];
         self.shortcut_count = 0;
-        if entries.is_null() || count <= 0 {
+        if (entries as usize) < 0x10000 || count <= 0 {
             return;
         }
         let n = (count as usize).min(MAX_SHORTCUTS);
@@ -228,7 +228,14 @@ impl HookState {
     ///
     /// Returns `(action, value)` where `value` is the mode code for
     /// [`ACTION_CUSTOM_SHORTCUT`] or the digit for [`ACTION_NUMBER_KEY`].
-    pub fn process(&mut self, vk: u32, scan: u32, flags: u32, is_down: bool, now_ms: i64) -> (i32, u32) {
+    pub fn process(
+        &mut self,
+        vk: u32,
+        scan: u32,
+        flags: u32,
+        is_down: bool,
+        now_ms: i64,
+    ) -> (i32, u32) {
         self.track_modifier(vk, is_down);
 
         // Reject synthetic input unless explicitly permitted.
@@ -255,8 +262,8 @@ impl HookState {
         // Custom mode shortcuts, on key-down of a non-modifier key.
         if is_down && !is_modifier_key(vk) {
             if let Some(entry) = self.match_shortcut(vk).copied() {
-                let repeated =
-                    self.last_shortcut_vk == vk && (now_ms - self.last_shortcut_tick) < SHORTCUT_REPEAT_MS;
+                let repeated = self.last_shortcut_vk == vk
+                    && (now_ms - self.last_shortcut_tick) < SHORTCUT_REPEAT_MS;
                 if repeated {
                     return (ACTION_PASS, 0);
                 }
@@ -408,10 +415,7 @@ pub fn is_passthrough_key(vk: u32) -> bool {
         return true;
     }
     // OEM keys: 0xBA..0xC0, 0xDB..0xF5, 0x92..0x96.
-    if (0xBA..=0xC0).contains(&vk)
-        || (0xDB..=0xF5).contains(&vk)
-        || (0x92..=0x96).contains(&vk)
-    {
+    if (0xBA..=0xC0).contains(&vk) || (0xDB..=0xF5).contains(&vk) || (0x92..=0x96).contains(&vk) {
         return true;
     }
     false
@@ -487,10 +491,16 @@ mod tests {
     fn predator_tap_fires_on_release() {
         let mut s = HookState::new();
         assert_eq!(s.process(0x6C, SC_PREDATOR, 0, true, 10_000).0, ACTION_PASS);
-        assert_eq!(s.process(0x6C, SC_PREDATOR, 0, false, 10_200).0, ACTION_PREDATOR_SENSE);
+        assert_eq!(
+            s.process(0x6C, SC_PREDATOR, 0, false, 10_200).0,
+            ACTION_PREDATOR_SENSE
+        );
         // A second tap 200 ms later is throttled.
         assert_eq!(s.process(0x6C, SC_PREDATOR, 0, true, 10_400).0, ACTION_PASS);
-        assert_eq!(s.process(0x6C, SC_PREDATOR, 0, false, 10_400).0, ACTION_PASS);
+        assert_eq!(
+            s.process(0x6C, SC_PREDATOR, 0, false, 10_400).0,
+            ACTION_PASS
+        );
     }
 
     #[test]
@@ -536,15 +546,20 @@ mod tests {
     #[test]
     fn injected_keys_are_rejected_by_default() {
         let mut s = HookState::new();
-        assert_eq!(s.process(0x6C, SC_PREDATOR, LLKHF_INJECTED, true, 0).0, ACTION_PASS);
         assert_eq!(
-            s.process(0x6C, SC_PREDATOR, LLKHF_LOWER_IL_INJECTED, true, 0).0,
+            s.process(0x6C, SC_PREDATOR, LLKHF_INJECTED, true, 0).0,
+            ACTION_PASS
+        );
+        assert_eq!(
+            s.process(0x6C, SC_PREDATOR, LLKHF_LOWER_IL_INJECTED, true, 0)
+                .0,
             ACTION_PASS
         );
         s.set_allow_injected(true);
         s.process(0x6C, SC_PREDATOR, LLKHF_INJECTED, true, 20_000);
         assert_eq!(
-            s.process(0x6C, SC_PREDATOR, LLKHF_INJECTED, false, 20_200).0,
+            s.process(0x6C, SC_PREDATOR, LLKHF_INJECTED, false, 20_200)
+                .0,
             ACTION_PREDATOR_SENSE
         );
     }
@@ -651,13 +666,19 @@ mod tests {
                 ACTION_PASS,
                 "vk {vk:#x} must not trigger the mode key"
             );
-            assert_eq!(s.process(vk, SC_MODE, 0, false, 10_050).0, ACTION_PASS, "vk {vk:#x}");
+            assert_eq!(
+                s.process(vk, SC_MODE, 0, false, 10_050).0,
+                ACTION_PASS,
+                "vk {vk:#x}"
+            );
         }
     }
 
     #[test]
     fn passthrough_predicate_covers_expected_ranges() {
-        for vk in [0x70u32, 0x75, 0x87, 0x5B, 0x5D, 0xA0, 0xA5, 0x21, 0x2F, 0xAD, 0xB7, 0xA6, 0xBA, 0xF5] {
+        for vk in [
+            0x70u32, 0x75, 0x87, 0x5B, 0x5D, 0xA0, 0xA5, 0x21, 0x2F, 0xAD, 0xB7, 0xA6, 0xBA, 0xF5,
+        ] {
             assert!(is_passthrough_key(vk), "{vk:#x} should pass through");
         }
         // Ordinary letters and digits are not passthrough.

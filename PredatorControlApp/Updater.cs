@@ -636,6 +636,13 @@ namespace PredatorControlApp
                 DialogResult = DialogResult.Cancel
             };
             try { dlg.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
+            dlg.Disposed += (s, e) =>
+            {
+                if (dlg.Icon != null && !ReferenceEquals(dlg.Icon, SystemIcons.Application))
+                {
+                    try { dlg.Icon.Dispose(); } catch { }
+                }
+            };
 
             dlg.Paint += (s, e) =>
             {

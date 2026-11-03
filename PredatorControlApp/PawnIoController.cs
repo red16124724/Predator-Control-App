@@ -677,9 +677,11 @@ namespace PredatorControlApp
 
         private Mutex? GetOrCreateMsrMutex()
         {
+            if (_isDisposed) return null;
             if (_cachedMsrMutex != null) return _cachedMsrMutex;
             lock (_mutexLock)
             {
+                if (_isDisposed) return null;
                 if (_cachedMsrMutex != null) return _cachedMsrMutex;
                 try
                 {
@@ -695,9 +697,11 @@ namespace PredatorControlApp
 
         private Mutex? GetOrCreatePciMutex()
         {
+            if (_isDisposed) return null;
             if (_cachedPciMutex != null) return _cachedPciMutex;
             lock (_mutexLock)
             {
+                if (_isDisposed) return null;
                 if (_cachedPciMutex != null) return _cachedPciMutex;
                 try
                 {
@@ -1216,6 +1220,10 @@ namespace PredatorControlApp
                         {
                             acquired = true;
                         }
+                        catch (ObjectDisposedException)
+                        {
+                            acquired = false;
+                        }
                     }
 
                     if (mutex != null && !acquired)
@@ -1269,6 +1277,10 @@ namespace PredatorControlApp
                         catch (AbandonedMutexException)
                         {
                             acquired = true;
+                        }
+                        catch (ObjectDisposedException)
+                        {
+                            acquired = false;
                         }
                     }
 
@@ -1464,7 +1476,7 @@ namespace PredatorControlApp
 
         private bool ExecuteOnHandle(SafeFileHandle handle, string functionName, ulong[]? input, ulong[]? output)
         {
-            if (handle.IsInvalid || handle.IsClosed)
+            if (_isDisposed || handle.IsInvalid || handle.IsClosed)
                 return false;
 
             const int FN_LEN = 32;
@@ -1660,6 +1672,9 @@ namespace PredatorControlApp
         {
             lock (_syncLock)
             {
+                if (_isDisposed)
+                    return PowerLimitApplyStatus.DriverNotInstalled;
+
                 if (_backend.IsOpen)
                     return PowerLimitApplyStatus.Success;
 
@@ -2155,6 +2170,7 @@ namespace PredatorControlApp
         /// </summary>
         public bool WriteMchbarPowerLimits(int pl1Watts, int pl2Watts, uint unitsPerWatt, out ulong rawMmioWritten)
         {
+            if (unitsPerWatt == 0) unitsPerWatt = 8;
             int safePl1 = Math.Max(5, pl1Watts);
             int safePl2 = Math.Max(safePl1, pl2Watts);
 

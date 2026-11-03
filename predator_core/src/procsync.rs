@@ -14,7 +14,7 @@ use std::slice;
 /// # Safety
 /// `input` must be valid for `input_len` bytes; `out` for `out_cap` bytes.
 pub unsafe fn copy_result(text: &str, out: *mut u8, out_cap: i32) -> i32 {
-    if out.is_null() || out_cap <= 0 {
+    if (out as usize) < 0x10000 || out_cap <= 0 {
         return -1;
     }
     let bytes = text.as_bytes();
@@ -30,7 +30,7 @@ pub unsafe fn copy_result(text: &str, out: *mut u8, out_cap: i32) -> i32 {
 /// # Safety
 /// `ptr` must be valid for `len` bytes when `len` is positive.
 pub unsafe fn read_str<'a>(ptr: *const u8, len: i32) -> &'a str {
-    if ptr.is_null() || len <= 0 {
+    if (ptr as usize) < 0x10000 || len <= 0 || len > 100_000 {
         return "";
     }
     std::str::from_utf8(slice::from_raw_parts(ptr, len as usize)).unwrap_or("")
@@ -52,7 +52,10 @@ pub fn executable_name(raw: &str) -> String {
 /// The process name without a trailing `.exe`, as `Process.ProcessName` reports it.
 pub fn process_name(raw: &str) -> String {
     let name = executable_name(raw);
-    if name.len() >= 4 && name.is_char_boundary(name.len() - 4) && name[name.len() - 4..].eq_ignore_ascii_case(".exe") {
+    if name.len() >= 4
+        && name.is_char_boundary(name.len() - 4)
+        && name[name.len() - 4..].eq_ignore_ascii_case(".exe")
+    {
         name[..name.len() - 4].to_string()
     } else {
         name
@@ -232,7 +235,10 @@ mod tests {
             assert_eq!(read_str(bytes.as_ptr(), 0), "");
             // Invalid UTF-8 bytes must not panic or cause UB
             let invalid_utf8 = [0xFF, 0xFE, 0xFD, 0x80];
-            assert_eq!(read_str(invalid_utf8.as_ptr(), invalid_utf8.len() as i32), "");
+            assert_eq!(
+                read_str(invalid_utf8.as_ptr(), invalid_utf8.len() as i32),
+                ""
+            );
         }
     }
 
