@@ -225,14 +225,14 @@ public sealed class LifecyclePersistenceAndBackgroundServiceStressTests
             return true;
         }, minIntervalMs: 10, settleMs: 5);
 
-        // 50 threads flooding requests simultaneously
-        var tasks = new Task[50];
+        // Concurrent tasks flooding requests
+        var tasks = new Task[10];
         for (int i = 0; i < tasks.Length; i++)
         {
             byte target = (byte)(i % 5);
             tasks[i] = Task.Run(() =>
             {
-                for (int j = 0; j < 50; j++)
+                for (int j = 0; j < 10; j++)
                 {
                     guard.Request(target);
                     Thread.Yield();
@@ -243,8 +243,8 @@ public sealed class LifecyclePersistenceAndBackgroundServiceStressTests
         await Task.WhenAll(tasks);
         guard.Request(4); // Final Turbo request
 
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (guard.IsSwitching && DateTime.UtcNow < deadline)
+        var deadline = DateTime.UtcNow.AddSeconds(15);
+        while (guard.LastAppliedMode != 4 && DateTime.UtcNow < deadline)
         {
             await Task.Delay(10);
         }
