@@ -7,7 +7,6 @@
 - [✨ Key Features](#-key-features)
   - [🚀 Power & Performance Modes](#-power--performance-modes)
   - [⚡ CPU Power Limits (PL1/PL2) via PawnIO & Native Ring-0 MMIO/MSR](#-cpu-power-limits-pl1pl2-via-pawnio--native-ring-0-mmiomsr)
-  - [🦀 Full Native Rust Core (`predator_core`)](#-full-native-rust-core-predator_core)
   - [❄️ Advanced Fan & Cooling Control](#️-advanced-fan--cooling-control)
   - [🎮 GPU & Display Control (MUX Switch)](#-gpu--display-control-mux-switch)
   - [🌈 Dynamic RGB Engine & Lighting Control](#-dynamic-rgb-engine--lighting-control)
