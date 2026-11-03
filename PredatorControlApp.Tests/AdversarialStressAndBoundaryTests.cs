@@ -27,7 +27,7 @@ namespace PredatorControlApp.Tests
             });
             thread.SetApartmentState(ApartmentState.STA);
             thread.Start();
-            thread.Join();
+            thread.Join(15000);
             if (ex != null) throw new AggregateException("Exception thrown in STA thread", ex);
         }
 
@@ -549,7 +549,7 @@ namespace PredatorControlApp.Tests
             foreach (var t in threads) t.Start();
 
             // Wait for all threads to join upon cancellation
-            foreach (var t in threads) t.Join();
+            foreach (var t in threads) t.Join(15000);
 
             Assert.Empty(exceptions);
             Assert.True(telemetryReads > 50, $"Expected >50 telemetry reads, got {telemetryReads}");

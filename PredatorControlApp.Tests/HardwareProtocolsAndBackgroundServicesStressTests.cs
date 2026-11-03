@@ -56,7 +56,7 @@ namespace PredatorControlApp.Tests
             }
 
             threads.ForEach(t => t.Start());
-            threads.ForEach(t => t.Join());
+            threads.ForEach(t => t.Join(15000));
 
             Assert.Empty(exceptions);
         }
@@ -152,7 +152,7 @@ namespace PredatorControlApp.Tests
             }
 
             threads.ForEach(t => t.Start());
-            threads.ForEach(t => t.Join());
+            threads.ForEach(t => t.Join(15000));
 
             Assert.Empty(exceptions);
         }
@@ -265,7 +265,7 @@ namespace PredatorControlApp.Tests
             }
 
             threads.ForEach(t => t.Start());
-            threads.ForEach(t => t.Join());
+            threads.ForEach(t => t.Join(15000));
 
             Assert.Empty(exceptions);
         }
@@ -347,7 +347,7 @@ namespace PredatorControlApp.Tests
             }
 
             threads.ForEach(t => t.Start());
-            threads.ForEach(t => t.Join());
+            threads.ForEach(t => t.Join(15000));
 
             Assert.Empty(exceptions);
         }
@@ -383,7 +383,7 @@ namespace PredatorControlApp.Tests
             }
 
             threads.ForEach(t => t.Start());
-            threads.ForEach(t => t.Join());
+            threads.ForEach(t => t.Join(15000));
 
             Assert.Empty(exceptions);
         }

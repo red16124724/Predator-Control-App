@@ -178,7 +178,7 @@ namespace PredatorControlApp.Tests
             });
             t.SetApartmentState(ApartmentState.STA);
             t.Start();
-            t.Join();
+            t.Join(15000);
         }
 
         [Theory]
@@ -235,7 +235,7 @@ namespace PredatorControlApp.Tests
             });
             t.SetApartmentState(ApartmentState.STA);
             t.Start();
-            t.Join();
+            t.Join(15000);
         }
 
         [Theory]
@@ -292,7 +292,7 @@ namespace PredatorControlApp.Tests
             });
             t.SetApartmentState(ApartmentState.STA);
             t.Start();
-            t.Join();
+            t.Join(15000);
         }
 
         [Fact]

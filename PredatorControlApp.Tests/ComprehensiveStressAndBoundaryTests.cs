@@ -36,7 +36,7 @@ namespace PredatorControlApp.Tests
             });
             thread.SetApartmentState(ApartmentState.STA);
             thread.Start();
-            thread.Join();
+            thread.Join(15000);
             if (ex != null) throw new AggregateException("Exception thrown in STA thread", ex);
         }
 

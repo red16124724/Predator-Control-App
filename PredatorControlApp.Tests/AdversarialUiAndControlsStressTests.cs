@@ -56,7 +56,7 @@ namespace PredatorControlApp.Tests
             });
             thread.SetApartmentState(ApartmentState.STA);
             thread.Start();
-            thread.Join();
+            thread.Join(15000);
             if (ex != null)
             {
                 System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex).Throw();
@@ -790,10 +790,11 @@ namespace PredatorControlApp.Tests
                     }
                 });
 
-                while (!task.IsCompleted)
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                while (!task.IsCompleted && sw.ElapsedMilliseconds < 5000)
                 {
                     Application.DoEvents();
-                    Thread.Sleep(1);
+                    Thread.Sleep(5);
                 }
 
                 task.GetAwaiter().GetResult();
