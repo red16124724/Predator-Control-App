@@ -73,10 +73,13 @@ namespace PredatorControlApp.Tests
                                 }
                                 else if (role == 2) // Mutators
                                 {
-                                    initialSettings.CpuCurve.Add(new CurvePointData(50 + (iter % 30), 60));
-                                    if (initialSettings.CpuCurve.Count > 100)
+                                    lock (initialSettings)
                                     {
-                                        initialSettings.CpuCurve.Clear();
+                                        initialSettings.CpuCurve.Add(new CurvePointData(50 + (iter % 30), 60));
+                                        if (initialSettings.CpuCurve.Count > 100)
+                                        {
+                                            initialSettings.CpuCurve.Clear();
+                                        }
                                     }
                                     Interlocked.Increment(ref writeSuccess);
                                 }

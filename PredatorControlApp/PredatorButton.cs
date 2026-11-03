@@ -53,8 +53,18 @@ namespace PredatorControlApp
         {
             if (_boldFont == null || _boldFont.FontFamily.Name != Font.FontFamily.Name || Math.Abs(_boldFont.Size - Font.Size) > 0.01f)
             {
-                _boldFont?.Dispose();
-                _boldFont = new Font(Font, FontStyle.Bold);
+                if (_boldFont != null && _boldFont != Font)
+                {
+                    _boldFont.Dispose();
+                }
+                try
+                {
+                    _boldFont = new Font(Font, FontStyle.Bold);
+                }
+                catch
+                {
+                    _boldFont = Font;
+                }
             }
             return _boldFont;
         }
@@ -84,9 +94,16 @@ namespace PredatorControlApp
 
             _themeHandler = () =>
             {
-                if (!IsDisposed && IsHandleCreated)
+                if (!IsDisposed && !Disposing && IsHandleCreated)
                 {
-                    try { Invalidate(); } catch { }
+                    try
+                    {
+                        if (InvokeRequired)
+                            BeginInvoke(new Action(() => { if (!IsDisposed && !Disposing) Invalidate(); }));
+                        else
+                            Invalidate();
+                    }
+                    catch { }
                 }
             };
             ThemeManager.ThemeChanged += _themeHandler;
@@ -98,6 +115,11 @@ namespace PredatorControlApp
             if (bounds.Width <= 0 || bounds.Height <= 0)
             {
                 path.AddRectangle(new Rectangle(bounds.X, bounds.Y, Math.Max(1, bounds.Width), Math.Max(1, bounds.Height)));
+                return path;
+            }
+            if (bounds.Width < 6 || bounds.Height < 6)
+            {
+                path.AddRectangle(bounds);
                 return path;
             }
             int maxRadius = Math.Max(1, Math.Min(bounds.Width, bounds.Height) / 2);
@@ -113,12 +135,14 @@ namespace PredatorControlApp
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            if (Width <= 3 || Height <= 3) return;
+            if (Width <= 4 || Height <= 4) return;
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
 
-            Color parentBg = Parent?.BackColor ?? ThemeManager.CardBg;
+            Color parentBg = ThemeManager.CardBg;
+            try { parentBg = Parent?.BackColor ?? ThemeManager.CardBg; } catch { }
+            if (parentBg.A < 255) parentBg = ThemeManager.CardBg;
             g.Clear(parentBg);
 
             var rect = new Rectangle(1, 1, Width - 3, Height - 3);
@@ -126,15 +150,24 @@ namespace PredatorControlApp
             if (_isNavButton)
             {
                 // Sleek OpenSense-style navigation rail button
-                Color navBg = _isActive
-                    ? ThemeManager.ControlActive
-                    : (_isHover ? ThemeManager.ControlHover : Color.Transparent);
+                Color navBg = !Enabled
+                    ? ThemeManager.ControlDisabled
+                    : (_isActive
+                        ? ThemeManager.ControlActive
+                        : (_isHover ? ThemeManager.ControlHover : Color.Transparent));
 
-                Color navText = _isActive
-                    ? (_customActiveColor ?? (ThemeManager.IsDarkThemeActive ? ThemeManager.Accent : Color.White))
-                    : (_isHover ? ThemeManager.TextPrimary : ThemeManager.TextSecondary);
+                Color navText = !Enabled
+                    ? ThemeManager.TextMuted
+                    : (_isActive
+                        ? (_customActiveColor ?? (ThemeManager.IsDarkThemeActive ? ThemeManager.Accent : Color.White))
+                        : (_isHover ? ThemeManager.TextPrimary : ThemeManager.TextSecondary));
 
-                using (var path = RoundedRect(new Rectangle(4, 2, Width - 8, Height - 4), 6))
+                float dpi = DeviceDpi > 0 ? DeviceDpi / 96f : 1f;
+                int barPadTop = (int)Math.Round(6 * dpi);
+                int barW = Math.Max(2, (int)Math.Round(3 * dpi));
+                int barX = (int)Math.Round(4 * dpi);
+
+                using (var path = RoundedRect(new Rectangle(barX, (int)Math.Round(2 * dpi), Math.Max(1, Width - barX * 2), Math.Max(1, Height - (int)Math.Round(4 * dpi))), Math.Max(2, (int)Math.Round(6 * dpi))))
                 {
                     if (navBg != Color.Transparent)
                     {
@@ -142,26 +175,29 @@ namespace PredatorControlApp
                         g.FillPath(brush, path);
                     }
 
-                    if (_isActive)
+                    if (_isActive && Height > barPadTop * 2)
                     {
                         // Left vertical accent indicator bar
                         using var accBrush = new SolidBrush(ThemeManager.Accent);
-                        g.FillRectangle(accBrush, 4, 6, 3, Height - 12);
+                        g.FillRectangle(accBrush, barX, barPadTop, barW, Height - barPadTop * 2);
                     }
                 }
 
                 Font navFont = _isActive ? GetBoldFont() : Font;
-                var navFlags = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine;
+                var navFlags = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis;
                 if (!_useMnemonic) navFlags |= TextFormatFlags.NoPrefix;
+                int textLeft = Math.Max(barX + barW + (int)Math.Round(8 * dpi), (int)Math.Round(20 * dpi));
+                int textW = Math.Max(0, Width - textLeft - (int)Math.Round(4 * dpi));
                 TextRenderer.DrawText(g, Text, navFont,
-                    new Rectangle(20, 0, Width - 24, Height), navText,
+                    new Rectangle(textLeft, 0, textW, Math.Max(0, Height)), navText,
                     navFlags);
 
-                if (Focused && Enabled)
+                if (Focused && ShowFocusCues && Enabled && Width > 12 && Height > 8)
                 {
                     using var focusPen = new Pen(ThemeManager.FocusRing, 1.2f) { DashStyle = DashStyle.Dot };
                     g.DrawRectangle(focusPen, 6, 4, Width - 12, Height - 8);
                 }
+                base.OnPaint(e);
                 return;
             }
 
@@ -212,17 +248,19 @@ namespace PredatorControlApp
                 g.DrawPath(glowPen, pathBtn);
             }
 
-            if (Focused && Enabled)
+            if (Focused && ShowFocusCues && Enabled && Width > 8 && Height > 8)
             {
                 using var focusPen = new Pen(ThemeManager.FocusRing, 1.2f) { DashStyle = DashStyle.Dot };
-                g.DrawRectangle(focusPen, 4, 4, Width - 9, Height - 9);
+                g.DrawRectangle(focusPen, 4, 4, Math.Max(1, Width - 9), Math.Max(1, Height - 9));
             }
 
             Font btnFont = _isActive ? GetBoldFont() : Font;
-            var btnFlags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter;
+            var btnFlags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis;
             if (!_useMnemonic) btnFlags |= TextFormatFlags.NoPrefix;
             TextRenderer.DrawText(g, Text, btnFont, ClientRectangle, textColor,
                 btnFlags);
+
+            base.OnPaint(e);
         }
 
         protected override void OnKeyDown(KeyEventArgs e)
@@ -296,7 +334,10 @@ namespace PredatorControlApp
             if (disposing)
             {
                 ThemeManager.ThemeChanged -= _themeHandler;
-                _boldFont?.Dispose();
+                if (_boldFont != null && _boldFont != Font)
+                {
+                    _boldFont.Dispose();
+                }
                 _boldFont = null;
             }
             base.Dispose(disposing);

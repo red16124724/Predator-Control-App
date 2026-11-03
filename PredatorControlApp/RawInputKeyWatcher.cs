@@ -14,6 +14,7 @@ namespace PredatorControlApp
         private const uint RID_INPUT = 0x10000003;
         private const uint RIDEV_INPUTSINK = 0x00000100;
         private const uint RIDEV_REMOVE = 0x00000001;
+        private const uint RIDEV_NOLEGACY = 0x00000030; // Strictly forbidden: never pass RIDEV_NOLEGACY to preserve BIOS Fn keys & Media keys
 
         [StructLayout(LayoutKind.Sequential)]
         private struct RAWINPUTDEVICE
@@ -31,17 +32,6 @@ namespace PredatorControlApp
             public uint dwSize;
             public IntPtr hDevice;
             public IntPtr wParam;
-        }
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct RAWKEYBOARD
-        {
-            public ushort MakeCode;
-            public ushort Flags;
-            public ushort Reserved;
-            public ushort VKey;
-            public uint Message;
-            public uint ExtraInformation;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -72,18 +62,33 @@ namespace PredatorControlApp
         {
             CreateHandle(new CreateParams());
             RegisterDevices();
+            try
+            {
+                AppDomain.CurrentDomain.ProcessExit += OnProcessExitOrCrash;
+                AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
+                Application.ApplicationExit += OnApplicationExit;
+            }
+            catch { }
         }
+
+        private void OnProcessExitOrCrash(object? sender, EventArgs e) => Dispose(true);
+        private void OnUnhandledException(object sender, UnhandledExceptionEventArgs e) => Dispose(true);
+        private void OnApplicationExit(object? sender, EventArgs e) => Dispose(true);
 
         private void RegisterDevices()
         {
-            RegisterSingleDevice(1, 6, RIDEV_INPUTSINK);       // Generic Desktop Keyboard
-            RegisterSingleDevice(0x0C, 1, RIDEV_INPUTSINK);    // Consumer Control (Multimedia/chassis hotkeys)
+            // Only listen to dedicated Acer hardware vendor pages.
+            // Do NOT register generic keyboard (1, 6) or Consumer Control (0x0C, 1)
+            // so standard keyboard inputs, Fn keys, and media controls are never intercepted.
             RegisterSingleDevice(136, 1, RIDEV_INPUTSINK);     // Acer Gaming Page
             RegisterSingleDevice(0xFF00, 1, RIDEV_INPUTSINK);  // Acer Vendor Defined Page
         }
 
         private void RegisterSingleDevice(ushort usagePage, ushort usage, uint flags)
         {
+            // Standard keyboard (1, 6) and consumer controls (0x0C, 1) must never be registered, and RIDEV_NOLEGACY is banned
+            if ((flags & RIDEV_NOLEGACY) != 0 || (usagePage == 1 && usage == 6) || usagePage == 0x0C)
+                return;
             try
             {
                 var dev = new RAWINPUTDEVICE[]
@@ -103,8 +108,6 @@ namespace PredatorControlApp
 
         private void UnregisterDevices()
         {
-            RegisterSingleDevice(1, 6, RIDEV_REMOVE);
-            RegisterSingleDevice(0x0C, 1, RIDEV_REMOVE);
             RegisterSingleDevice(136, 1, RIDEV_REMOVE);
             RegisterSingleDevice(0xFF00, 1, RIDEV_REMOVE);
         }
@@ -131,7 +134,14 @@ namespace PredatorControlApp
             if (now - _lastNitroSenseTick >= DebounceThresholdMs)
             {
                 _lastNitroSenseTick = now;
-                try { NitroSenseKeyPressed?.Invoke(); } catch { }
+                var handler = NitroSenseKeyPressed;
+                if (handler != null)
+                {
+                    ThreadPool.UnsafeQueueUserWorkItem(static h =>
+                    {
+                        try { h(); } catch { }
+                    }, handler, preferLocal: true);
+                }
             }
         }
 
@@ -142,7 +152,14 @@ namespace PredatorControlApp
             if (now - _lastModeKeyTick >= DebounceThresholdMs)
             {
                 _lastModeKeyTick = now;
-                try { ModeKeyPressed?.Invoke(); } catch { }
+                var handler = ModeKeyPressed;
+                if (handler != null)
+                {
+                    ThreadPool.UnsafeQueueUserWorkItem(static h =>
+                    {
+                        try { h(); } catch { }
+                    }, handler, preferLocal: true);
+                }
             }
         }
 
@@ -162,42 +179,25 @@ namespace PredatorControlApp
                     var header = Marshal.PtrToStructure<RAWINPUTHEADER>(pData);
                     IntPtr pRaw = (IntPtr)((long)pData + headerSize);
 
-                    if (header.dwType == 1) // RIM_TYPEKEYBOARD
-                    {
-                        if ((long)size < headerSize + Marshal.SizeOf<RAWKEYBOARD>()) return;
-                        var kb = Marshal.PtrToStructure<RAWKEYBOARD>(pRaw);
-                        if ((kb.Flags & 1) == 0) // Key down
-                        {
-                            // MakeCode 117 (0x75) = Predator / NitroSense dedicated key
-                            if (kb.MakeCode == 117)
-                            {
-                                FireNitroSenseKey();
-                            }
-                            else if (kb.MakeCode == 118 || kb.MakeCode == 119 || kb.MakeCode == 0x76 || kb.MakeCode == 0x77 || kb.VKey == 0x7C || (kb.VKey >= 0x82 && kb.VKey <= 0x87))
-                            {
-                                FireModeKey();
-                            }
-                        }
-                    }
-                    else if (header.dwType == 2) // RIM_TYPEHID
+                    if (header.dwType == 2) // RIM_TYPEHID
                     {
                         int hidDataOffset = Marshal.OffsetOf<RAWHID>("bRawData").ToInt32();
                         if ((long)size < headerSize + hidDataOffset) return;
                         var hid = Marshal.PtrToStructure<RAWHID>(pRaw);
                         int maxPayload = (int)((long)size - headerSize - hidDataOffset);
-                        if (maxPayload < 2) return;
-                        int totalBytes = (int)Math.Min((long)hid.dwSizeHid * Math.Max(1, (int)hid.dwCount), (long)maxPayload);
-                        if (totalBytes >= 2)
+                        if (maxPayload < 3) return;
+                        int totalBytes = (int)Math.Min((long)hid.dwSizeHid * Math.Max(1L, (long)hid.dwCount), (long)maxPayload);
+                        if (totalBytes >= 3)
                         {
                             byte[] rawBytes = new byte[totalBytes];
                             Marshal.Copy((IntPtr)((long)pRaw + hidDataOffset), rawBytes, 0, totalBytes);
-                            if (totalBytes >= 3 && rawBytes[1] == 129 && rawBytes[2] == 0xFF)
+
+                            // Strict Acer vendor packet signature: byte[1] == 129 (0x81)
+                            if (rawBytes[1] == 129 && rawBytes[2] == 0xFF)
                             {
                                 FireNitroSenseKey();
                             }
-                            else if (rawBytes[0] == 7 || rawBytes[0] == 0x82 || rawBytes[0] == 0x86 || rawBytes[0] == 0x87 ||
-                                     rawBytes[1] == 7 || rawBytes[1] == 130 || rawBytes[1] == 0x82 || rawBytes[1] == 0x86 || rawBytes[1] == 0x87 ||
-                                     (totalBytes >= 3 && rawBytes[1] == 129 && (rawBytes[2] == 0x07 || rawBytes[2] == 0x82 || rawBytes[2] == 0x86 || rawBytes[2] == 0x87)))
+                            else if (rawBytes[1] == 129 && (rawBytes[2] == 0x82 || rawBytes[2] == 0x86 || rawBytes[2] == 0x87))
                             {
                                 FireModeKey();
                             }
@@ -222,8 +222,20 @@ namespace PredatorControlApp
         {
             if (Interlocked.Exchange(ref _disposedState, 1) != 0) return;
             _isDisposed = true;
-            try { UnregisterDevices(); } catch { }
-            try { DestroyHandle(); } catch { }
+            NitroSenseKeyPressed = null;
+            ModeKeyPressed = null;
+            try
+            {
+                AppDomain.CurrentDomain.ProcessExit -= OnProcessExitOrCrash;
+                AppDomain.CurrentDomain.UnhandledException -= OnUnhandledException;
+                Application.ApplicationExit -= OnApplicationExit;
+            }
+            catch { }
+            if (disposing)
+            {
+                try { UnregisterDevices(); } catch { }
+                try { DestroyHandle(); } catch { }
+            }
         }
 
         ~RawInputKeyWatcher()

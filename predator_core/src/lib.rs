@@ -1,0 +1,1309 @@
+pub mod migration_exports;
+pub mod lighting_rules;
+pub mod protocol_migration;
+pub mod smbios;
+pub mod acpi;
+pub mod audio;
+pub mod battery;
+pub mod curve;
+pub mod graphproj;
+pub mod history;
+pub mod hook;
+pub mod pipeguard;
+pub mod procsync;
+pub mod shortcuts;
+pub mod ec_hid;
+pub mod nvapi;
+pub mod pawnio;
+pub mod rgb;
+pub mod telemetry;
+pub mod thermal;
+
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::Mutex;
+use acpi::{AcpiTable, PpccEntry, PpccSummary};
+use audio::SpectrumAnalyzer;
+use curve::{ControlPoint, FanCurveFollower};
+use ec_hid::EcHid;
+use pawnio::{PawnIoDriver, MchbarWritePlan};
+use rgb::{RgbAnimator, Rgb8};
+use telemetry::{NativeTelemetrySnapshot, TelemetryWorker};
+use thermal::{NativeThermalDecision, ThermalCoordinator, ThermalSafetyProfile};
+
+static GLOBAL_PAWNIO: Mutex<Option<PawnIoDriver>> = Mutex::new(None);
+static GLOBAL_TELEMETRY: Mutex<Option<TelemetryWorker>> = Mutex::new(None);
+static GLOBAL_ECHID: Mutex<Option<EcHid>> = Mutex::new(None);
+
+/// Serializes init/cleanup so a concurrent init cannot interleave with a cleanup.
+static LIFECYCLE: Mutex<()> = Mutex::new(());
+
+/// Ensures no panic unwinds across the C-ABI FFI boundary, preventing undefined behavior.
+#[inline]
+fn safe_ffi<F, R>(default: R, f: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    match catch_unwind(AssertUnwindSafe(f)) {
+        Ok(ret) => ret,
+        Err(_) => default,
+    }
+}
+
+/// Helper executing an operation on the global PawnIoDriver with poison recovery.
+fn with_pawnio<F, R>(default: R, f: F) -> R
+where
+    F: FnOnce(&mut PawnIoDriver) -> R,
+{
+    let mut guard = GLOBAL_PAWNIO.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.is_none() {
+        *guard = Some(PawnIoDriver::new());
+    }
+    if let Some(driver) = guard.as_mut() {
+        f(driver)
+    } else {
+        default
+    }
+}
+
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_core_init() -> i32 {
+    safe_ffi(-1, || {
+        let _lifecycle = LIFECYCLE.lock().unwrap_or_else(|e| e.into_inner());
+
+        {
+            let mut t_guard = GLOBAL_TELEMETRY.lock().unwrap_or_else(|e| e.into_inner());
+            if t_guard.is_none() {
+                let mut worker = TelemetryWorker::new();
+                worker.start();
+                *t_guard = Some(worker);
+            }
+        }
+
+        0
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_core_cleanup() {
+    safe_ffi((), || {
+        let _lifecycle = LIFECYCLE.lock().unwrap_or_else(|e| e.into_inner());
+
+        let worker_to_stop = {
+            let mut t_guard = GLOBAL_TELEMETRY.lock().unwrap_or_else(|e| e.into_inner());
+            t_guard.take()
+        };
+        if let Some(mut worker) = worker_to_stop {
+            worker.stop();
+        }
+
+        {
+            let mut p_guard = GLOBAL_PAWNIO.lock().unwrap_or_else(|e| e.into_inner());
+            p_guard.take();
+        }
+
+        {
+            let mut ec_guard = GLOBAL_ECHID.lock().unwrap_or_else(|e| e.into_inner());
+            ec_guard.take();
+        }
+
+        nvapi::shutdown();
+    });
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_pawnio_is_available() -> i32 {
+    safe_ffi(0, || {
+        with_pawnio(0, |driver| if driver.is_available() { 1 } else { 0 })
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_pawnio_read_msr(msr: u32, out_val: *mut u64) -> i32 {
+    safe_ffi(-1, || {
+        if out_val.is_null() {
+            return -1;
+        }
+        with_pawnio(-7, |driver| match driver.read_msr(msr) {
+            Ok(val) => {
+                std::ptr::write_unaligned(out_val, val);
+                0
+            }
+            Err(e) => e,
+        })
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_pawnio_write_msr(msr: u32, val: u64) -> i32 {
+    safe_ffi(-1, || {
+        with_pawnio(-7, |driver| match driver.write_msr(msr, val) {
+            Ok(()) => 0,
+            Err(e) => e,
+        })
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_pawnio_read_mmio32(addr: u64, out_val: *mut u32) -> i32 {
+    safe_ffi(-1, || {
+        if out_val.is_null() {
+            return -1;
+        }
+        with_pawnio(-7, |driver| match driver.read_mmio32(addr) {
+            Ok(val) => {
+                std::ptr::write_unaligned(out_val, val);
+                0
+            }
+            Err(e) => e,
+        })
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_pawnio_write_mmio32(addr: u64, val: u32) -> i32 {
+    safe_ffi(-1, || {
+        with_pawnio(-7, |driver| match driver.write_mmio32(addr, val) {
+            Ok(()) => 0,
+            Err(e) => e,
+        })
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_pawnio_plan_msr_write(
+    current_msr_limit: u64,
+    raw_pl1: u64,
+    raw_pl2: u64,
+    out_value: *mut u64,
+) -> i32 {
+    safe_ffi(-1, || {
+        if out_value.is_null() {
+            return -1;
+        }
+        match pawnio::PawnIoController::plan_msr_power_limit(current_msr_limit, raw_pl1, raw_pl2) {
+            Ok(value) => {
+                std::ptr::write_unaligned(out_value, value);
+                0
+            }
+            Err(status) => status,
+        }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_pawnio_plan_mchbar_write(
+    current_mmio: u64,
+    read_ok: i32,
+    raw_pl1: u64,
+    raw_pl2: u64,
+    fallback_tau1: u64,
+    fallback_tau2: u64,
+    pl1_address: u64,
+    pl2_address: u64,
+    out_plan: *mut MchbarWritePlan,
+) -> i32 {
+    safe_ffi(-1, || {
+        if out_plan.is_null() {
+            return -1;
+        }
+        let plan = pawnio::plan_mchbar_power_write(
+            current_mmio,
+            read_ok != 0,
+            raw_pl1,
+            raw_pl2,
+            fallback_tau1,
+            fallback_tau2,
+            pl1_address,
+            pl2_address,
+        );
+        std::ptr::write_unaligned(out_plan, plan);
+        plan.status
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_pawnio_apply_power_limits(
+    target_pl1: u32,
+    target_pl2: u32,
+    out_mmio_mirrored: *mut i32,
+) -> i32 {
+    safe_ffi(-1, || {
+        with_pawnio(-7, |driver| {
+            match driver.write_rapl_limits_directional(target_pl1, target_pl2) {
+                Ok(mirrored) => {
+                    if !out_mmio_mirrored.is_null() {
+                        std::ptr::write_unaligned(out_mmio_mirrored, if mirrored { 1 } else { 0 });
+                    }
+                    0
+                }
+                Err(e) => e,
+            }
+        })
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_telemetry_get_snapshot(out_snapshot: *mut NativeTelemetrySnapshot) -> i32 {
+    safe_ffi(-1, || {
+        if out_snapshot.is_null() {
+            return -1;
+        }
+        let guard = GLOBAL_TELEMETRY.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(worker) = guard.as_ref() {
+            let snap = worker.get_snapshot();
+            std::ptr::write_unaligned(out_snapshot, snap);
+            0
+        } else {
+            -2
+        }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_telemetry_set_interval(ms: u32) -> i32 {
+    safe_ffi(-1, || {
+        let guard = GLOBAL_TELEMETRY.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(worker) = guard.as_ref() {
+            worker.set_interval(ms);
+            0
+        } else {
+            -2
+        }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_curve_create(hysteresis: i32) -> *mut FanCurveFollower {
+    safe_ffi(std::ptr::null_mut(), || {
+        let follower = Box::new(FanCurveFollower::new(hysteresis));
+        Box::into_raw(follower)
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_curve_update(
+    handle: *mut FanCurveFollower,
+    temp: f64,
+    points_ptr: *const ControlPoint,
+    point_count: usize,
+    safety_floor: i32,
+) -> i32 {
+    safe_ffi(safety_floor.clamp(0, 100).max(50), || {
+        let fallback = safety_floor.clamp(0, 100).max(50);
+        if handle.is_null() || points_ptr.is_null() || point_count == 0 {
+            return fallback;
+        }
+        if (handle as usize) % std::mem::align_of::<FanCurveFollower>() != 0 {
+            return fallback;
+        }
+        if point_count > (isize::MAX as usize) / std::mem::size_of::<ControlPoint>() {
+            return fallback;
+        }
+
+        let follower = &mut *handle;
+
+        if (points_ptr as usize) % std::mem::align_of::<ControlPoint>() == 0 {
+            let points = std::slice::from_raw_parts(points_ptr, point_count);
+            follower.update_f64(temp, points, safety_floor)
+        } else {
+            // Unaligned pointer from foreign runtime: read safely via read_unaligned
+            if point_count <= 64 {
+                let mut aligned = [ControlPoint::default(); 64];
+                for i in 0..point_count {
+                    aligned[i] = std::ptr::read_unaligned(points_ptr.add(i));
+                }
+                follower.update_f64(temp, &aligned[..point_count], safety_floor)
+            } else {
+                let mut aligned = Vec::with_capacity(point_count);
+                for i in 0..point_count {
+                    aligned.push(std::ptr::read_unaligned(points_ptr.add(i)));
+                }
+                follower.update_f64(temp, &aligned, safety_floor)
+            }
+        }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_curve_interpolate(
+    points_ptr: *const ControlPoint,
+    point_count: usize,
+    temp: i32,
+) -> i32 {
+    safe_ffi(50, || {
+        if points_ptr.is_null() || point_count == 0 {
+            return 50;
+        }
+        if point_count > (isize::MAX as usize) / std::mem::size_of::<ControlPoint>() {
+            return 50;
+        }
+
+        if (points_ptr as usize) % std::mem::align_of::<ControlPoint>() == 0 {
+            let points = std::slice::from_raw_parts(points_ptr, point_count);
+            curve::interpolate_curve(points, temp)
+        } else {
+            if point_count <= 64 {
+                let mut aligned = [ControlPoint::default(); 64];
+                for i in 0..point_count {
+                    aligned[i] = std::ptr::read_unaligned(points_ptr.add(i));
+                }
+                curve::interpolate_curve(&aligned[..point_count], temp)
+            } else {
+                let mut aligned = Vec::with_capacity(point_count);
+                for i in 0..point_count {
+                    aligned.push(std::ptr::read_unaligned(points_ptr.add(i)));
+                }
+                curve::interpolate_curve(&aligned, temp)
+            }
+        }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_curve_reset(handle: *mut FanCurveFollower) {
+    safe_ffi((), || {
+        if !handle.is_null() && (handle as usize) % std::mem::align_of::<FanCurveFollower>() == 0 {
+            let follower = &mut *handle;
+            follower.reset();
+        }
+    });
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_curve_destroy(handle: *mut FanCurveFollower) {
+    safe_ffi((), || {
+        if !handle.is_null() && (handle as usize) % std::mem::align_of::<FanCurveFollower>() == 0 {
+            let _ = Box::from_raw(handle);
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Thermal coordinator handles (thermal.rs)
+//
+// The coordinator is per-instance state: latches, filtered temperatures, and
+// fan-floor pacing all belong to one caller. A process-wide singleton made
+// independent coordinators (and therefore independent tests) share state, so
+// ownership follows the same handle pattern as the curve and RGB engines.
+// ---------------------------------------------------------------------------
+
+/// # Safety
+/// The returned pointer must be released with [`predator_thermal_destroy`].
+#[no_mangle]
+pub unsafe extern "C" fn predator_thermal_create() -> *mut ThermalCoordinator {
+    safe_ffi(std::ptr::null_mut(), || {
+        Box::into_raw(Box::new(ThermalCoordinator::new(ThermalSafetyProfile::default())))
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_thermal_destroy(handle: *mut ThermalCoordinator) {
+    safe_ffi((), || {
+        if !handle.is_null() && (handle as usize) % std::mem::align_of::<ThermalCoordinator>() == 0 {
+            let _ = Box::from_raw(handle);
+        }
+    });
+}
+
+/// Runs `f` against a validated coordinator handle, returning `default` when the
+/// pointer is null, misaligned, or the caller panics.
+#[inline]
+unsafe fn with_thermal<F, R>(handle: *mut ThermalCoordinator, default: R, f: F) -> R
+where
+    F: FnOnce(&mut ThermalCoordinator) -> R,
+{
+    if handle.is_null() || (handle as usize) % std::mem::align_of::<ThermalCoordinator>() != 0 {
+        return default;
+    }
+    safe_ffi(default, || f(&mut *handle))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_thermal_set_profile(
+    handle: *mut ThermalCoordinator,
+    enabled: i32,
+    cpu_warn: f64,
+    cpu_ceiling: f64,
+    cpu_critical: f64,
+    gpu_warn: f64,
+    gpu_ceiling: f64,
+    gpu_critical: f64,
+    hysteresis: f64,
+    max_fan_floor: i32,
+    cpu_power_cap_watts: i32,
+    min_power_cap_watts: i32,
+    critical_fans_full_speed: i32,
+    ema_alpha: f64,
+) -> i32 {
+    safe_ffi(-1, || {
+        with_thermal(handle, -1, |coordinator| {
+            coordinator.set_profile(ThermalSafetyProfile {
+                enabled: enabled != 0,
+                cpu_warn,
+                cpu_ceiling,
+                cpu_critical,
+                gpu_warn,
+                gpu_ceiling,
+                gpu_critical,
+                hysteresis,
+                max_fan_floor,
+                cpu_power_cap_watts,
+                min_power_cap_watts,
+                critical_fans_full_speed: critical_fans_full_speed != 0,
+                ema_alpha,
+            });
+            0
+        })
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_thermal_reset(handle: *mut ThermalCoordinator) -> i32 {
+    safe_ffi(-1, || {
+        with_thermal(handle, -1, |coordinator| {
+            coordinator.reset();
+            0
+        })
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_thermal_evaluate(
+    handle: *mut ThermalCoordinator,
+    cpu_temp: f64,
+    gpu_temp: f64,
+    target_pl1: i32,
+    min_power: i32,
+    base_tdp: i32,
+    out_decision: *mut NativeThermalDecision,
+) -> i32 {
+    safe_ffi(-1, || {
+        if out_decision.is_null() {
+            return -1;
+        }
+        with_thermal(handle, -1, |coordinator| {
+            let decision = coordinator.evaluate(cpu_temp, gpu_temp, target_pl1, min_power, base_tdp);
+            std::ptr::write_unaligned(out_decision, decision);
+            0
+        })
+    })
+}
+
+// ---------------------------------------------------------------------------
+// RGB animation engine (LightingEffects34.cs)
+// ---------------------------------------------------------------------------
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_rgb_create(
+    effect: i32,
+    r: u8,
+    g: u8,
+    b: u8,
+    brightness: u8,
+    speed: u8,
+    direction: u8,
+    zones: usize,
+) -> *mut RgbAnimator {
+    safe_ffi(std::ptr::null_mut(), || {
+        let anim = Box::new(RgbAnimator::new(
+            effect,
+            Rgb8 { r, g, b },
+            brightness,
+            speed,
+            direction,
+            zones,
+        ));
+        Box::into_raw(anim)
+    })
+}
+
+/// Renders the next frame as `zones` interleaved RGB triples. Returns zones written.
+#[no_mangle]
+pub unsafe extern "C" fn predator_rgb_next_frame(
+    handle: *mut RgbAnimator,
+    out: *mut u8,
+    zones: usize,
+) -> i32 {
+    safe_ffi(-1, || {
+        if handle.is_null() || (handle as usize) % std::mem::align_of::<RgbAnimator>() != 0 || out.is_null() || zones == 0 {
+            return -1;
+        }
+        let anim = &mut *handle;
+        // Rgb8 is #[repr(C)] with three u8 fields: layout-compatible with RGB triples.
+        let slice = std::slice::from_raw_parts_mut(out as *mut Rgb8, zones.min(rgb::MAX_ZONES));
+        anim.next_frame(slice) as i32
+    })
+}
+
+/// Stateless frame render for callers that own the cursor themselves.
+#[no_mangle]
+pub unsafe extern "C" fn predator_rgb_render_frame(
+    effect: i32,
+    step: u64,
+    r: u8,
+    g: u8,
+    b: u8,
+    brightness: u8,
+    out: *mut u8,
+    zones: usize,
+) -> i32 {
+    safe_ffi(-1, || {
+        if out.is_null() || zones == 0 {
+            return -1;
+        }
+        let slice = std::slice::from_raw_parts_mut(out as *mut Rgb8, zones.min(rgb::MAX_ZONES));
+        rgb::render_frame(effect, step, Rgb8 { r, g, b }, brightness, slice) as i32
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_rgb_frame_delay_ms(speed: u8) -> u32 {
+    safe_ffi(125, || rgb::frame_delay_ms(speed))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_rgb_delay_ms(handle: *mut RgbAnimator) -> u32 {
+    safe_ffi(0, || {
+        if handle.is_null() || (handle as usize) % std::mem::align_of::<RgbAnimator>() != 0 {
+            return 0;
+        }
+        (*handle).delay_ms()
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_rgb_set_brightness(handle: *mut RgbAnimator, brightness: u8) {
+    safe_ffi((), || {
+        if !handle.is_null() && (handle as usize) % std::mem::align_of::<RgbAnimator>() == 0 {
+            (*handle).set_brightness(brightness);
+        }
+    });
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_rgb_reset(handle: *mut RgbAnimator) {
+    safe_ffi((), || {
+        if !handle.is_null() && (handle as usize) % std::mem::align_of::<RgbAnimator>() == 0 {
+            (*handle).reset();
+        }
+    });
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_rgb_destroy(handle: *mut RgbAnimator) {
+    safe_ffi((), || {
+        if !handle.is_null() && (handle as usize) % std::mem::align_of::<RgbAnimator>() == 0 {
+            let _ = Box::from_raw(handle);
+        }
+    });
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_rgb_hsv_to_rgb(hue: f64, saturation: f64, value: f64, out: *mut u8) -> i32 {
+    safe_ffi(-1, || {
+        if out.is_null() {
+            return -1;
+        }
+        let c = rgb::hsv_to_rgb(hue, saturation, value);
+        std::ptr::write_unaligned(out, c.r);
+        std::ptr::write_unaligned(out.add(1), c.g);
+        std::ptr::write_unaligned(out.add(2), c.b);
+        0
+    })
+}
+
+/// Cross-fades `zones` RGB triples in `current` toward `target` by `t` (0..=1).
+#[no_mangle]
+pub unsafe extern "C" fn predator_rgb_blend(
+    current: *mut u8,
+    target: *const u8,
+    zones: usize,
+    t: f32,
+) -> i32 {
+    safe_ffi(-1, || {
+        if current.is_null() || target.is_null() || zones == 0 {
+            return -1;
+        }
+        let cur = std::slice::from_raw_parts_mut(current as *mut Rgb8, zones.min(rgb::MAX_ZONES));
+        let tgt = std::slice::from_raw_parts(target as *const Rgb8, zones.min(rgb::MAX_ZONES));
+        rgb::blend_zones(cur, tgt, t);
+        0
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_rgb_apply_brightness(zones: *mut u8, count: usize, brightness: u8) -> i32 {
+    safe_ffi(-1, || {
+        if zones.is_null() || count == 0 {
+            return -1;
+        }
+        let slice = std::slice::from_raw_parts_mut(zones as *mut Rgb8, count.min(rgb::MAX_ZONES));
+        rgb::apply_brightness(slice, brightness);
+        0
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Audio spectrum analyzer (AudioMeter.cs)
+// ---------------------------------------------------------------------------
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_audio_create(
+    sample_rate: u32,
+    fft_size: usize,
+    band_count: usize,
+) -> *mut SpectrumAnalyzer {
+    safe_ffi(std::ptr::null_mut(), || match SpectrumAnalyzer::new(sample_rate, fft_size, band_count) {
+        Some(analyzer) => Box::into_raw(Box::new(analyzer)),
+        None => std::ptr::null_mut(),
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_audio_destroy(handle: *mut SpectrumAnalyzer) {
+    safe_ffi((), || {
+        if !handle.is_null() && (handle as usize) % std::mem::align_of::<SpectrumAnalyzer>() == 0 {
+            let _ = Box::from_raw(handle);
+        }
+    });
+}
+
+/// Pushes `count` f32 samples (interleaved across `channels`).
+#[no_mangle]
+pub unsafe extern "C" fn predator_audio_push(
+    handle: *mut SpectrumAnalyzer,
+    samples: *const f32,
+    count: usize,
+    channels: usize,
+) -> i32 {
+    safe_ffi(-1, || {
+        if handle.is_null() || (handle as usize) % std::mem::align_of::<SpectrumAnalyzer>() != 0 || samples.is_null() || count == 0 {
+            return -1;
+        }
+        let max_samples = count.min(audio::MAX_PUSH_FRAMES * 8);
+        if (samples as usize) % std::mem::align_of::<f32>() == 0 {
+            let data = std::slice::from_raw_parts(samples, max_samples);
+            (*handle).push_interleaved(data, channels.max(1));
+        } else {
+            let mut aligned = Vec::with_capacity(max_samples);
+            for i in 0..max_samples {
+                aligned.push(std::ptr::read_unaligned(samples.add(i)));
+            }
+            (*handle).push_interleaved(&aligned, channels.max(1));
+        }
+        0
+    })
+}
+
+/// Writes up to `cap` band energies (0..=1) and returns how many were written.
+#[no_mangle]
+pub unsafe extern "C" fn predator_audio_get_bands(
+    handle: *mut SpectrumAnalyzer,
+    out: *mut f32,
+    cap: usize,
+) -> i32 {
+    safe_ffi(-1, || {
+        if handle.is_null() || (handle as usize) % std::mem::align_of::<SpectrumAnalyzer>() != 0 || out.is_null() || cap == 0 {
+            return -1;
+        }
+        let analyzer = &mut *handle;
+        let bands = analyzer.bands();
+        let count = cap.min(bands.len());
+        for (i, v) in bands[..count].iter().enumerate() {
+            std::ptr::write_unaligned(out.add(i), *v);
+        }
+        count as i32
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_audio_get_level(handle: *mut SpectrumAnalyzer) -> f32 {
+    safe_ffi(0.0, || {
+        if handle.is_null() || (handle as usize) % std::mem::align_of::<SpectrumAnalyzer>() != 0 {
+            return 0.0;
+        }
+        (*handle).level()
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_audio_is_beat(handle: *mut SpectrumAnalyzer) -> i32 {
+    safe_ffi(0, || {
+        if handle.is_null() || (handle as usize) % std::mem::align_of::<SpectrumAnalyzer>() != 0 {
+            return 0;
+        }
+        if (*handle).is_beat() { 1 } else { 0 }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_audio_beat_strength(handle: *mut SpectrumAnalyzer) -> f32 {
+    safe_ffi(0.0, || {
+        if handle.is_null() || (handle as usize) % std::mem::align_of::<SpectrumAnalyzer>() != 0 {
+            return 0.0;
+        }
+        (*handle).beat_strength()
+    })
+}
+
+/// Maps spectrum energy onto `zones` RGB triples driven by `base` color.
+#[no_mangle]
+pub unsafe extern "C" fn predator_audio_render_zones(
+    handle: *mut SpectrumAnalyzer,
+    r: u8,
+    g: u8,
+    b: u8,
+    brightness: u8,
+    out: *mut u8,
+    zones: usize,
+) -> i32 {
+    safe_ffi(-1, || {
+        if handle.is_null() || (handle as usize) % std::mem::align_of::<SpectrumAnalyzer>() != 0 || out.is_null() || zones == 0 {
+            return -1;
+        }
+        let slice = std::slice::from_raw_parts_mut(out, zones.min(rgb::MAX_ZONES) * 3);
+        (*handle).render_zones([r, g, b], brightness, slice) as i32
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_audio_reset(handle: *mut SpectrumAnalyzer) {
+    safe_ffi((), || {
+        if !handle.is_null() && (handle as usize) % std::mem::align_of::<SpectrumAnalyzer>() == 0 {
+            (*handle).reset();
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
+// NVAPI bridge (PdhLoadMonitor.cs GPU telemetry)
+// ---------------------------------------------------------------------------
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_nvapi_is_available() -> i32 {
+    safe_ffi(0, || if nvapi::is_available() { 1 } else { 0 })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_nvapi_get_gpu_load(out_load: *mut f64) -> i32 {
+    safe_ffi(-1, || {
+        if out_load.is_null() {
+            return -1;
+        }
+        match nvapi::gpu_load() {
+            Some(load) => {
+                std::ptr::write_unaligned(out_load, load);
+                0
+            }
+            None => -2,
+        }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_nvapi_get_gpu_temperature(out_temp: *mut f64) -> i32 {
+    safe_ffi(-1, || {
+        if out_temp.is_null() {
+            return -1;
+        }
+        match nvapi::gpu_temperature() {
+            Some(temp) => {
+                std::ptr::write_unaligned(out_temp, temp);
+                0
+            }
+            None => -2,
+        }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_nvapi_get_gpu_count() -> u32 {
+    safe_ffi(0, nvapi::gpu_count)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_nvapi_shutdown() {
+    safe_ffi((), nvapi::shutdown);
+}
+
+// ---------------------------------------------------------------------------
+// ACPI / AML parser (BiosUefiPowerScanner.cs)
+// ---------------------------------------------------------------------------
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_acpi_ppcc_entries(
+    aml: *const u8,
+    len: usize,
+    out: *mut PpccEntry,
+    cap: usize,
+) -> i32 {
+    safe_ffi(-1, || {
+        if aml.is_null() || len == 0 {
+            return -1;
+        }
+        let slice = std::slice::from_raw_parts(aml, len);
+        let entries = acpi::extract_ppcc_entries(slice);
+        if out.is_null() || cap == 0 {
+            return entries.len() as i32;
+        }
+        let count = entries.len().min(cap);
+        for (i, entry) in entries[..count].iter().enumerate() {
+            std::ptr::write_unaligned(out.add(i), *entry);
+        }
+        count as i32
+    })
+}
+
+/// Returns 1 and fills `out_summary` when a PPCC block was found, 0 when absent.
+#[no_mangle]
+pub unsafe extern "C" fn predator_acpi_ppcc_summary(
+    aml: *const u8,
+    len: usize,
+    out_summary: *mut PpccSummary,
+) -> i32 {
+    safe_ffi(-1, || {
+        if aml.is_null() || len == 0 || out_summary.is_null() {
+            return -1;
+        }
+        let slice = std::slice::from_raw_parts(aml, len);
+        match acpi::parse_ppcc_summary(slice) {
+            Some(summary) => {
+                std::ptr::write_unaligned(out_summary, summary);
+                1
+            }
+            None => 0,
+        }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_acpi_scan_tables(
+    blob: *const u8,
+    len: usize,
+    out: *mut AcpiTable,
+    cap: usize,
+) -> i32 {
+    safe_ffi(-1, || {
+        if blob.is_null() || len == 0 {
+            return -1;
+        }
+        let slice = std::slice::from_raw_parts(blob, len);
+        let tables = acpi::scan_acpi_tables(slice);
+        if out.is_null() || cap == 0 {
+            return tables.len() as i32;
+        }
+        let count = tables.len().min(cap);
+        for (i, table) in tables[..count].iter().enumerate() {
+            std::ptr::write_unaligned(out.add(i), *table);
+        }
+        count as i32
+    })
+}
+
+// ---------------------------------------------------------------------------
+// EC-HID transport (AcerHardwareProtocols.cs)
+// ---------------------------------------------------------------------------
+
+fn with_echid<F, R>(_default: R, f: F) -> R
+where
+    F: FnOnce(&mut Option<EcHid>) -> R,
+{
+    let mut guard = GLOBAL_ECHID.lock().unwrap_or_else(|e| e.into_inner());
+    f(&mut guard)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_echid_open(
+    vendor_id: u16,
+    product_id: u16,
+    usage_page: u16,
+    usage: u16,
+) -> i32 {
+    safe_ffi(0, || {
+        with_echid(0, |slot| {
+            if let Some(existing) = slot.as_ref() {
+                if existing.is_open() {
+                    return 1;
+                }
+            }
+            *slot = EcHid::open(vendor_id, product_id, usage_page, usage);
+            if slot.is_some() { 1 } else { 0 }
+        })
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_echid_close() {
+    safe_ffi((), || {
+        with_echid((), |slot| {
+            slot.take();
+        })
+    });
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_echid_is_open() -> i32 {
+    safe_ffi(0, || {
+        with_echid(0, |slot| match slot.as_ref() {
+            Some(dev) if dev.is_open() => 1,
+            _ => 0,
+        })
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_echid_report_length() -> i32 {
+    safe_ffi(0, || {
+        with_echid(0, |slot| match slot.as_ref() {
+            Some(dev) => dev.report_length() as i32,
+            None => 0,
+        })
+    })
+}
+
+/// Sends a feature report and copies the reply report into `out`.
+/// Returns the number of reply bytes written, or a negative error code.
+#[no_mangle]
+pub unsafe extern "C" fn predator_echid_exchange(
+    request: *const u8,
+    request_len: usize,
+    out: *mut u8,
+    out_cap: usize,
+) -> i32 {
+    safe_ffi(-1, || {
+        if request.is_null() || request_len == 0 || out.is_null() || out_cap == 0 {
+            return -1;
+        }
+        let req = std::slice::from_raw_parts(request, request_len);
+        let out_slice = std::slice::from_raw_parts_mut(out, out_cap);
+        with_echid(-2, |slot| match slot.as_ref() {
+            Some(dev) => match dev.exchange(req, out_slice) {
+                Some(n) => n as i32,
+                None => -3,
+            },
+            None => -2,
+        })
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_echid_enumerate(limit: usize) -> i32 {
+    safe_ffi(0, || ec_hid::enumerate_hid_paths(limit) as i32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex as StdMutex;
+    static TEST_MUTEX: StdMutex<()> = StdMutex::new(());
+
+    #[test]
+    fn test_curve_interpolation_and_deadband() {
+        let mut follower = FanCurveFollower::new(2);
+        let pts = [
+            ControlPoint { temp: 40, speed: 20 },
+            ControlPoint { temp: 60, speed: 50 },
+            ControlPoint { temp: 80, speed: 80 },
+            ControlPoint { temp: 95, speed: 100 },
+        ];
+
+        // Below lowest point clamped to lowest speed
+        assert_eq!(FanCurveFollower::interpolate(&pts, 30), 20);
+        // Above highest point clamped to highest speed
+        assert_eq!(FanCurveFollower::interpolate(&pts, 100), 100);
+        // Exact points
+        assert_eq!(FanCurveFollower::interpolate(&pts, 40), 20);
+        assert_eq!(FanCurveFollower::interpolate(&pts, 60), 50);
+        // Midpoint linear interpolation (40->60 temp is 20-50 speed: 50 temp is 35 speed)
+        assert_eq!(FanCurveFollower::interpolate(&pts, 50), 35);
+
+        // Test update with safety floor
+        let speed = follower.update(50, &pts, 60);
+        assert_eq!(speed, 60); // Safety floor overrides 35
+    }
+
+    #[test]
+    fn test_thermal_coordinator_stages_and_caps() {
+        let profile = ThermalSafetyProfile {
+            enabled: true,
+            cpu_warn: 75.0,
+            cpu_ceiling: 95.0,
+            cpu_critical: 100.0,
+            gpu_warn: 70.0,
+            gpu_ceiling: 87.0,
+            gpu_critical: 90.0,
+            hysteresis: 3.0,
+            max_fan_floor: 100,
+            cpu_power_cap_watts: 45,
+            min_power_cap_watts: 15,
+            critical_fans_full_speed: true,
+            ema_alpha: 0.35,
+        };
+
+        let mut coord = ThermalCoordinator::new(profile);
+
+        // Normal temperature
+        let d_normal = coord.evaluate(50.0, 50.0, 65, 15, 45);
+        assert_eq!(d_normal.stage, 0);
+        assert_eq!(d_normal.active, false);
+
+        // Warm temperature sustained over several ticks (EMA convergence)
+        let mut d_warm = d_normal;
+        for _ in 0..10 {
+            d_warm = coord.evaluate(85.0, 50.0, 65, 15, 45);
+        }
+        assert!(d_warm.stage >= 1);
+        assert_eq!(d_warm.active, true);
+
+        // Critical temperature sustained over several ticks
+        let mut d_crit = d_warm;
+        for _ in 0..10 {
+            d_crit = coord.evaluate(105.0, 50.0, 65, 15, 45);
+        }
+        assert_eq!(d_crit.stage, 3);
+        assert_eq!(d_crit.critical, true);
+        assert_eq!(d_crit.cpu_fan_floor, 100);
+        assert_eq!(d_crit.cpu_power_cap_watts, 15); // clamped to floor
+    }
+
+    /// Regression test: thermal FFI used to be a process-wide singleton, so a
+    /// second coordinator inherited the first one's latches, filters, and floor.
+    #[test]
+    fn test_thermal_handles_are_independent() {
+        let _test_guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            let hot = predator_thermal_create();
+            let cold = predator_thermal_create();
+            assert!(!hot.is_null() && !cold.is_null());
+            assert_ne!(hot, cold);
+
+            let mut dec = NativeThermalDecision::default();
+            assert_eq!(predator_thermal_evaluate(hot, 105.0, 95.0, 65, 15, 45, &mut dec), 0);
+            assert_eq!(dec.stage, 3);
+            assert_eq!(dec.cpu_fan_floor, 100);
+
+            // The untouched handle must still report a normal stage and no floor.
+            assert_eq!(predator_thermal_evaluate(cold, 45.0, 40.0, 65, 15, 45, &mut dec), 0);
+            assert_eq!(dec.stage, 0);
+            assert_eq!(dec.cpu_fan_floor, 0);
+            assert!(!dec.active);
+
+            // Resetting the hot handle must not disturb the cold one.
+            assert_eq!(predator_thermal_reset(hot), 0);
+            assert_eq!(predator_thermal_evaluate(hot, 45.0, 40.0, 65, 15, 45, &mut dec), 0);
+            assert_eq!(dec.stage, 0);
+
+            predator_thermal_destroy(hot);
+            predator_thermal_destroy(cold);
+        }
+    }
+
+    #[test]
+    fn test_pawnio_directional_split_write() {
+        let mut driver = PawnIoDriver::new();
+        assert!(driver.is_available());
+
+        // Test reading mock MSR
+        let units = driver.read_msr(pawnio::MSR_RAPL_POWER_UNIT).unwrap();
+        assert_eq!(units, 0x000A0E03);
+
+        // Test directional split write
+        let res = driver.write_rapl_limits_directional(45, 90);
+        assert!(res.is_ok());
+
+        // Check new MSR 0x610 value
+        let limit = driver.read_msr(pawnio::MSR_PKG_POWER_LIMIT).unwrap();
+        let pl1_raw = limit & 0x7FFF;
+        assert_eq!(pl1_raw, 45 * 8); // 45W * 8 units/W
+    }
+
+    #[test]
+    fn test_c_abi_curve_exports() {
+        let _test_guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let handle = unsafe { predator_curve_create(2) };
+        assert!(!handle.is_null());
+
+        let pts = [
+            ControlPoint { temp: 40, speed: 20 },
+            ControlPoint { temp: 60, speed: 50 },
+            ControlPoint { temp: 80, speed: 80 },
+            ControlPoint { temp: 95, speed: 100 },
+        ];
+
+        // Test predator_curve_interpolate
+        assert_eq!(unsafe { predator_curve_interpolate(std::ptr::null(), 0, 50) }, 50);
+        assert_eq!(unsafe { predator_curve_interpolate(pts.as_ptr(), pts.len(), 30) }, 20);
+        assert_eq!(unsafe { predator_curve_interpolate(pts.as_ptr(), pts.len(), 50) }, 35);
+        assert_eq!(unsafe { predator_curve_interpolate(pts.as_ptr(), pts.len(), 100) }, 100);
+
+        // Test predator_curve_update with f64 temp
+        assert_eq!(unsafe { predator_curve_update(std::ptr::null_mut(), 50.0, pts.as_ptr(), pts.len(), 0) }, 50);
+        assert_eq!(unsafe { predator_curve_update(handle, 50.0, std::ptr::null(), 0, 0) }, 50);
+
+        let speed = unsafe { predator_curve_update(handle, 50.0, pts.as_ptr(), pts.len(), 0) };
+        assert_eq!(speed, 35);
+
+        let speed_floor = unsafe { predator_curve_update(handle, 50.0, pts.as_ptr(), pts.len(), 60) };
+        assert_eq!(speed_floor, 60);
+
+        unsafe {
+            predator_curve_reset(handle);
+            predator_curve_destroy(handle);
+        }
+    }
+
+    #[test]
+    fn test_ffi_null_pointers_robustness() {
+        let _test_guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            assert_eq!(predator_pawnio_read_msr(0x606, std::ptr::null_mut()), -1);
+            assert_eq!(predator_pawnio_read_mmio32(0xFED159A0, std::ptr::null_mut()), -1);
+            assert_eq!(predator_telemetry_get_snapshot(std::ptr::null_mut()), -1);
+            assert_eq!(predator_curve_interpolate(std::ptr::null(), 0, 50), 50);
+            assert_eq!(predator_curve_update(std::ptr::null_mut(), 50.0, std::ptr::null(), 0, 0), 50);
+            assert_eq!(predator_thermal_evaluate(std::ptr::null_mut(), 50.0, 50.0, 45, 15, 45, std::ptr::null_mut()), -1);
+            assert_eq!(predator_thermal_set_profile(std::ptr::null_mut(), 1, 75.0, 95.0, 100.0, 70.0, 87.0, 90.0, 3.0, 100, 45, 15, 1, 0.35), -1);
+            assert_eq!(predator_thermal_reset(std::ptr::null_mut()), -1);
+            predator_thermal_destroy(std::ptr::null_mut());
+            predator_curve_reset(std::ptr::null_mut());
+            predator_curve_destroy(std::ptr::null_mut());
+        }
+    }
+
+    #[test]
+    fn test_ffi_unaligned_pointers() {
+        let _test_guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            // Test unaligned out_val for read_msr
+            let mut buf = [0u8; 16];
+            let unaligned_u64 = buf.as_mut_ptr().add(1) as *mut u64;
+            let res = predator_pawnio_read_msr(pawnio::MSR_RAPL_POWER_UNIT, unaligned_u64);
+            assert_eq!(res, 0);
+            let val = std::ptr::read_unaligned(unaligned_u64);
+            assert_eq!(val, 0x000A0E03);
+
+            // Test unaligned out_val for read_mmio32
+            let unaligned_u32 = buf.as_mut_ptr().add(3) as *mut u32;
+            let res_mmio = predator_pawnio_read_mmio32(pawnio::MMIO_PKG_RAPL_LIMIT_ADDRESS, unaligned_u32);
+            assert_eq!(res_mmio, 0);
+
+            // Test unaligned points buffer for curve interpolation
+            let pts = [
+                ControlPoint { temp: 40, speed: 20 },
+                ControlPoint { temp: 80, speed: 80 },
+            ];
+            let mut byte_buf = [0u8; 32];
+            let unaligned_pts = byte_buf.as_mut_ptr().add(1) as *mut ControlPoint;
+            std::ptr::copy_nonoverlapping(pts.as_ptr() as *const u8, unaligned_pts as *mut u8, std::mem::size_of_val(&pts));
+
+            let interp = predator_curve_interpolate(unaligned_pts, 2, 60);
+            assert_eq!(interp, 50);
+
+            let handle = predator_curve_create(2);
+            let update_res = predator_curve_update(handle, 60.0, unaligned_pts, 2, 0);
+            assert_eq!(update_res, 50);
+            predator_curve_destroy(handle);
+
+            // Test unaligned thermal decision out pointer
+            let thermal = predator_thermal_create();
+            let mut dec_buf = [0u8; 64];
+            let unaligned_dec = dec_buf.as_mut_ptr().add(1) as *mut NativeThermalDecision;
+            let th_res = predator_thermal_evaluate(thermal, 50.0, 50.0, 45, 15, 45, unaligned_dec);
+            assert_eq!(th_res, 0);
+            let dec = std::ptr::read_unaligned(unaligned_dec);
+            assert_eq!(dec.stage, 0);
+            predator_thermal_destroy(thermal);
+        }
+    }
+
+    #[test]
+    fn test_numerical_robustness_extremes_and_invalids() {
+        let _test_guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let pts = [
+            ControlPoint { temp: 40, speed: 20 },
+            ControlPoint { temp: 60, speed: 50 },
+            ControlPoint { temp: 80, speed: 80 },
+        ];
+
+        let handle = unsafe { predator_curve_create(2) };
+
+        // 1. Extreme negative temperature (-1000°C) -> treated as invalid sensor reading, holds safe speed
+        let s_neg = unsafe { predator_curve_update(handle, -1000.0, pts.as_ptr(), pts.len(), 0) };
+        assert!(s_neg >= 10 && s_neg <= 100);
+
+        // 2. Extreme high temperature (2000°C) -> clamped to max curve speed (80)
+        let s_high = unsafe { predator_curve_update(handle, 2000.0, pts.as_ptr(), pts.len(), 0) };
+        assert_eq!(s_high, 80);
+
+        // 3. NaN temperature -> invalid, maintains safe speed
+        let s_nan = unsafe { predator_curve_update(handle, f64::NAN, pts.as_ptr(), pts.len(), 0) };
+        assert!(s_nan >= 10 && s_nan <= 100);
+
+        // 4. +Infinity / -Infinity
+        let s_inf = unsafe { predator_curve_update(handle, f64::INFINITY, pts.as_ptr(), pts.len(), 0) };
+        assert!(s_inf >= 10 && s_inf <= 100);
+        let s_ninf = unsafe { predator_curve_update(handle, f64::NEG_INFINITY, pts.as_ptr(), pts.len(), 0) };
+        assert!(s_ninf >= 10 && s_ninf <= 100);
+
+        // 5. Thermal evaluate at critical temperature (105°C) -> triggers critical stage 3
+        let thermal = unsafe { predator_thermal_create() };
+        let mut decision = NativeThermalDecision::default();
+        let eval_res = unsafe { predator_thermal_evaluate(thermal, 105.0, 50.0, 65, 15, 45, &mut decision) };
+        assert_eq!(eval_res, 0);
+        assert_eq!(decision.stage, 3);
+        assert!(decision.critical);
+        assert_eq!(decision.cpu_fan_floor, 100);
+        assert_eq!(decision.cpu_power_cap_watts, 15);
+        unsafe { predator_thermal_destroy(thermal); }
+
+        unsafe { predator_curve_destroy(handle); }
+    }
+
+    #[test]
+    fn test_duplicate_and_inverted_curve_points() {
+        let _test_guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        // Inverted points (descending order)
+        let inv_pts = [
+            ControlPoint { temp: 90, speed: 90 },
+            ControlPoint { temp: 70, speed: 70 },
+            ControlPoint { temp: 50, speed: 50 },
+            ControlPoint { temp: 30, speed: 30 },
+        ];
+        assert_eq!(unsafe { predator_curve_interpolate(inv_pts.as_ptr(), inv_pts.len(), 20) }, 30);
+        assert_eq!(unsafe { predator_curve_interpolate(inv_pts.as_ptr(), inv_pts.len(), 60) }, 60);
+        assert_eq!(unsafe { predator_curve_interpolate(inv_pts.as_ptr(), inv_pts.len(), 100) }, 90);
+
+        // Duplicate temperatures (step curve)
+        let dup_pts = [
+            ControlPoint { temp: 40, speed: 20 },
+            ControlPoint { temp: 60, speed: 30 },
+            ControlPoint { temp: 60, speed: 70 },
+            ControlPoint { temp: 80, speed: 100 },
+        ];
+        // At 59°C: interpolating 40->60 (20->30)
+        assert!(unsafe { predator_curve_interpolate(dup_pts.as_ptr(), dup_pts.len(), 59) } <= 30);
+        // At 60°C: step jumps up to 70 for thermal safety!
+        assert_eq!(unsafe { predator_curve_interpolate(dup_pts.as_ptr(), dup_pts.len(), 60) }, 70);
+        // At 70°C: interpolating 60->80 (70->100) -> 85
+        assert_eq!(unsafe { predator_curve_interpolate(dup_pts.as_ptr(), dup_pts.len(), 70) }, 85);
+    }
+
+    #[test]
+    fn test_telemetry_timestamp_is_epoch_ms() {
+        let _test_guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let mut worker = TelemetryWorker::new();
+        worker.start();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let snap = worker.get_snapshot();
+        worker.stop();
+
+        // System epoch ms in 2026 is > 1_700_000_000_000 ms
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        assert!(snap.timestamp_ms > 1_700_000_000_000, "Timestamp must be real epoch ms, got {}", snap.timestamp_ms);
+        assert!(snap.timestamp_ms <= now_ms);
+    }
+}

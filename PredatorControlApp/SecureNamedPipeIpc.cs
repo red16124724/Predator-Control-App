@@ -22,7 +22,8 @@ namespace PredatorControlApp
             var authUsers = new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null);
             var network = new SecurityIdentifier(WellKnownSidType.NetworkSid, null);
 
-            var currentUser = WindowsIdentity.GetCurrent().User;
+            using var currentIdentity = WindowsIdentity.GetCurrent();
+            var currentUser = currentIdentity.User;
             if (currentUser != null)
             {
                 try
@@ -39,7 +40,7 @@ namespace PredatorControlApp
             {
                 sec.AddAccessRule(new PipeAccessRule(currentUser, PipeAccessRights.FullControl, AccessControlType.Allow));
             }
-            sec.AddAccessRule(new PipeAccessRule(authUsers, PipeAccessRights.ReadWrite | PipeAccessRights.Synchronize, AccessControlType.Allow));
+            sec.AddAccessRule(new PipeAccessRule(authUsers, PipeAccessRights.ReadWrite | PipeAccessRights.Synchronize | PipeAccessRights.ReadPermissions, AccessControlType.Allow));
             // Deny CreateNewInstance for Authenticated Users to prevent pipe squatting / instance hijacking
             sec.AddAccessRule(new PipeAccessRule(authUsers, PipeAccessRights.CreateNewInstance, AccessControlType.Deny));
 
@@ -60,8 +61,37 @@ namespace PredatorControlApp
                     return true;
                 }
 
-                var currentUser = WindowsIdentity.GetCurrent().User;
+                using var currentIdentity = WindowsIdentity.GetCurrent();
+                var currentUser = currentIdentity.User;
                 return currentUser != null && owner.Equals(currentUser);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public static bool IsTrustedClient(NamedPipeServerStream pipe)
+        {
+            try
+            {
+                SecurityIdentifier? clientSid = null;
+                pipe.RunAsClient(() =>
+                {
+                    using var id = WindowsIdentity.GetCurrent();
+                    clientSid = id.User;
+                });
+
+                if (clientSid == null) return false;
+
+                if (clientSid.IsWellKnown(WellKnownSidType.LocalSystemSid) ||
+                    clientSid.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid))
+                {
+                    return true;
+                }
+
+                using var serverIdentity = WindowsIdentity.GetCurrent();
+                return serverIdentity.User != null && clientSid.Equals(serverIdentity.User);
             }
             catch
             {
@@ -90,22 +120,38 @@ namespace PredatorControlApp
                 {
                     if (_isDisposed || _started) return;
                     _started = true;
-                    Task.Run(RunServerLoopAsync);
+                    Task.Run(RunServerLoopAsync).ContinueWith(t => { _ = t.Exception; }, TaskContinuationOptions.OnlyOnFaulted);
                 }
             }
 
             private async Task RunServerLoopAsync()
             {
-                while (!_cts.Token.IsCancellationRequested)
+                try
                 {
+                    while (!_isDisposed)
+                    {
+                        CancellationToken token;
+                        try
+                        {
+                            lock (_startLock)
+                            {
+                                if (_isDisposed || _cts.IsCancellationRequested) break;
+                                token = _cts.Token;
+                            }
+                        }
+                        catch (ObjectDisposedException)
+                        {
+                            break;
+                        }
+
                     NamedPipeServerStream? pipe = null;
                     try
                     {
                         pipe = NamedPipeServerStreamAcl.Create(
                             _pipeName, PipeDirection.InOut, NamedPipeServerStream.MaxAllowedServerInstances,
-                            PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 0, 0, CreatePipeSecurity());
+                            PipeTransmissionMode.Byte, PipeOptions.Asynchronous, inBufferSize: 4096, outBufferSize: 4096, CreatePipeSecurity());
 
-                        await pipe.WaitForConnectionAsync(_cts.Token);
+                        await pipe.WaitForConnectionAsync(token);
 
                         var connectedPipe = pipe;
                         pipe = null; // Ownership transferred to client task
@@ -114,45 +160,63 @@ namespace PredatorControlApp
                         {
                             using (connectedPipe)
                             {
+                                if (!IsTrustedClient(connectedPipe))
+                                {
+                                    try { connectedPipe.Disconnect(); } catch { }
+                                    return;
+                                }
+
                                 try
                                 {
                                     using var reader = new StreamReader(connectedPipe, Encoding.UTF8);
-                                    using var readCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+                                    CancellationToken clientToken;
+                                    try { clientToken = _cts.Token; }
+                                    catch (ObjectDisposedException) { return; }
+                                    using var readCts = CancellationTokenSource.CreateLinkedTokenSource(clientToken);
                                     readCts.CancelAfter(2000);
                                     try
                                     {
-                                        // Bounded message reading to prevent unbounded memory allocation DoS attacks
+                                        // Bounded chunked message reading to prevent unbounded memory allocation DoS attacks
                                         var sb = new StringBuilder();
-                                        char[] charBuf = new char[1];
+                                        char[] charBuf = new char[64];
+                                        bool newlineReceived = false;
                                         while (sb.Length < MaxMessageLength)
                                         {
-                                            int readCount = await reader.ReadAsync(charBuf.AsMemory(0, 1), readCts.Token);
+                                            int toRead = Math.Min(charBuf.Length, MaxMessageLength - sb.Length);
+                                            int readCount = await reader.ReadAsync(charBuf.AsMemory(0, toRead), readCts.Token);
                                             if (readCount <= 0) break;
-                                            if (charBuf[0] == '\n') break;
-                                            if (charBuf[0] != '\r') sb.Append(charBuf[0]);
+                                            for (int i = 0; i < readCount; i++)
+                                            {
+                                                char c = charBuf[i];
+                                                if (c == '\n') { newlineReceived = true; break; }
+                                                if (c != '\r') sb.Append(c);
+                                            }
+                                            if (newlineReceived) break;
                                         }
 
-                                        string line = sb.ToString().Trim();
-                                        if (!string.IsNullOrEmpty(line))
+                                        if (newlineReceived)
                                         {
-                                            try { _onMessage(line); } catch { }
+                                            string line = sb.ToString().Replace(" ", "").Trim();
+                                            if (!string.IsNullOrEmpty(line))
+                                            {
+                                                try { _onMessage(line); } catch { }
+                                            }
                                         }
                                     }
                                     catch { }
                                 }
                                 catch { }
+                                finally
+                                {
+                                    try { connectedPipe.Disconnect(); } catch { }
+                                }
                             }
-                        }, _cts.Token);
-                    }
-                    catch (OperationCanceledException) when (_cts.Token.IsCancellationRequested)
-                    {
-                        pipe?.Dispose();
-                        break;
+                        });
                     }
                     catch (OperationCanceledException)
                     {
                         pipe?.Dispose();
-                        if (_cts.Token.IsCancellationRequested) break;
+                        break;
                     }
                     catch (ObjectDisposedException)
                     {
@@ -162,15 +226,30 @@ namespace PredatorControlApp
                     catch
                     {
                         pipe?.Dispose();
-                        try { await Task.Delay(200, _cts.Token); } catch { break; }
+                        try
+                        {
+                            if (!_isDisposed)
+                                await Task.Delay(200, token);
+                            else
+                                break;
+                        }
+                        catch { break; }
                     }
+                }
+                }
+                finally
+                {
+                    try { _cts.Dispose(); } catch { }
                 }
             }
 
             public void Dispose()
             {
-                if (_isDisposed) return;
-                _isDisposed = true;
+                lock (_startLock)
+                {
+                    if (_isDisposed) return;
+                    _isDisposed = true;
+                }
                 try { _cts.Cancel(); } catch { }
             }
         }
@@ -179,13 +258,21 @@ namespace PredatorControlApp
         {
             if (string.IsNullOrEmpty(message)) return false;
             timeoutMs = Math.Max(100, timeoutMs);
-            string sanitizedMessage = message.Replace("\r", "").Replace("\n", " ");
+            // Message shaping (control-character stripping and bounded length)
+            // is owned by the native core; fall back locally only if it is absent.
+            string sanitizedMessage = PredatorNativeMigrations.SanitizePipeMessage(message)
+                ?? message.Replace("\r", "").Replace("\n", " ");
+            if (sanitizedMessage.Length > MaxMessageLength - 2)
+            {
+                sanitizedMessage = sanitizedMessage.Substring(0, MaxMessageLength - 2);
+            }
+            if (sanitizedMessage.Length == 0) return false;
             string targetPipe = pipeName ?? PipeName;
 
             try
             {
-                // Explicitly specify TokenImpersonationLevel.None to prevent server from impersonating elevated client token
-                using var pipe = new NamedPipeClientStream(".", targetPipe, PipeDirection.InOut, PipeOptions.Asynchronous, TokenImpersonationLevel.None);
+                // Explicitly specify TokenImpersonationLevel.Identification to prevent server from impersonating elevated client token
+                using var pipe = new NamedPipeClientStream(".", targetPipe, PipeDirection.InOut, PipeOptions.Asynchronous, TokenImpersonationLevel.Identification);
                 using var cts = new CancellationTokenSource(timeoutMs);
 
                 await pipe.ConnectAsync(cts.Token);
@@ -201,8 +288,18 @@ namespace PredatorControlApp
                 await writer.FlushAsync(cts.Token);
                 try
                 {
-                    var drainTask = Task.Run(() => { try { pipe.WaitForPipeDrain(); } catch { } });
-                    await Task.WhenAny(drainTask, Task.Delay(1500, cts.Token));
+                    if (pipe.IsConnected)
+                    {
+                        var drainTask = Task.Run(() =>
+                        {
+                            try { if (pipe.IsConnected) pipe.WaitForPipeDrain(); } catch { }
+                        });
+                        var completed = await Task.WhenAny(drainTask, Task.Delay(1500, cts.Token));
+                        if (completed == drainTask)
+                        {
+                            await drainTask;
+                        }
+                    }
                 }
                 catch { }
                 return true;

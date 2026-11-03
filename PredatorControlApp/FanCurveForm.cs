@@ -53,13 +53,17 @@ namespace PredatorControlApp
         private readonly List<Panel> _separators = new();
         private readonly Action _themeHandler;
 
+        private bool _isClosing;
         private int _hysteresisDegrees = CurveFollower.DefaultHysteresisDegrees;
+        private bool _updatingHysteresis;
+        private float _dpiScale = 1f;
+        private int S(int px) => px == 0 ? 0 : Math.Max(1, (int)Math.Round(px * _dpiScale));
 
         private const int SidePad = 16;
         private const int GraphHeight = 220;
         private const int TitleBarHeight = 36;
         private const int SepHeight = 1;
-        private const int HysteresisRowHeight = 58;
+        private const int HysteresisRowHeight = 64;
         private const int ButtonRowHeight = 50;
 
         #endregion
@@ -104,13 +108,14 @@ namespace PredatorControlApp
             DoubleBuffered = true;
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
-            int totalHeight = TitleBarHeight + SepHeight
-                            + GraphHeight + SepHeight
-                            + GraphHeight + SepHeight
-                            + HysteresisRowHeight + SepHeight
-                            + ButtonRowHeight;
+            _dpiScale = DeviceDpi > 0 ? DeviceDpi / 96f : 1f;
+            int totalHeight = S(TitleBarHeight) + S(SepHeight)
+                            + S(GraphHeight) + S(SepHeight)
+                            + S(GraphHeight) + S(SepHeight)
+                            + S(HysteresisRowHeight) + S(SepHeight)
+                            + S(ButtonRowHeight);
 
-            int totalWidth = 460;
+            int totalWidth = S(460);
             ClientSize = new Size(totalWidth, totalHeight);
             AutoScroll = true;
             AutoScrollMinSize = new Size(totalWidth, totalHeight);
@@ -120,17 +125,7 @@ namespace PredatorControlApp
 
             _themeHandler = () =>
             {
-                if (!IsDisposed && IsHandleCreated)
-                {
-                    try
-                    {
-                        if (InvokeRequired)
-                            BeginInvoke(new Action(ApplyThemeColors));
-                        else
-                            ApplyThemeColors();
-                    }
-                    catch { }
-                }
+                SafeBeginInvoke(ApplyThemeColors);
             };
             ThemeManager.ThemeChanged += _themeHandler;
 
@@ -147,7 +142,7 @@ namespace PredatorControlApp
 
             _pnlTitle = new Panel
             {
-                Height = TitleBarHeight,
+                Height = S(TitleBarHeight),
                 Dock = DockStyle.Top,
                 BackColor = TitleBarBg
             };
@@ -160,7 +155,7 @@ namespace PredatorControlApp
                 Font = FontTitle,
                 ForeColor = TitleTextColor,
                 AutoSize = true,
-                Location = new Point(SidePad, (TitleBarHeight - FontTitle.Height) / 2),
+                Location = new Point(S(SidePad), (S(TitleBarHeight) - FontTitle.Height) / 2),
                 BackColor = Color.Transparent,
                 UseMnemonic = false
             };
@@ -179,45 +174,45 @@ namespace PredatorControlApp
                 Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
             _lblClose.Location = new Point(
-                ClientSize.Width - SidePad - _lblClose.PreferredWidth - 2,
-                (TitleBarHeight - _lblClose.PreferredHeight) / 2);
+                _pnlTitle.ClientSize.Width - S(SidePad) - _lblClose.PreferredWidth - S(2),
+                (S(TitleBarHeight) - _lblClose.PreferredHeight) / 2);
             _lblClose.Click += (s, e) => Close();
             _lblClose.MouseEnter += (s, e) => _lblClose.ForeColor = CloseHoverColor;
             _lblClose.MouseLeave += (s, e) => _lblClose.ForeColor = CloseNormalColor;
             _pnlTitle.Controls.Add(_lblClose);
 
-            y = TitleBarHeight;
+            y = S(TitleBarHeight);
 
             Controls.Add(MakeSeparator(y));
-            y += SepHeight;
+            y += S(SepHeight);
 
             _graphCpu = new FanCurveGraph
             {
                 CurveColor = CpuCurveColor,
                 FanLabel = "CPU FAN CURVE",
-                Location = new Point(SidePad, y),
-                Size = new Size(ClientSize.Width - SidePad * 2, GraphHeight),
+                Location = new Point(S(SidePad), y),
+                Size = new Size(ClientSize.Width - S(SidePad) * 2, S(GraphHeight)),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             Controls.Add(_graphCpu);
-            y += GraphHeight;
+            y += S(GraphHeight);
 
             Controls.Add(MakeSeparator(y));
-            y += SepHeight;
+            y += S(SepHeight);
 
             _graphGpu = new FanCurveGraph
             {
                 CurveColor = GpuCurveColor,
                 FanLabel = "GPU FAN CURVE",
-                Location = new Point(SidePad, y),
-                Size = new Size(ClientSize.Width - SidePad * 2, GraphHeight),
+                Location = new Point(S(SidePad), y),
+                Size = new Size(ClientSize.Width - S(SidePad) * 2, S(GraphHeight)),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             Controls.Add(_graphGpu);
-            y += GraphHeight;
+            y += S(GraphHeight);
 
             Controls.Add(MakeSeparator(y));
-            y += SepHeight;
+            y += S(SepHeight);
 
             _lblHysteresis = new Label
             {
@@ -225,42 +220,52 @@ namespace PredatorControlApp
                 Font = FontHysteresis,
                 ForeColor = TitleTextColor,
                 AutoSize = true,
-                Location = new Point(SidePad, y + 6),
+                Location = new Point(S(SidePad), y + S(4)),
                 BackColor = Color.Transparent,
                 UseMnemonic = false,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left
             };
             Controls.Add(_lblHysteresis);
 
+            int sliderH = Math.Max(28, S(28));
             _sliderHysteresis = new PredatorSlider
             {
                 Minimum = CurveFollower.MinHysteresisDegrees,
                 Maximum = CurveFollower.MaxHysteresisDegrees,
                 Value = _hysteresisDegrees,
-                Location = new Point(SidePad, y + 26),
-                Size = new Size(ClientSize.Width - SidePad * 2, 26),
+                Location = new Point(S(SidePad), y + S(28)),
+                Size = new Size(ClientSize.Width - S(SidePad) * 2, sliderH),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             _sliderHysteresis.ValueChanged += (s, e) =>
             {
-                _hysteresisDegrees = _sliderHysteresis.Value;
-                _lblHysteresis.Text = UiLabelFormatter.FormatHysteresisLabel(_hysteresisDegrees);
+                if (_updatingHysteresis) return;
+                _updatingHysteresis = true;
+                try
+                {
+                    _hysteresisDegrees = _sliderHysteresis.Value;
+                    _lblHysteresis.Text = UiLabelFormatter.FormatHysteresisLabel(_hysteresisDegrees);
+                }
+                finally
+                {
+                    _updatingHysteresis = false;
+                }
             };
             Controls.Add(_sliderHysteresis);
-            y += HysteresisRowHeight;
+            y += S(HysteresisRowHeight);
 
             Controls.Add(MakeSeparator(y));
-            y += SepHeight;
+            y += S(SepHeight);
 
-            int btnWidth = 96;
-            int btnHeight = 34;
-            int btnY = y + (ButtonRowHeight - btnHeight) / 2;
+            int btnWidth = S(96);
+            int btnHeight = S(34);
+            int btnY = y + (S(ButtonRowHeight) - btnHeight) / 2;
 
             _btnReset = new PredatorButton
             {
                 Text = "Reset",
                 Size = new Size(btnWidth, btnHeight),
-                Location = new Point(SidePad, btnY),
+                Location = new Point(S(SidePad), btnY),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left
             };
             _btnReset.Click += BtnReset_Click;
@@ -270,7 +275,7 @@ namespace PredatorControlApp
             {
                 Text = "Apply",
                 Size = new Size(btnWidth, btnHeight),
-                Location = new Point(ClientSize.Width - SidePad - btnWidth, btnY),
+                Location = new Point(ClientSize.Width - S(SidePad) - btnWidth, btnY),
                 Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
             _btnApply.Click += BtnApply_Click;
@@ -282,12 +287,100 @@ namespace PredatorControlApp
             var sep = new Panel
             {
                 Location = new Point(0, yPos),
-                Size = new Size(ClientSize.Width, SepHeight),
+                Size = new Size(ClientSize.Width, S(SepHeight)),
                 BackColor = SeparatorColor,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             _separators.Add(sep);
             return sep;
+        }
+
+        protected override void OnDpiChanged(DpiChangedEventArgs e)
+        {
+            base.OnDpiChanged(e);
+            _dpiScale = e.DeviceDpiNew / 96f;
+            UpdateLayout();
+        }
+
+        private void UpdateLayout()
+        {
+            try
+            {
+                int totalHeight = S(TitleBarHeight) + S(SepHeight)
+                                + S(GraphHeight) + S(SepHeight)
+                                + S(GraphHeight) + S(SepHeight)
+                                + S(HysteresisRowHeight) + S(SepHeight)
+                                + S(ButtonRowHeight);
+                int totalWidth = S(460);
+                ClientSize = new Size(totalWidth, totalHeight);
+                AutoScrollMinSize = new Size(totalWidth, totalHeight);
+
+                int y = 0;
+                if (_pnlTitle != null)
+                {
+                    _pnlTitle.Height = S(TitleBarHeight);
+                    if (_lblTitle != null)
+                        _lblTitle.Location = new Point(S(SidePad), (S(TitleBarHeight) - _lblTitle.Height) / 2);
+                    if (_lblClose != null)
+                        _lblClose.Location = new Point(_pnlTitle.ClientSize.Width - S(SidePad) - _lblClose.PreferredWidth - S(2),
+                            (S(TitleBarHeight) - _lblClose.PreferredHeight) / 2);
+                }
+                y = S(TitleBarHeight);
+
+                int sepIdx = 0;
+                if (_separators.Count > sepIdx) { _separators[sepIdx].Location = new Point(0, y); _separators[sepIdx].Size = new Size(ClientSize.Width, S(SepHeight)); }
+                y += S(SepHeight);
+                sepIdx++;
+
+                if (_graphCpu != null)
+                {
+                    _graphCpu.Location = new Point(S(SidePad), y);
+                    _graphCpu.Size = new Size(ClientSize.Width - S(SidePad) * 2, S(GraphHeight));
+                }
+                y += S(GraphHeight);
+
+                if (_separators.Count > sepIdx) { _separators[sepIdx].Location = new Point(0, y); _separators[sepIdx].Size = new Size(ClientSize.Width, S(SepHeight)); }
+                y += S(SepHeight);
+                sepIdx++;
+
+                if (_graphGpu != null)
+                {
+                    _graphGpu.Location = new Point(S(SidePad), y);
+                    _graphGpu.Size = new Size(ClientSize.Width - S(SidePad) * 2, S(GraphHeight));
+                }
+                y += S(GraphHeight);
+
+                if (_separators.Count > sepIdx) { _separators[sepIdx].Location = new Point(0, y); _separators[sepIdx].Size = new Size(ClientSize.Width, S(SepHeight)); }
+                y += S(SepHeight);
+                sepIdx++;
+
+                if (_lblHysteresis != null) _lblHysteresis.Location = new Point(S(SidePad), y + S(4));
+                int sliderH = Math.Max(28, S(28));
+                if (_sliderHysteresis != null)
+                {
+                    _sliderHysteresis.Location = new Point(S(SidePad), y + S(28));
+                    _sliderHysteresis.Size = new Size(ClientSize.Width - S(SidePad) * 2, sliderH);
+                }
+                y += S(HysteresisRowHeight);
+
+                if (_separators.Count > sepIdx) { _separators[sepIdx].Location = new Point(0, y); _separators[sepIdx].Size = new Size(ClientSize.Width, S(SepHeight)); }
+                y += S(SepHeight);
+
+                int btnWidth = S(96);
+                int btnHeight = S(34);
+                int btnY = y + (S(ButtonRowHeight) - btnHeight) / 2;
+                if (_btnReset != null)
+                {
+                    _btnReset.Size = new Size(btnWidth, btnHeight);
+                    _btnReset.Location = new Point(S(SidePad), btnY);
+                }
+                if (_btnApply != null)
+                {
+                    _btnApply.Size = new Size(btnWidth, btnHeight);
+                    _btnApply.Location = new Point(ClientSize.Width - S(SidePad) - btnWidth, btnY);
+                }
+            }
+            catch { }
         }
 
         private void ApplyThemeColors()
@@ -337,7 +430,7 @@ namespace PredatorControlApp
 
         private void FlashTimer_Tick(object? sender, EventArgs e)
         {
-            _flashTimer.Stop();
+            try { _flashTimer?.Stop(); } catch { }
             if (IsDisposed || _btnApply.IsDisposed) return;
             _btnApply.IsActive = false;
             _btnApply.CustomActiveColor = null;
@@ -345,14 +438,44 @@ namespace PredatorControlApp
 
         #endregion
 
+        private void SafeBeginInvoke(Action action)
+        {
+            try
+            {
+                if (IsDisposed || Disposing || _isClosing) return;
+                if (IsHandleCreated && InvokeRequired)
+                {
+                    BeginInvoke(new Action(() =>
+                    {
+                        try
+                        {
+                            if (!IsDisposed && !Disposing && !_isClosing)
+                            {
+                                action();
+                            }
+                        }
+                        catch (ObjectDisposedException) { }
+                        catch (InvalidOperationException) { }
+                        catch { }
+                    }));
+                }
+                else
+                {
+                    if (!IsDisposed && !Disposing && !_isClosing)
+                        action();
+                }
+            }
+            catch { }
+        }
+
         #region Public Methods
 
         public void UpdateTemps(int cpuTemp, int gpuTemp)
         {
-            if (IsDisposed || !IsHandleCreated) return;
+            if (IsDisposed || Disposing || _isClosing || !IsHandleCreated) return;
             if (InvokeRequired)
             {
-                try { BeginInvoke(new Action(() => UpdateTemps(cpuTemp, gpuTemp))); } catch { }
+                SafeBeginInvoke(() => UpdateTemps(cpuTemp, gpuTemp));
                 return;
             }
             _graphCpu.CurrentTemp = cpuTemp;
@@ -361,10 +484,10 @@ namespace PredatorControlApp
 
         public void SetCpuCurve(List<Point> points)
         {
-            if (IsDisposed) return;
+            if (IsDisposed || Disposing || _isClosing) return;
             if (InvokeRequired)
             {
-                try { BeginInvoke(new Action(() => SetCpuCurve(points))); } catch { }
+                SafeBeginInvoke(() => SetCpuCurve(points));
                 return;
             }
             _graphCpu.Points = points != null && points.Count > 0 ? points : FanCurveGraph.DefaultCpuPoints;
@@ -372,10 +495,10 @@ namespace PredatorControlApp
 
         public void SetGpuCurve(List<Point> points)
         {
-            if (IsDisposed) return;
+            if (IsDisposed || Disposing || _isClosing) return;
             if (InvokeRequired)
             {
-                try { BeginInvoke(new Action(() => SetGpuCurve(points))); } catch { }
+                SafeBeginInvoke(() => SetGpuCurve(points));
                 return;
             }
             _graphGpu.Points = points != null && points.Count > 0 ? points : FanCurveGraph.DefaultGpuPoints;
@@ -398,20 +521,29 @@ namespace PredatorControlApp
 
         public void SetHysteresis(int degrees)
         {
-            if (IsDisposed) return;
+            if (IsDisposed || Disposing || _isClosing) return;
             if (InvokeRequired)
             {
-                try { BeginInvoke(new Action(() => SetHysteresis(degrees))); } catch { }
+                SafeBeginInvoke(() => SetHysteresis(degrees));
                 return;
             }
-            _hysteresisDegrees = Math.Clamp(degrees, CurveFollower.MinHysteresisDegrees, CurveFollower.MaxHysteresisDegrees);
-            if (_sliderHysteresis != null && _sliderHysteresis.Value != _hysteresisDegrees)
+            if (_updatingHysteresis) return;
+            _updatingHysteresis = true;
+            try
             {
-                _sliderHysteresis.Value = _hysteresisDegrees;
+                _hysteresisDegrees = Math.Clamp(degrees, CurveFollower.MinHysteresisDegrees, CurveFollower.MaxHysteresisDegrees);
+                if (_sliderHysteresis != null && _sliderHysteresis.Value != _hysteresisDegrees)
+                {
+                    _sliderHysteresis.Value = _hysteresisDegrees;
+                }
+                if (_lblHysteresis != null)
+                {
+                    _lblHysteresis.Text = UiLabelFormatter.FormatHysteresisLabel(_hysteresisDegrees);
+                }
             }
-            if (_lblHysteresis != null)
+            finally
             {
-                _lblHysteresis.Text = UiLabelFormatter.FormatHysteresisLabel(_hysteresisDegrees);
+                _updatingHysteresis = false;
             }
         }
 
@@ -427,18 +559,60 @@ namespace PredatorControlApp
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public PredatorButton ApplyButton => _btnApply;
 
-        public void ApplyCurves() => BtnApply_Click(this, EventArgs.Empty);
+        public void ApplyCurves()
+        {
+            if (IsDisposed || Disposing || _isClosing) return;
+            if (InvokeRequired)
+            {
+                SafeBeginInvoke(ApplyCurves);
+                return;
+            }
+            BtnApply_Click(this, EventArgs.Empty);
+        }
 
-        public void ResetDefaults() => BtnReset_Click(this, EventArgs.Empty);
+        public void ResetDefaults()
+        {
+            if (IsDisposed || Disposing || _isClosing) return;
+            if (InvokeRequired)
+            {
+                SafeBeginInvoke(ResetDefaults);
+                return;
+            }
+            BtnReset_Click(this, EventArgs.Empty);
+        }
 
         #endregion
 
         #region Cleanup
 
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            _isClosing = true;
+            try
+            {
+                if (_flashTimer != null)
+                {
+                    _flashTimer.Stop();
+                    _flashTimer.Tick -= FlashTimer_Tick;
+                    _flashTimer.Dispose();
+                }
+            }
+            catch { }
+            base.OnFormClosing(e);
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            _isClosing = true;
+            ThemeManager.ThemeChanged -= _themeHandler;
+            base.OnFormClosed(e);
+        }
+
         protected override void Dispose(bool disposing)
         {
             if (disposing)
             {
+                _isClosing = true;
                 ThemeManager.ThemeChanged -= _themeHandler;
                 if (_flashTimer != null)
                 {

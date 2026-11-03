@@ -22,48 +22,107 @@ namespace PredatorControlApp
             AutoScroll = true;
             ResizeRedraw = true;
             SetStyle(ControlStyles.OptimizedDoubleBuffer, true);
+            _dpi = DeviceDpi > 0 ? DeviceDpi / 96f : 1f;
 
             _themeHandler = () =>
             {
-                if (!IsDisposed && IsHandleCreated)
+                if (!IsDisposed && !Disposing && IsHandleCreated)
                 {
-                    BackColor = ThemeManager.FormBg;
-                    Invalidate();
-                    InvalidateScrollBar();
+                    try
+                    {
+                        if (InvokeRequired)
+                        {
+                            BeginInvoke(new Action(() =>
+                            {
+                                try
+                                {
+                                    if (IsDisposed || Disposing) return;
+                                    BackColor = ThemeManager.FormBg;
+                                    Invalidate();
+                                    InvalidateScrollBar();
+                                }
+                                catch { }
+                            }));
+                        }
+                        else
+                        {
+                            BackColor = ThemeManager.FormBg;
+                            Invalidate();
+                            InvalidateScrollBar();
+                        }
+                    }
+                    catch { }
                 }
             };
             ThemeManager.ThemeChanged += _themeHandler;
         }
 
         public void SetDpiScale(float dpi) => _dpi = dpi <= 0 ? 1f : dpi;
-        private int S(int v) => Math.Max(1, (int)(v * _dpi));
+        private int S(int v) => Math.Max(1, (int)Math.Round(v * _dpi));
+
+        protected override void OnDpiChangedAfterParent(EventArgs e)
+        {
+            base.OnDpiChangedAfterParent(e);
+            if (DeviceDpi > 0)
+            {
+                SetDpiScale(DeviceDpi / 96f);
+            }
+        }
+
+        private bool _isFilterRegistered;
 
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
-            Application.AddMessageFilter(this);
+            if (!_isFilterRegistered)
+            {
+                Application.AddMessageFilter(this);
+                _isFilterRegistered = true;
+            }
         }
 
         protected override void OnHandleDestroyed(EventArgs e)
         {
-            Application.RemoveMessageFilter(this);
+            if (_isFilterRegistered)
+            {
+                Application.RemoveMessageFilter(this);
+                _isFilterRegistered = false;
+            }
             base.OnHandleDestroyed(e);
         }
 
         public bool PreFilterMessage(ref Message m)
         {
             if (m.Msg != WM_MOUSEWHEEL) return false;
-            if (IsDisposed || !IsHandleCreated || !Visible || !VerticalScroll.Visible) return false;
+            if (IsDisposed || Disposing || !IsHandleCreated || !Visible || !VerticalScroll.Visible) return false;
 
-            var form = FindForm();
-            if (form == null || Form.ActiveForm != form) return false;
-            if (!RectangleToScreen(ClientRectangle).Contains(Cursor.Position)) return false;
+            try
+            {
+                var form = FindForm();
+                if (form == null || Form.ActiveForm != form) return false;
+                if (!RectangleToScreen(ClientRectangle).Contains(Cursor.Position)) return false;
 
-            int delta = (short)(((long)m.WParam >> 16) & 0xFFFF);
-            if (delta == 0) return false;
+                var ptClient = PointToClient(Cursor.Position);
+                var child = GetChildAtPoint(ptClient, GetChildAtPointSkip.Invisible | GetChildAtPointSkip.Transparent);
+                if (child != null && child != this)
+                {
+                    if (child is PredatorSlider || child is ComboBox || child is TrackBar ||
+                        child.GetType().Name.Contains("Slider") || child.GetType().Name.Contains("DropDown") || child.GetType().Name.Contains("Graph"))
+                    {
+                        return false;
+                    }
+                }
 
-            ScrollByWheel(delta);
-            return true;
+                int delta = (short)(((long)m.WParam >> 16) & 0xFFFF);
+                if (delta == 0) return false;
+
+                ScrollByWheel(delta);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private void ScrollByWheel(int delta)
@@ -75,36 +134,41 @@ namespace PredatorControlApp
             int viewH = ClientSize.Height, contentH = content.Height;
             int maxScroll = Math.Max(0, contentH - viewH);
 
-            int top = Math.Clamp(-AutoScrollPosition.Y - Math.Sign(delta) * step, 0, maxScroll);
-            AutoScrollPosition = new Point(-AutoScrollPosition.X, top);
+            int top = Math.Clamp(Math.Abs(AutoScrollPosition.Y) - Math.Sign(delta) * step, 0, maxScroll);
+            AutoScrollPosition = new Point(Math.Abs(AutoScrollPosition.X), top);
             InvalidateScrollBar();
         }
 
         private bool _dragging;
         private int _dragOffset;
 
-        private int VisibleWidth => (Parent != null && Parent.ClientSize.Width < ClientSize.Width)
+        private int VisibleWidth => Math.Max(0, (Parent != null && Parent.ClientSize.Width < ClientSize.Width)
             ? Parent.ClientSize.Width
-            : ClientSize.Width;
+            : ClientSize.Width);
 
         private Rectangle ThumbRect()
         {
             var content = DisplayRectangle;
             int viewH = ClientSize.Height, contentH = content.Height;
-            if (viewH <= 0 || contentH <= viewH) return Rectangle.Empty;
+            if (viewH <= 0 || contentH <= viewH || VisibleWidth <= 0) return Rectangle.Empty;
 
             int barW = S(5);
-            int maxThumb = Math.Max(S(30), viewH * 2 / 3);
-            int thumbH = Math.Clamp((int)((long)viewH * viewH / contentH), S(30), maxThumb);
+            int minThumb = Math.Min(viewH, S(30));
+            int maxThumb = Math.Max(minThumb, viewH * 2 / 3);
+            int thumbH = Math.Clamp((int)((long)viewH * viewH / contentH), minThumb, maxThumb);
             int scrollPos = Math.Clamp(-content.Y, 0, contentH - viewH);
-            int thumbY = (int)((float)scrollPos / (contentH - viewH) * (viewH - thumbH));
-            return new Rectangle(VisibleWidth - barW - S(3), thumbY, barW, thumbH);
+            int maxThumbY = Math.Max(0, viewH - thumbH);
+            int thumbY = maxThumbY > 0 ? (int)((float)scrollPos / (contentH - viewH) * maxThumbY) : 0;
+            int x = VisibleWidth - barW - S(3);
+            if (x < 0) return Rectangle.Empty;
+            return new Rectangle(x, thumbY, barW, thumbH);
         }
 
         private Rectangle BarHitRect()
         {
             int strip = S(14);
-            return new Rectangle(VisibleWidth - strip, 0, strip, ClientSize.Height);
+            int x = Math.Max(0, VisibleWidth - strip);
+            return new Rectangle(x, 0, Math.Min(strip, VisibleWidth), Math.Max(0, ClientSize.Height));
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
@@ -117,6 +181,7 @@ namespace PredatorControlApp
             if (thumb.IsEmpty) return;
 
             _dragging = true;
+            Capture = true;
             _dragOffset = thumb.Contains(thumb.X, e.Y) ? e.Y - thumb.Y : thumb.Height / 2;
             ScrollThumbTo(e.Y);
         }
@@ -131,6 +196,34 @@ namespace PredatorControlApp
         {
             base.OnMouseUp(e);
             _dragging = false;
+            Capture = false;
+        }
+
+        protected override void OnLostFocus(EventArgs e)
+        {
+            _dragging = false;
+            Capture = false;
+            base.OnLostFocus(e);
+        }
+
+        protected override void OnEnabledChanged(EventArgs e)
+        {
+            if (!Enabled)
+            {
+                _dragging = false;
+                Capture = false;
+            }
+            base.OnEnabledChanged(e);
+        }
+
+        protected override void OnMouseCaptureChanged(EventArgs e)
+        {
+            base.OnMouseCaptureChanged(e);
+            if (!Capture && _dragging)
+            {
+                _dragging = false;
+                InvalidateScrollBar();
+            }
         }
 
         private void ScrollThumbTo(int mouseY)
@@ -140,6 +233,7 @@ namespace PredatorControlApp
             if (viewH <= 0 || contentH <= viewH) return;
 
             var thumb = ThumbRect();
+            if (thumb.IsEmpty) return;
             int maxThumbY = viewH - thumb.Height;
             if (maxThumbY <= 0) return;
 
@@ -147,7 +241,7 @@ namespace PredatorControlApp
             float ratio = (float)targetThumbY / maxThumbY;
             int targetScroll = (int)(ratio * (contentH - viewH));
 
-            AutoScrollPosition = new Point(-AutoScrollPosition.X, targetScroll);
+            AutoScrollPosition = new Point(Math.Abs(AutoScrollPosition.X), targetScroll);
             InvalidateScrollBar();
         }
 
@@ -159,13 +253,16 @@ namespace PredatorControlApp
 
         private void InvalidateScrollBar()
         {
+            if (ClientSize.Width <= 0 || ClientSize.Height <= 0 || VisibleWidth <= 0 || IsDisposed || Disposing) return;
             int strip = S(14);
-            Invalidate(new Rectangle(VisibleWidth - strip, 0, strip, ClientSize.Height));
+            int x = Math.Max(0, VisibleWidth - strip);
+            Invalidate(new Rectangle(x, 0, Math.Min(strip, VisibleWidth), ClientSize.Height));
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
+            if (ClientSize.Width <= 0 || ClientSize.Height <= 0 || VisibleWidth <= 0 || IsDisposed || Disposing) return;
 
             var rect = ThumbRect();
             if (rect.IsEmpty) return;
@@ -177,16 +274,23 @@ namespace PredatorControlApp
             Color thumbColor = ThemeManager.IsDarkThemeActive ? Color.FromArgb(65, 72, 92) : Color.FromArgb(180, 186, 200);
 
             using (var trackBrush = new SolidBrush(trackColor))
-                g.FillRectangle(trackBrush, rect.X - S(1), 0, rect.Width + S(2), ClientSize.Height);
+                g.FillRectangle(trackBrush, Math.Max(0, rect.X - S(1)), 0, rect.Width + S(2), ClientSize.Height);
 
-            int maxR = Math.Max(1, Math.Min(rect.Width, rect.Height) / 2);
-            int r = Math.Clamp(rect.Width / 2, 1, maxR);
             using var path = new GraphicsPath();
-            path.AddArc(rect.X, rect.Y, r * 2, r * 2, 180, 90);
-            path.AddArc(rect.Right - r * 2, rect.Y, r * 2, r * 2, 270, 90);
-            path.AddArc(rect.Right - r * 2, rect.Bottom - r * 2, r * 2, r * 2, 0, 90);
-            path.AddArc(rect.X, rect.Bottom - r * 2, r * 2, r * 2, 90, 90);
-            path.CloseFigure();
+            if (rect.Width < 4 || rect.Height < 4)
+            {
+                path.AddRectangle(rect);
+            }
+            else
+            {
+                int maxR = Math.Max(1, Math.Min(rect.Width, rect.Height) / 2);
+                int r = Math.Clamp(rect.Width / 2, 1, maxR);
+                path.AddArc(rect.X, rect.Y, r * 2, r * 2, 180, 90);
+                path.AddArc(rect.Right - r * 2, rect.Y, r * 2, r * 2, 270, 90);
+                path.AddArc(rect.Right - r * 2, rect.Bottom - r * 2, r * 2, r * 2, 0, 90);
+                path.AddArc(rect.X, rect.Bottom - r * 2, r * 2, r * 2, 90, 90);
+                path.CloseFigure();
+            }
 
             using (var thumbBrush = new SolidBrush(thumbColor))
                 g.FillPath(thumbBrush, path);
@@ -197,7 +301,11 @@ namespace PredatorControlApp
             if (disposing)
             {
                 ThemeManager.ThemeChanged -= _themeHandler;
-                Application.RemoveMessageFilter(this);
+                if (_isFilterRegistered)
+                {
+                    Application.RemoveMessageFilter(this);
+                    _isFilterRegistered = false;
+                }
             }
             base.Dispose(disposing);
         }

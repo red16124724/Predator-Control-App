@@ -142,5 +142,77 @@ namespace PredatorControlApp
             else if (control is PredatorDropDown pdd) pdd.UseMnemonic = false;
             return control;
         }
+
+        /// <summary>
+        /// Formats PL1 label with user watts and laptop default watts.
+        /// </summary>
+        public static string FormatPl1Label(int watts, int defaultWatts, bool isScanned)
+        {
+            string defaultPart = isScanned && defaultWatts > 0 ? $" (Laptop Default: {defaultWatts} W)" : (defaultWatts > 0 ? $" (Default: ~{defaultWatts} W)" : "");
+            return $"PL1 (Sustained): {watts} W{defaultPart}";
+        }
+
+        /// <summary>
+        /// Formats PL2 label with user watts and laptop default watts.
+        /// </summary>
+        public static string FormatPl2Label(int watts, int defaultWatts, bool isScanned)
+        {
+            string defaultPart = isScanned && defaultWatts > 0 ? $" (Laptop Default: {defaultWatts} W)" : (defaultWatts > 0 ? $" (Default: ~{defaultWatts} W)" : "");
+            return $"PL2 (Turbo Burst): {watts} W{defaultPart}";
+        }
+
+        /// <summary>
+        /// Formats summary of scanned hardware power limits and detected CPU TDP.
+        /// </summary>
+        public static string FormatHardwarePowerBoundsSummary(int minW, int maxPl1W, int maxPl2W, int tdpW, string cpuModel)
+        {
+            string cpuPart = string.IsNullOrWhiteSpace(cpuModel) ? "" : $" [{cpuModel}]";
+            return $"Scanned Device Limits: Min {minW}W | Max PL1 {maxPl1W}W | Max PL2 {maxPl2W}W (CPU TDP {tdpW}W){cpuPart}";
+        }
+
+        /// <summary>
+        /// Formats reset button text with default PL1/PL2 values.
+        /// </summary>
+        public static string FormatResetButtonLabel(int defaultPl1, int defaultPl2)
+        {
+            if (defaultPl1 > 0 && defaultPl2 > 0)
+                return $"Reset to Laptop Default ({defaultPl1}W / {defaultPl2}W)";
+            return "Reset to Laptop Default";
+        }
+        /// <summary>
+        /// Formats PL1 label with active watts and scanned native BIOS default watts.
+        /// </summary>
+        public static string FormatPl1Label(int activeWatts, int biosDefaultWatts)
+        {
+            string biosPart = biosDefaultWatts > 0 ? $"  [BIOS Default: {biosDefaultWatts} W]" : "";
+            return $"PL1 (Sustained): {activeWatts} W{biosPart}";
+        }
+
+        /// <summary>
+        /// Formats PL2 label with active watts and scanned native BIOS default watts.
+        /// </summary>
+        public static string FormatPl2Label(int activeWatts, int biosDefaultWatts)
+        {
+            string biosPart = biosDefaultWatts > 0 ? $"  [BIOS Default: {biosDefaultWatts} W]" : "";
+            return $"PL2 (Turbo Burst): {activeWatts} W{biosPart}";
+        }
+
+        /// <summary>
+        /// Formats header summary of scanned native BIOS/UEFI power capabilities and CPU bounds.
+        /// </summary>
+        public static string FormatCpuPowerCapabilitiesHeader(int minW, int tdpW, int maxPl1W, int maxPl2W)
+        {
+            return $"BIOS/UEFI Scanned Limits: Min {minW}W | Base TDP {tdpW}W | Max PL1 {maxPl1W}W | Max PL2 {maxPl2W}W";
+        }
+
+        /// <summary>
+        /// Formats reset button text with operating mode and scanned BIOS default PL1/PL2 values.
+        /// </summary>
+        public static string FormatResetToBiosDefaultButton(OperatingMode mode, int biosPl1, int biosPl2)
+        {
+            if (biosPl1 > 0 && biosPl2 > 0)
+                return $"Reset {mode} to BIOS Default ({biosPl1}W / {biosPl2}W)";
+            return $"Reset {mode} to BIOS Default";
+        }
     }
 }

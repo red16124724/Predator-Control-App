@@ -43,6 +43,9 @@ namespace PredatorControlApp
         public int RgbR { get; set; } = -1;
         public int RgbG { get; set; } = -1;
         public int RgbB { get; set; } = -1;
+        public bool ApplyCpuPowerLimits { get; set; } = false;
+        public int CpuPl1Watts { get; set; } = -1;
+        public int CpuPl2Watts { get; set; } = -1;
 
         public static readonly HashSet<string> BlockedExecutableNames = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -53,7 +56,7 @@ namespace PredatorControlApp
             "TextInputHost.exe", "SecurityHealthSystray.exe", "SecurityHealthService.exe",
             "MsMpEng.exe", "NisSrv.exe", "SgrmBroker.exe", "audiodg.exe", "PredatorControlApp.exe",
             "System.exe", "Registry.exe", "Idle.exe", "Memory Compression.exe", "explorer.exe",
-            "cmd.exe", "powershell.exe", "pwsh.exe", "taskmgr.exe", "rundll32.exe", "cscript.exe",
+            "cmd.exe", "powershell.exe", "pwsh.exe", "taskmgr.exe", "rundll32.exe", "regsvr32.exe", "cscript.exe",
             "wscript.exe", "mshta.exe", "regedit.exe"
         };
 
@@ -181,6 +184,9 @@ namespace PredatorControlApp
                 DisplayName = Path.GetFileNameWithoutExtension(ExecutableName);
             }
 
+            PowerMode = Math.Clamp(PowerMode, (byte)0x00, (byte)0x06);
+            FanMode = Math.Clamp(FanMode, (byte)0x01, (byte)0x03);
+
             if (CpuFanSpeed != -1) CpuFanSpeed = CpuFanSpeed < 0 ? -1 : Math.Clamp(CpuFanSpeed, 0, 100);
             if (GpuFanSpeed != -1) GpuFanSpeed = GpuFanSpeed < 0 ? -1 : Math.Clamp(GpuFanSpeed, 0, 100);
             if (SysFanSpeed != -1) SysFanSpeed = SysFanSpeed < 0 ? -1 : Math.Clamp(SysFanSpeed, 0, 100);
@@ -188,12 +194,43 @@ namespace PredatorControlApp
             if (RefreshRate != -1) RefreshRate = RefreshRate < 0 ? -1 : Math.Clamp(RefreshRate, 60, 480);
             if (BatteryLimit != -1) BatteryLimit = BatteryLimit < 0 ? -1 : Math.Clamp(BatteryLimit, 0, 100);
 
-            if (RgbMode != -1) RgbMode = RgbMode < 0 ? -1 : Math.Clamp(RgbMode, 0, 15);
+            if (RgbMode != -1) RgbMode = RgbMode < 0 ? -1 : Math.Clamp(RgbMode, 0, 33);
             if (RgbBrightness != -1) RgbBrightness = RgbBrightness < 0 ? -1 : Math.Clamp(RgbBrightness, 0, 100);
             if (RgbSpeed != -1) RgbSpeed = RgbSpeed < 0 ? -1 : Math.Clamp(RgbSpeed, 0, 100);
             if (RgbR != -1) RgbR = RgbR < 0 ? -1 : Math.Clamp(RgbR, 0, 255);
             if (RgbG != -1) RgbG = RgbG < 0 ? -1 : Math.Clamp(RgbG, 0, 255);
             if (RgbB != -1) RgbB = RgbB < 0 ? -1 : Math.Clamp(RgbB, 0, 255);
+
+            if (CpuPl1Watts <= 0 && CpuPl1Watts != -1) CpuPl1Watts = -1;
+            if (CpuPl2Watts <= 0 && CpuPl2Watts != -1) CpuPl2Watts = -1;
+            if (CpuPl1Watts > 0) CpuPl1Watts = Math.Clamp(CpuPl1Watts, 5, 300);
+            if (CpuPl2Watts > 0) CpuPl2Watts = Math.Clamp(CpuPl2Watts, CpuPl1Watts > 0 ? CpuPl1Watts : 5, 350);
+        }
+
+        public GameProfile Clone()
+        {
+            return new GameProfile
+            {
+                ExecutableName = this.ExecutableName,
+                ExecutablePath = this.ExecutablePath,
+                DisplayName = this.DisplayName,
+                PowerMode = this.PowerMode,
+                FanMode = this.FanMode,
+                CpuFanSpeed = this.CpuFanSpeed,
+                GpuFanSpeed = this.GpuFanSpeed,
+                SysFanSpeed = this.SysFanSpeed,
+                RefreshRate = this.RefreshRate,
+                BatteryLimit = this.BatteryLimit,
+                RgbMode = this.RgbMode,
+                RgbBrightness = this.RgbBrightness,
+                RgbSpeed = this.RgbSpeed,
+                RgbR = this.RgbR,
+                RgbG = this.RgbG,
+                RgbB = this.RgbB,
+                ApplyCpuPowerLimits = this.ApplyCpuPowerLimits,
+                CpuPl1Watts = this.CpuPl1Watts,
+                CpuPl2Watts = this.CpuPl2Watts
+            };
         }
     }
 
@@ -213,5 +250,32 @@ namespace PredatorControlApp
         public int RgbR { get; set; }
         public int RgbG { get; set; }
         public int RgbB { get; set; }
+        public bool CpuPowerLimitsWereApplied { get; set; }
+        public int CpuPl1Watts { get; set; } = -1;
+        public int CpuPl2Watts { get; set; } = -1;
+
+        public DashboardSnapshot Clone()
+        {
+            return new DashboardSnapshot
+            {
+                PowerMode = this.PowerMode,
+                FanMode = this.FanMode,
+                CpuFanSpeed = this.CpuFanSpeed,
+                GpuFanSpeed = this.GpuFanSpeed,
+                SysFanSpeed = this.SysFanSpeed,
+                FanCurveWasEnabled = this.FanCurveWasEnabled,
+                RefreshRate = this.RefreshRate,
+                BatteryLimit = this.BatteryLimit,
+                RgbMode = this.RgbMode,
+                RgbBrightness = this.RgbBrightness,
+                RgbSpeed = this.RgbSpeed,
+                RgbR = this.RgbR,
+                RgbG = this.RgbG,
+                RgbB = this.RgbB,
+                CpuPowerLimitsWereApplied = this.CpuPowerLimitsWereApplied,
+                CpuPl1Watts = this.CpuPl1Watts,
+                CpuPl2Watts = this.CpuPl2Watts
+            };
+        }
     }
 }

@@ -9,6 +9,7 @@ using Xunit;
 
 namespace PredatorControlApp.Tests
 {
+    [Collection("NoParallel")]
     public class UiRgbAnimationAndFormTransitionsStressTests : IDisposable
     {
         private readonly string _tempConfig;
@@ -64,6 +65,7 @@ namespace PredatorControlApp.Tests
         public void ZoneColor_NegativeRgbValuesAndOverload_ClampsSafely()
         {
             using var wmi = new WmiController();
+            wmi.CommandInterceptor = (method, input) => { };
             // Call int overload with negative and out of range values
             bool res1 = wmi.SetZoneColor(1, -100, 128, 500);
             Assert.True(res1);
@@ -80,6 +82,7 @@ namespace PredatorControlApp.Tests
         public void ZoneColor_AlphaChannel_ScalesRgbGracefully()
         {
             using var wmi = new WmiController();
+            wmi.CommandInterceptor = (method, input) => { };
 
             // Transparent color (A=0) should scale RGB to 0
             Color transparent = Color.FromArgb(0, 255, 0, 0);
@@ -153,50 +156,56 @@ namespace PredatorControlApp.Tests
         [Fact]
         public void GameSyncForm_LstProfiles_DrawItem_OutOfBoundsIndex_DoesNotThrow()
         {
-            using var controller = new GameSyncController(_tempConfig);
-            using var form = new GameSyncForm(controller, 144);
+            StaTestRunner.Run(() =>
+            {
+                using var controller = new GameSyncController(_tempConfig);
+                using var form = new GameSyncForm(controller, 144);
 
-            var lstField = typeof(GameSyncForm).GetField("_lstProfiles", BindingFlags.NonPublic | BindingFlags.Instance);
-            var lst = (ListBox?)lstField?.GetValue(form);
-            Assert.NotNull(lst);
+                var lstField = typeof(GameSyncForm).GetField("_lstProfiles", BindingFlags.NonPublic | BindingFlags.Instance);
+                var lst = (ListBox?)lstField?.GetValue(form);
+                Assert.NotNull(lst);
 
-            var drawMethod = typeof(GameSyncForm).GetMethod("LstProfiles_DrawItem", BindingFlags.NonPublic | BindingFlags.Instance);
-            Assert.NotNull(drawMethod);
+                var drawMethod = typeof(GameSyncForm).GetMethod("LstProfiles_DrawItem", BindingFlags.NonPublic | BindingFlags.Instance);
+                Assert.NotNull(drawMethod);
 
-            using var bmp = new Bitmap(100, 50);
-            using var g = Graphics.FromImage(bmp);
-            var rect = new Rectangle(0, 0, 100, 30);
+                using var bmp = new Bitmap(100, 50);
+                using var g = Graphics.FromImage(bmp);
+                var rect = new Rectangle(0, 0, 100, 30);
 
-            // Index -1
-            var eaNeg = new DrawItemEventArgs(g, form.Font, rect, -1, DrawItemState.Default);
-            drawMethod.Invoke(form, new object[] { lst, eaNeg });
+                // Index -1
+                var eaNeg = new DrawItemEventArgs(g, form.Font, rect, -1, DrawItemState.Default);
+                drawMethod.Invoke(form, new object[] { lst, eaNeg });
 
-            // Index 999 when items count is 0
-            var eaOob = new DrawItemEventArgs(g, form.Font, rect, 999, DrawItemState.Default);
-            drawMethod.Invoke(form, new object[] { lst, eaOob });
+                // Index 999 when items count is 0
+                var eaOob = new DrawItemEventArgs(g, form.Font, rect, 999, DrawItemState.Default);
+                drawMethod.Invoke(form, new object[] { lst, eaOob });
+            });
         }
 
         [Fact]
         public void GameSyncForm_DialogLifecycle_RepeatedOpenClose_DuringActiveGameDetection()
         {
-            using var controller = new GameSyncController(_tempConfig);
-            controller.AddProfile(new GameProfile { ExecutableName = "stress_game.exe", DisplayName = "Stress Game", PowerMode = 0x05 });
-            controller.IsEnabled = true;
-
-            // Simulate rapid open and close while game detected and exited events are firing
-            for (int i = 0; i < 15; i++)
+            StaTestRunner.Run(() =>
             {
-                using var form = new GameSyncForm(controller, 165);
-                Assert.NotNull(form);
+                using var controller = new GameSyncController(_tempConfig);
+                controller.AddProfile(new GameProfile { ExecutableName = "stress_game.exe", DisplayName = "Stress Game", PowerMode = 0x05 });
+                controller.IsEnabled = true;
 
-                // Trigger game detected event on controller
-                var profile = controller.Profiles[0];
-                controller.PollOnce();
+                // Simulate rapid open and close while game detected and exited events are firing
+                for (int i = 0; i < 15; i++)
+                {
+                    using var form = new GameSyncForm(controller, 165);
+                    Assert.NotNull(form);
 
-                // Dispose form and verify it cleans up
-                form.Dispose();
-                Assert.True(form.IsDisposed);
-            }
+                    // Trigger game detected event on controller
+                    var profile = controller.Profiles[0];
+                    controller.PollOnce();
+
+                    // Dispose form and verify it cleans up
+                    form.Dispose();
+                    Assert.True(form.IsDisposed);
+                }
+            });
         }
     }
 }

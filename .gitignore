@@ -22,3 +22,23 @@ publish/
 *.txt
 *.tex
 
+
+# Standalone executables and ACPI dumps
+*-Standalone.exe
+*.aml
+acpi_tables/
+all_acpi/
+tests_list.txt
+
+# Rust & Test outputs
+target/
+TestResults/
+*.log
+*.trx
+
+# Backups and Context
+*.bak*
+CONVERSATION_CONTEXT.md
+
+# local build/test logs
+*.log

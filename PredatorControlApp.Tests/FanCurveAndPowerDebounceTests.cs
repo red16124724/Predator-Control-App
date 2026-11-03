@@ -254,7 +254,67 @@ namespace PredatorControlApp.Tests
                 Assert.True(normalized[i].X <= normalized[i + 1].X);
             }
         }
-    }
+    
+        [Fact]
+        public void GpuPowerMonitor_IsGpuAsleep_StableAndDebounced()
+        {
+            GpuPowerMonitor.ResetDebounce();
+            bool initial = GpuPowerMonitor.IsGpuAsleep();
+
+            // Consecutive calls within debounce window (750ms) must return identical state without flickering
+            for (int i = 0; i < 10; i++)
+            {
+                Assert.Equal(initial, GpuPowerMonitor.IsGpuAsleep());
+            }
+
+            GpuPowerMonitor.ResetDebounce();
+        }
+
+        [Fact]
+        public void PowerStateTransition_BatteryToCharging_ImmediatelyResolvesAc()
+        {
+            // Scenario: Laptop was on battery (_isPluggedIn was false). Charger is plugged in.
+            bool? isPluggedIn = false;
+            PowerLineStatus lineStatus = PowerLineStatus.Online;
+            bool isCharging = false; // Charging status hasn't updated yet
+
+            // New logic: lineStatus Online or isCharging immediately resolves as AC
+            bool isAc = lineStatus == PowerLineStatus.Online || isCharging || (lineStatus != PowerLineStatus.Offline && isPluggedIn == true);
+            bool onBattery = !isAc;
+
+            Assert.True(isAc);
+            Assert.False(onBattery);
+
+            // Even if lineStatus was still Unknown but battery reported Charging
+            lineStatus = PowerLineStatus.Unknown;
+            isCharging = true;
+            isAc = lineStatus == PowerLineStatus.Online || isCharging || (lineStatus != PowerLineStatus.Offline && isPluggedIn == true);
+            onBattery = !isAc;
+
+            Assert.True(isAc);
+            Assert.False(onBattery);
+        }
+
+        [Fact]
+        public void PowerStateTransition_BatteryToCharging_DebouncePowerLineDoesNotStickOnBattery()
+        {
+            bool? isPluggedIn = false;
+            bool? pending = false;
+            int ticks = 0;
+
+            // When plugged in, first tick registers pending = true
+            bool? result1 = Form1.DebouncePowerLine(PowerLineStatus.Online, isPluggedIn, ref pending, ref ticks, BatteryChargeStatus.Charging);
+            Assert.False(result1); // Tick 1: still old state during debounce
+            Assert.True(pending);
+            Assert.Equal(1, ticks);
+
+            // Second tick confirms AC
+            bool? result2 = Form1.DebouncePowerLine(PowerLineStatus.Online, isPluggedIn, ref pending, ref ticks, BatteryChargeStatus.Charging);
+            Assert.True(result2); // Confirmed AC!
+            Assert.Equal(2, ticks);
+        }
+
+}
 
     public class GameSyncControllerTests : System.IDisposable
     {
@@ -926,31 +986,41 @@ namespace PredatorControlApp.Tests
         [Fact]
         public void Program_ResolveFanSpeeds_ResolvesCorrectlyAcrossHives()
         {
-            using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"SOFTWARE\PredatorControl");
+            const string testKeyPath = @"SOFTWARE\PredatorControl_TestFanSpeeds";
+            using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(testKeyPath);
             if (key != null)
             {
-                key.SetValue("FanSpeedCpuAC", 75);
-                key.SetValue("FanSpeedGpuAC", 85);
-                key.SetValue("FanSpeedCpuBattery", 35);
-                key.SetValue("FanSpeedGpuBattery", 45);
+                try
+                {
+                    key.SetValue("FanSpeedCpuAC", 75);
+                    key.SetValue("FanSpeedGpuAC", 85);
+                    key.SetValue("FanSpeedCpuBattery", 35);
+                    key.SetValue("FanSpeedGpuBattery", 45);
+                    key.Flush();
 
-                Program.ResolveFanSpeeds(onBattery: false, out byte acCpu, out byte acGpu);
-                Assert.Equal(75, acCpu);
-                Assert.Equal(85, acGpu);
+                    Program.ResolveFanSpeeds(onBattery: false, out byte acCpu, out byte acGpu, testKeyPath);
+                    Assert.Equal(75, acCpu);
+                    Assert.Equal(85, acGpu);
 
-                Program.ResolveFanSpeeds(onBattery: true, out byte batCpu, out byte batGpu);
-                Assert.Equal(35, batCpu);
-                Assert.Equal(45, batGpu);
+                    Program.ResolveFanSpeeds(onBattery: true, out byte batCpu, out byte batGpu, testKeyPath);
+                    Assert.Equal(35, batCpu);
+                    Assert.Equal(45, batGpu);
 
-                // Fallback to general FanSpeedCpu / FanSpeedGpu
-                key.DeleteValue("FanSpeedCpuAC", false);
-                key.DeleteValue("FanSpeedGpuAC", false);
-                key.SetValue("FanSpeedCpu", 60);
-                key.SetValue("FanSpeedGpu", 65);
+                    // Fallback to general FanSpeedCpu / FanSpeedGpu
+                    key.DeleteValue("FanSpeedCpuAC", false);
+                    key.DeleteValue("FanSpeedGpuAC", false);
+                    key.SetValue("FanSpeedCpu", 60);
+                    key.SetValue("FanSpeedGpu", 65);
+                    key.Flush();
 
-                Program.ResolveFanSpeeds(onBattery: false, out byte fallbackCpu, out byte fallbackGpu);
-                Assert.Equal(60, fallbackCpu);
-                Assert.Equal(65, fallbackGpu);
+                    Program.ResolveFanSpeeds(onBattery: false, out byte fallbackCpu, out byte fallbackGpu, testKeyPath);
+                    Assert.Equal(60, fallbackCpu);
+                    Assert.Equal(65, fallbackGpu);
+                }
+                finally
+                {
+                    try { Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(testKeyPath, false); } catch { }
+                }
             }
         }
 
@@ -1542,6 +1612,7 @@ namespace PredatorControlApp.Tests
             Assert.False(AcerProtocol.TryEcModeToWmiMode(5, out _, modeCount: 3));
             Assert.False(AcerProtocol.TryEcModeToWmiMode(0xFF, out _, modeCount: 3));
         }
+
 
         #endregion
     }

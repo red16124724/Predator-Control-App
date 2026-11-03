@@ -403,14 +403,14 @@ namespace PredatorControlApp.Tests
         [Fact]
         public void Test_LightingEffects34_CountAndEnumMapping()
         {
-            Assert.Equal(34, LightingEffectsManager.EffectNames.Length);
+            Assert.Equal(33, LightingEffectsManager.EffectNames.Length);
 
             // Verify index 0 is Static and index 33 is Blasting
             Assert.Equal("Static", LightingEffectsManager.EffectNames[0]);
             Assert.Equal((int)LightingEffect34.Static, 0);
 
-            Assert.Equal("Blasting", LightingEffectsManager.EffectNames[33]);
-            Assert.Equal((int)LightingEffect34.Blasting, 33);
+            Assert.Equal("Blasting", LightingEffectsManager.EffectNames[32]);
+            Assert.Equal((int)LightingEffect34.Blasting, 32);
 
             Assert.Equal("Follow Power Mode", LightingEffectsManager.EffectNames[(int)LightingEffect34.FollowOperatingMode]);
         }
@@ -660,9 +660,9 @@ namespace PredatorControlApp.Tests
         [Fact]
         public void Test_LightingEffects34_AllNamesNonEmptyAndUnique()
         {
-            Assert.Equal(34, LightingEffectsManager.EffectNames.Length);
+            Assert.Equal(33, LightingEffectsManager.EffectNames.Length);
             var hashSet = new HashSet<string>(LightingEffectsManager.EffectNames);
-            Assert.Equal(34, hashSet.Count);
+            Assert.Equal(33, hashSet.Count);
             foreach (var name in LightingEffectsManager.EffectNames)
             {
                 Assert.False(string.IsNullOrWhiteSpace(name));

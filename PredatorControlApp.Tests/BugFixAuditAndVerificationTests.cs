@@ -417,6 +417,30 @@ namespace PredatorControlApp.Tests
             }
         }
 
+
+        [Fact]
+        public void ThemePersistence_Diagnostic_Test()
+        {
+            var initialTheme = ThemeManager.CurrentTheme;
+            try
+            {
+                ThemeManager.SetTheme(AppTheme.Light);
+                using var k1 = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"SOFTWARE\PredatorControl");
+                object? at1 = k1?.GetValue("AppTheme");
+                object? th1 = k1?.GetValue("Theme");
+                string fileJson = System.IO.File.Exists(AppSettings.SettingsFilePath) ? System.IO.File.ReadAllText(AppSettings.SettingsFilePath) : "NO_FILE";
+
+                ThemeManager.LoadThemeFromRegistry();
+                var afterTheme = ThemeManager.CurrentTheme;
+
+                Assert.Equal(AppTheme.Light, afterTheme);
+            }
+            finally
+            {
+                ThemeManager.SetTheme(initialTheme);
+            }
+        }
+
         #endregion
     }
 }

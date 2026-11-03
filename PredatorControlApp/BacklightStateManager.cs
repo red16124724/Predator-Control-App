@@ -14,6 +14,11 @@ namespace PredatorControlApp
         private bool _manualBacklightOnBattery;
         private int _manualBatteryBrightness;
 
+        private int _idleTimeoutSeconds = 0; // 0 = disabled
+        private int _dimmedBrightnessPercent = 30;
+        private bool _isDimmed = false;
+        private DateTime _lastActivityUtc = DateTime.UtcNow;
+
         public bool IsLidClosed { get { lock (_lock) { return _isLidClosed; } } private set { lock (_lock) { _isLidClosed = value; } } }
         public bool IsSleeping { get { lock (_lock) { return _isSleeping; } } private set { lock (_lock) { _isSleeping = value; } } }
         public bool? IsPluggedIn { get { lock (_lock) { return _isPluggedIn; } } private set { lock (_lock) { _isPluggedIn = value; } } }
@@ -21,6 +26,83 @@ namespace PredatorControlApp
         public int SavedAcBrightness { get { lock (_lock) { return _savedAcBrightness; } } set { lock (_lock) { _savedAcBrightness = Math.Clamp(value, 0, 100); } } }
         public bool ManualBacklightOnBattery { get { lock (_lock) { return _manualBacklightOnBattery; } } set { lock (_lock) { _manualBacklightOnBattery = value; } } }
         public int ManualBatteryBrightness { get { lock (_lock) { return _manualBatteryBrightness; } } set { lock (_lock) { _manualBatteryBrightness = Math.Clamp(value, 0, 100); } } }
+
+        public int IdleTimeoutSeconds
+        {
+            get { lock (_lock) return _idleTimeoutSeconds; }
+            set { lock (_lock) _idleTimeoutSeconds = Math.Max(0, value); }
+        }
+
+        public int DimmedBrightnessPercent
+        {
+            get { lock (_lock) return _dimmedBrightnessPercent; }
+            set { lock (_lock) _dimmedBrightnessPercent = Math.Clamp(value, 0, 100); }
+        }
+
+        public bool IsDimmed
+        {
+            get { lock (_lock) return _isDimmed; }
+        }
+
+        public void RecordActivity()
+        {
+            lock (_lock)
+            {
+                _lastActivityUtc = DateTime.UtcNow;
+            }
+        }
+
+        public bool EvaluateIdle(DateTime nowUtc, out bool shouldDim, out int targetBrightness)
+        {
+            lock (_lock)
+            {
+                shouldDim = false;
+                targetBrightness = 0;
+
+                if (_isLidClosed || _isSleeping) return false;
+                if (_idleTimeoutSeconds <= 0) return false;
+
+                double idleSec = (nowUtc - _lastActivityUtc).TotalSeconds;
+                if (idleSec >= _idleTimeoutSeconds)
+                {
+                    if (!_isDimmed)
+                    {
+                        _isDimmed = true;
+                        shouldDim = true;
+                        targetBrightness = _dimmedBrightnessPercent;
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }
+
+        public bool OnActivity(out bool shouldRestore, out int targetBrightness)
+        {
+            lock (_lock)
+            {
+                _lastActivityUtc = DateTime.UtcNow;
+                shouldRestore = false;
+                targetBrightness = 0;
+
+                if (_isDimmed)
+                {
+                    _isDimmed = false;
+                    shouldRestore = true;
+
+                    if (_isPluggedIn == true)
+                    {
+                        targetBrightness = Math.Clamp(_savedAcBrightness, 0, 100);
+                    }
+                    else
+                    {
+                        targetBrightness = _manualBacklightOnBattery ? Math.Clamp(_manualBatteryBrightness, 0, 100) : 0;
+                    }
+                    return true;
+                }
+                return false;
+            }
+        }
 
         public bool IsOnBattery(PowerLineStatus lineStatus, BatteryChargeStatus chargeStatus = 0)
         {
@@ -47,6 +129,8 @@ namespace PredatorControlApp
             lock (_lock)
             {
                 _isLidClosed = !isOpen;
+                _isDimmed = false;
+                _lastActivityUtc = DateTime.UtcNow;
 
                 bool isCharging = (chargeStatus & BatteryChargeStatus.Charging) != 0;
                 if (lineStatus == PowerLineStatus.Online || isCharging)
@@ -87,6 +171,7 @@ namespace PredatorControlApp
             lock (_lock)
             {
                 _isSleeping = true;
+                _isDimmed = false;
                 _manualBacklightOnBattery = false;
                 _manualBatteryBrightness = 0;
                 shouldTurnOff = true;
@@ -99,6 +184,8 @@ namespace PredatorControlApp
             lock (_lock)
             {
                 _isSleeping = false;
+                _isDimmed = false;
+                _lastActivityUtc = DateTime.UtcNow;
 
                 bool isCharging = (chargeStatus & BatteryChargeStatus.Charging) != 0;
                 if (lineStatus == PowerLineStatus.Online || isCharging)
@@ -136,6 +223,8 @@ namespace PredatorControlApp
             lock (_lock)
             {
                 _isPluggedIn = pluggedIn;
+                _isDimmed = false;
+                _lastActivityUtc = DateTime.UtcNow;
 
                 if (_isLidClosed || _isSleeping)
                 {
@@ -171,6 +260,9 @@ namespace PredatorControlApp
         {
             lock (_lock)
             {
+                _isDimmed = false;
+                _lastActivityUtc = DateTime.UtcNow;
+
                 if (onBattery)
                 {
                     _manualBacklightOnBattery = brightness > 0;

@@ -18,7 +18,6 @@ namespace PredatorControlApp.Tests
         [InlineData(4, 2)]  // Shifting -> Neon
         [InlineData(5, 2)]  // Zoom -> Neon
         [InlineData(6, 2)]  // Meteor -> Neon
-        [InlineData(7, 2)]  // Twinkling -> Neon
         public void Test_SetGamingLED_ModeMapping_SingleLedHardware(int inputMode, byte expectedMappedMode)
         {
             byte mapped = (byte)(inputMode switch
@@ -31,25 +30,25 @@ namespace PredatorControlApp.Tests
         }
 
         [Fact]
-        public void Test_SetGamingLEDColor_BytePacking_LogoAndExterior()
+        public void Test_SetGamingLEDColor_BytePacking_ZoneAndExterior()
         {
             byte r = 0, g = 150, b = 255;
-            ulong logoZone = 0x01ul;
+            ulong zoneIndex = 0x01ul;
             ulong exteriorZone = 0x0Ful;
 
-            ulong logoColorPayload = ((ulong)b << 24) | ((ulong)g << 16) | ((ulong)r << 8) | logoZone;
+            ulong zoneColorPayload = ((ulong)b << 24) | ((ulong)g << 16) | ((ulong)r << 8) | zoneIndex;
             ulong exteriorColorPayload = ((ulong)b << 24) | ((ulong)g << 16) | ((ulong)r << 8) | exteriorZone;
 
             // Verify Byte 0 = Zone
-            Assert.Equal(0x01ul, logoColorPayload & 0xFFul);
+            Assert.Equal(0x01ul, zoneColorPayload & 0xFFul);
             Assert.Equal(0x0Ful, exteriorColorPayload & 0xFFul);
 
             // Verify Byte 1 = R
-            Assert.Equal(r, (byte)((logoColorPayload >> 8) & 0xFFul));
+            Assert.Equal(r, (byte)((zoneColorPayload >> 8) & 0xFFul));
             // Verify Byte 2 = G
-            Assert.Equal(g, (byte)((logoColorPayload >> 16) & 0xFFul));
+            Assert.Equal(g, (byte)((zoneColorPayload >> 16) & 0xFFul));
             // Verify Byte 3 = B
-            Assert.Equal(b, (byte)((logoColorPayload >> 24) & 0xFFul));
+            Assert.Equal(b, (byte)((zoneColorPayload >> 24) & 0xFFul));
         }
 
         [Fact]

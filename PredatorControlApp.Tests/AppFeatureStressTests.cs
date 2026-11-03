@@ -567,11 +567,11 @@ namespace PredatorControlApp.Tests
         }
 
         [Fact]
-        public void CurrentVersion_Is141()
+        public void CurrentVersion_Is155()
         {
             Assert.Equal(1, Updater.Current.Major);
-            Assert.Equal(4, Updater.Current.Minor);
-            Assert.Equal(1, Updater.Current.Build);
+            Assert.Equal(5, Updater.Current.Minor);
+            Assert.Equal(5, Updater.Current.Build);
         }
 
         [Fact]
@@ -1236,27 +1236,32 @@ namespace PredatorControlApp.Tests
         {
             lock (ThemeManager.ThemeSync)
             {
-                ThemeManager.SetTheme(AppTheme.Dark);
-                Assert.True(ThemeManager.IsDarkThemeActive);
-                Assert.NotEqual(Color.Empty, ThemeManager.FormBg);
-                Assert.NotEqual(Color.Empty, ThemeManager.CardBg);
-                Assert.NotEqual(Color.Empty, ThemeManager.Accent);
-                Assert.NotEqual(Color.Empty, ThemeManager.SidebarBg);
-                Assert.NotEqual(Color.Empty, ThemeManager.TitleBarBg);
+                var prevTheme = ThemeManager.CurrentTheme;
+                try
+                {
+                    ThemeManager.SetTheme(AppTheme.Dark);
+                    Assert.True(ThemeManager.IsDarkThemeActive);
+                    Assert.NotEqual(Color.Empty, ThemeManager.FormBg);
+                    Assert.NotEqual(Color.Empty, ThemeManager.CardBg);
+                    Assert.NotEqual(Color.Empty, ThemeManager.Accent);
+                    Assert.NotEqual(Color.Empty, ThemeManager.SidebarBg);
+                    Assert.NotEqual(Color.Empty, ThemeManager.TitleBarBg);
 
-                ThemeManager.SetTheme(AppTheme.Light);
-                Assert.False(ThemeManager.IsDarkThemeActive);
-                Assert.NotEqual(Color.Empty, ThemeManager.FormBg);
-                Assert.NotEqual(Color.Empty, ThemeManager.CardBg);
-                Assert.NotEqual(Color.Empty, ThemeManager.Accent);
-                Assert.NotEqual(Color.Empty, ThemeManager.SidebarBg);
-                Assert.NotEqual(Color.Empty, ThemeManager.TitleBarBg);
+                    ThemeManager.SetTheme(AppTheme.Light);
+                    Assert.False(ThemeManager.IsDarkThemeActive);
+                    Assert.NotEqual(Color.Empty, ThemeManager.FormBg);
+                    Assert.NotEqual(Color.Empty, ThemeManager.CardBg);
+                    Assert.NotEqual(Color.Empty, ThemeManager.Accent);
+                    Assert.NotEqual(Color.Empty, ThemeManager.SidebarBg);
+                    Assert.NotEqual(Color.Empty, ThemeManager.TitleBarBg);
 
-                // Light mode card background must be bright/white and accent must have high contrast
-                Assert.True(ThemeManager.CardBg.R > 200 && ThemeManager.CardBg.G > 200 && ThemeManager.CardBg.B > 200);
-
-                // Restore default
-                ThemeManager.SetTheme(AppTheme.System);
+                    // Light mode card background must be bright/white and accent must have high contrast
+                    Assert.True(ThemeManager.CardBg.R > 200 && ThemeManager.CardBg.G > 200 && ThemeManager.CardBg.B > 200);
+                }
+                finally
+                {
+                    ThemeManager.SetTheme(prevTheme);
+                }
             }
         }
 

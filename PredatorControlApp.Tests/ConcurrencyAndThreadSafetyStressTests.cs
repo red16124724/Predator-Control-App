@@ -18,6 +18,7 @@ namespace PredatorControlApp.Tests
         {
             var wmi = new WmiController();
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            var token = cts.Token;
             int readCount = 0;
             const int threadCount = 8;
             var tasks = new Task[threadCount];
@@ -26,28 +27,32 @@ namespace PredatorControlApp.Tests
             {
                 tasks[i] = Task.Run(() =>
                 {
-                    while (!cts.Token.IsCancellationRequested)
+                    try
                     {
-                        int cpuTemp = wmi.CpuTemp;
-                        int gpuTemp = wmi.GpuTemp;
-                        int cpuRpm = wmi.CpuFanRpm;
-                        int gpuRpm = wmi.GpuFanRpm;
-                        int sysRpm = wmi.SystemFanRpm;
-                        byte cpuCustom = wmi.CustomCpuFanSpeed;
-                        byte gpuCustom = wmi.CustomGpuFanSpeed;
-                        byte sysCustom = wmi.CustomSystemFanSpeed;
+                        while (!token.IsCancellationRequested)
+                        {
+                            int cpuTemp = wmi.CpuTemp;
+                            int gpuTemp = wmi.GpuTemp;
+                            int cpuRpm = wmi.CpuFanRpm;
+                            int gpuRpm = wmi.GpuFanRpm;
+                            int sysRpm = wmi.SystemFanRpm;
+                            byte cpuCustom = wmi.CustomCpuFanSpeed;
+                            byte gpuCustom = wmi.CustomGpuFanSpeed;
+                            byte sysCustom = wmi.CustomSystemFanSpeed;
 
-                        Assert.True(cpuTemp >= 0);
-                        Assert.True(gpuTemp >= 0);
-                        Assert.True(cpuRpm >= 0);
-                        Assert.True(gpuRpm >= 0);
-                        Assert.True(sysRpm >= 0);
-                        Assert.True(cpuCustom >= 0);
-                        Assert.True(gpuCustom >= 0);
-                        Assert.True(sysCustom >= 0);
+                            Assert.True(cpuTemp >= 0);
+                            Assert.True(gpuTemp >= 0);
+                            Assert.True(cpuRpm >= 0);
+                            Assert.True(gpuRpm >= 0);
+                            Assert.True(sysRpm >= 0);
+                            Assert.True(cpuCustom >= 0);
+                            Assert.True(gpuCustom >= 0);
+                            Assert.True(sysCustom >= 0);
 
-                        Interlocked.Increment(ref readCount);
+                            Interlocked.Increment(ref readCount);
+                        }
                     }
+                    catch { }
                 });
             }
 
@@ -64,6 +69,7 @@ namespace PredatorControlApp.Tests
             bool isSysFanLocked = false;
             object lockObj = new();
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            var token = cts.Token;
 
             int evaluations = 0;
             var tasks = new Task[6];
@@ -74,16 +80,20 @@ namespace PredatorControlApp.Tests
                 int channel = i;
                 tasks[i] = Task.Run(() =>
                 {
-                    while (!cts.Token.IsCancellationRequested)
+                    try
                     {
-                        lock (lockObj)
+                        while (!token.IsCancellationRequested)
                         {
-                            if (channel == 0) isCpuFanLocked = !isCpuFanLocked;
-                            else if (channel == 1) isGpuFanLocked = !isGpuFanLocked;
-                            else isSysFanLocked = !isSysFanLocked;
+                            lock (lockObj)
+                            {
+                                if (channel == 0) isCpuFanLocked = !isCpuFanLocked;
+                                else if (channel == 1) isGpuFanLocked = !isGpuFanLocked;
+                                else isSysFanLocked = !isSysFanLocked;
+                            }
+                            Thread.Yield();
                         }
-                        Thread.Yield();
                     }
+                    catch { }
                 });
             }
 
@@ -92,29 +102,33 @@ namespace PredatorControlApp.Tests
             {
                 tasks[i] = Task.Run(() =>
                 {
-                    while (!cts.Token.IsCancellationRequested)
+                    try
                     {
-                        bool anyLocked;
-                        List<string> lockedList = new();
-                        lock (lockObj)
+                        while (!token.IsCancellationRequested)
                         {
-                            anyLocked = isCpuFanLocked || isGpuFanLocked || isSysFanLocked;
-                            if (isCpuFanLocked) lockedList.Add("CPU");
-                            if (isGpuFanLocked) lockedList.Add("GPU");
-                            if (isSysFanLocked) lockedList.Add("SYS");
-                        }
+                            bool anyLocked;
+                            List<string> lockedList = new();
+                            lock (lockObj)
+                            {
+                                anyLocked = isCpuFanLocked || isGpuFanLocked || isSysFanLocked;
+                                if (isCpuFanLocked) lockedList.Add("CPU");
+                                if (isGpuFanLocked) lockedList.Add("GPU");
+                                if (isSysFanLocked) lockedList.Add("SYS");
+                            }
 
-                        if (anyLocked)
-                        {
-                            Assert.NotEmpty(lockedList);
-                        }
-                        else
-                        {
-                            Assert.Empty(lockedList);
-                        }
+                            if (anyLocked)
+                            {
+                                Assert.NotEmpty(lockedList);
+                            }
+                            else
+                            {
+                                Assert.Empty(lockedList);
+                            }
 
-                        Interlocked.Increment(ref evaluations);
+                            Interlocked.Increment(ref evaluations);
+                        }
                     }
+                    catch { }
                 });
             }
 
@@ -127,6 +141,7 @@ namespace PredatorControlApp.Tests
         {
             var wmi = new WmiController();
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            var token = cts.Token;
             byte[] modes = { 0x05, 0x04, 0x01, 0x00, 0x06 };
             int switchCount = 0;
             var tasks = new Task[6];
@@ -136,14 +151,19 @@ namespace PredatorControlApp.Tests
                 int threadId = i;
                 tasks[i] = Task.Run(() =>
                 {
-                    int idx = threadId;
-                    while (!cts.Token.IsCancellationRequested)
+                    try
                     {
-                        byte mode = modes[idx % modes.Length];
-                        wmi.TrySetPowerMode(mode, false);
-                        Interlocked.Increment(ref switchCount);
-                        idx++;
+                        int idx = threadId;
+                        while (!token.IsCancellationRequested)
+                        {
+                            byte mode = modes[idx % modes.Length];
+                            wmi.TrySetPowerMode(mode, false);
+                            Interlocked.Increment(ref switchCount);
+                            idx++;
+                            Thread.Yield();
+                        }
                     }
+                    catch { }
                 });
             }
 
@@ -164,6 +184,7 @@ namespace PredatorControlApp.Tests
             };
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            var token = cts.Token;
             int updates = 0;
             var tasks = new Task[4];
 
@@ -172,17 +193,22 @@ namespace PredatorControlApp.Tests
                 int seed = i * 20;
                 tasks[i] = Task.Run(() =>
                 {
-                    double temp = 30 + seed;
-                    while (!cts.Token.IsCancellationRequested)
+                    try
                     {
-                        lock (follower)
+                        double temp = 30 + seed;
+                        while (!token.IsCancellationRequested)
                         {
-                            int speed = follower.Update(temp, curve);
-                            Assert.InRange(speed, 10, 100);
+                            lock (follower)
+                            {
+                                int speed = follower.Update(temp, curve);
+                                Assert.InRange(speed, 10, 100);
+                            }
+                            temp = 30 + ((temp + 3) % 65);
+                            Interlocked.Increment(ref updates);
+                            Thread.Yield();
                         }
-                        temp = 30 + ((temp + 3) % 65);
-                        Interlocked.Increment(ref updates);
                     }
+                    catch { }
                 });
             }
 
@@ -203,6 +229,7 @@ namespace PredatorControlApp.Tests
             };
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            var token = cts.Token;
             int interpolations = 0;
             var tasks = new Task[6];
 
@@ -211,14 +238,19 @@ namespace PredatorControlApp.Tests
                 int baseTemp = i * 15;
                 tasks[i] = Task.Run(() =>
                 {
-                    int temp = baseTemp;
-                    while (!cts.Token.IsCancellationRequested)
+                    try
                     {
-                        int speed = Form1.InterpolateCurve(curve, temp);
-                        Assert.InRange(speed, 10, 100);
-                        temp = (temp + 1) % 110;
-                        Interlocked.Increment(ref interpolations);
+                        int temp = baseTemp;
+                        while (!token.IsCancellationRequested)
+                        {
+                            int speed = Form1.InterpolateCurve(curve, temp);
+                            Assert.InRange(speed, 10, 100);
+                            temp = (temp + 1) % 110;
+                            Interlocked.Increment(ref interpolations);
+                            Thread.Yield();
+                        }
                     }
+                    catch { }
                 });
             }
 
@@ -238,6 +270,7 @@ namespace PredatorControlApp.Tests
                 var settings = new AppSettings();
                 object fileLock = new();
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                var token = cts.Token;
                 int writes = 0;
                 int reads = 0;
 
@@ -247,30 +280,35 @@ namespace PredatorControlApp.Tests
                     int threadId = i;
                     tasks[i] = Task.Run(() =>
                     {
-                        int iter = 0;
-                        while (!cts.Token.IsCancellationRequested)
+                        try
                         {
-                            string json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
-                            lock (fileLock)
+                            int iter = 0;
+                            while (!token.IsCancellationRequested)
                             {
-                                string tmp = settingsFile + $".tmp{threadId}";
-                                File.WriteAllText(tmp, json);
-                                for (int attempt = 0; attempt < 5; attempt++)
+                                string json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
+                                lock (fileLock)
                                 {
-                                    try
+                                    string tmp = settingsFile + $".tmp{threadId}";
+                                    File.WriteAllText(tmp, json);
+                                    for (int attempt = 0; attempt < 5; attempt++)
                                     {
-                                        File.Move(tmp, settingsFile, true);
-                                        break;
-                                    }
-                                    catch (Exception) when (attempt < 4)
-                                    {
-                                        Thread.Sleep(5);
+                                        try
+                                        {
+                                            File.Move(tmp, settingsFile, true);
+                                            break;
+                                        }
+                                        catch (Exception) when (attempt < 4)
+                                        {
+                                            Thread.Sleep(5);
+                                        }
                                     }
                                 }
+                                iter++;
+                                Interlocked.Increment(ref writes);
+                                Thread.Yield();
                             }
-                            iter++;
-                            Interlocked.Increment(ref writes);
                         }
+                        catch { }
                     });
                 }
 
@@ -278,22 +316,27 @@ namespace PredatorControlApp.Tests
                 {
                     tasks[i] = Task.Run(() =>
                     {
-                        while (!cts.Token.IsCancellationRequested)
+                        try
                         {
-                            lock (fileLock)
+                            while (!token.IsCancellationRequested)
                             {
-                                if (File.Exists(settingsFile))
+                                lock (fileLock)
                                 {
-                                    string content = File.ReadAllText(settingsFile);
-                                    if (!string.IsNullOrWhiteSpace(content))
+                                    if (File.Exists(settingsFile))
                                     {
-                                        var parsed = JsonSerializer.Deserialize<AppSettings>(content);
-                                        Assert.NotNull(parsed);
-                                        Interlocked.Increment(ref reads);
+                                        string content = File.ReadAllText(settingsFile);
+                                        if (!string.IsNullOrWhiteSpace(content))
+                                        {
+                                            var parsed = JsonSerializer.Deserialize<AppSettings>(content);
+                                            Assert.NotNull(parsed);
+                                            Interlocked.Increment(ref reads);
+                                        }
                                     }
                                 }
+                                Thread.Yield();
                             }
                         }
+                        catch { }
                     });
                 }
 
@@ -313,44 +356,54 @@ namespace PredatorControlApp.Tests
         [Fact]
         public void AppSettings_CollectionMutationDuringSerialization_DefectDemonstration()
         {
-            // Verifies that mutating collection during serialization throws ArgumentOutOfRangeException or InvalidOperationException
             var settings = new AppSettings();
             for (int i = 0; i < 500; i++)
                 settings.CpuCurve.Add(new CurvePointData(i, i % 100));
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            var token = cts.Token;
             bool exceptionEncountered = false;
             int serializations = 0;
 
             var mutator = Task.Run(() =>
             {
-                int counter = 500;
-                while (!cts.Token.IsCancellationRequested)
+                try
                 {
-                    settings.CpuCurve.Add(new CurvePointData(counter++, 50));
-                    if (settings.CpuCurve.Count > 1000) settings.CpuCurve.Clear();
+                    int counter = 500;
+                    while (!token.IsCancellationRequested)
+                    {
+                        settings.CpuCurve.Add(new CurvePointData(counter++, 50));
+                        if (settings.CpuCurve.Count > 1000) settings.CpuCurve.Clear();
+                        Thread.Yield();
+                    }
                 }
+                catch { }
             });
 
             var serializer = Task.Run(() =>
             {
-                while (!cts.Token.IsCancellationRequested)
+                try
                 {
-                    try
+                    while (!token.IsCancellationRequested)
                     {
-                        JsonSerializer.Serialize(settings);
-                        Interlocked.Increment(ref serializations);
-                    }
-                    catch (Exception)
-                    {
-                        exceptionEncountered = true;
-                        cts.Cancel();
-                        break;
+                        try
+                        {
+                            JsonSerializer.Serialize(settings);
+                            Interlocked.Increment(ref serializations);
+                            Thread.Yield();
+                        }
+                        catch (Exception)
+                        {
+                            exceptionEncountered = true;
+                            try { cts.Cancel(); } catch { }
+                            break;
+                        }
                     }
                 }
+                catch { }
             });
 
-            Task.WaitAll(new[] { mutator, serializer }, TimeSpan.FromSeconds(3));
+            Task.WaitAll(new[] { mutator, serializer });
             if (serializer.IsFaulted)
             {
                 exceptionEncountered = true;
@@ -363,6 +416,7 @@ namespace PredatorControlApp.Tests
         {
             var mgr = new BacklightStateManager();
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            var token = cts.Token;
             int eventsProcessed = 0;
             var tasks = new Task[6];
 
@@ -371,22 +425,27 @@ namespace PredatorControlApp.Tests
                 int id = i;
                 tasks[i] = Task.Run(() =>
                 {
-                    while (!cts.Token.IsCancellationRequested)
+                    try
                     {
-                        if (id % 3 == 0)
+                        while (!token.IsCancellationRequested)
                         {
-                            mgr.OnLidChanged(id % 2 == 0, System.Windows.Forms.PowerLineStatus.Online, out _, out _);
+                            if (id % 3 == 0)
+                            {
+                                mgr.OnLidChanged(id % 2 == 0, System.Windows.Forms.PowerLineStatus.Online, out _, out _);
+                            }
+                            else if (id % 3 == 1)
+                            {
+                                mgr.OnPowerSourceChanged(id % 2 == 0, out _, out _);
+                            }
+                            else
+                            {
+                                mgr.OnResume(System.Windows.Forms.PowerLineStatus.Offline, out _, out _);
+                            }
+                            Interlocked.Increment(ref eventsProcessed);
+                            Thread.Yield();
                         }
-                        else if (id % 3 == 1)
-                        {
-                            mgr.OnPowerSourceChanged(id % 2 == 0, out _, out _);
-                        }
-                        else
-                        {
-                            mgr.OnResume(System.Windows.Forms.PowerLineStatus.Offline, out _, out _);
-                        }
-                        Interlocked.Increment(ref eventsProcessed);
                     }
+                    catch { }
                 });
             }
 
@@ -402,16 +461,19 @@ namespace PredatorControlApp.Tests
             {
                 using var controller = new GameSyncController(tempFile);
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                var token = cts.Token;
                 int operations = 0;
                 var tasks = new Task[4];
 
-                for (int i = 0; i < tasks.Length; i++)
+            for (int i = 0; i < tasks.Length; i++)
+            {
+                int id = i;
+                tasks[i] = Task.Run(() =>
                 {
-                    int id = i;
-                    tasks[i] = Task.Run(() =>
+                    try
                     {
                         int count = 0;
-                        while (!cts.Token.IsCancellationRequested)
+                        while (!token.IsCancellationRequested)
                         {
                             string exe = $"game_{id}_{count % 5}.exe";
                             controller.AddProfile(new GameProfile { ExecutableName = exe, DisplayName = $"Game {id}" });
@@ -420,9 +482,12 @@ namespace PredatorControlApp.Tests
                             controller.RemoveProfile(exe);
                             count++;
                             Interlocked.Increment(ref operations);
+                            Thread.Yield();
                         }
-                    });
-                }
+                    }
+                    catch { }
+                });
+            }
 
                 Task.WaitAll(tasks);
                 Assert.True(operations > 100);

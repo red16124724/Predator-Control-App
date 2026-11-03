@@ -1,4 +1,7 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using Microsoft.Win32;
 
 namespace PredatorControlApp
@@ -10,6 +13,7 @@ namespace PredatorControlApp
 
         private const int HWND_BROADCAST = 0xffff;
         private static Mutex? _appMutex;
+        private static readonly object _mutexLock = new();
 
         private static readonly HashSet<string> _reported = new();
         private static bool _dialogOpen;
@@ -18,45 +22,99 @@ namespace PredatorControlApp
         private const string DefaultMutexName = @"Global\PredatorControlApp_Unique_System_Mutex_999";
         internal static string MutexName = DefaultMutexName;
 
-        internal static bool TryTakeSingleInstanceLock(string? customMutexName = null)
+        private static Mutex CreateSafeMutex(string name)
         {
             try
             {
-                if (_appMutex != null) return false;
-                string name = customMutexName ?? MutexName;
-                var mutex = new Mutex(false, name);
-                bool acquired = false;
-                try
-                {
-                    acquired = mutex.WaitOne(TimeSpan.Zero, false);
-                }
-                catch (AbandonedMutexException)
-                {
-                    acquired = true;
-                }
+                var sec = new MutexSecurity();
+                var authUsers = new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null);
+                var admins = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+                var localSystem = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
 
-                if (!acquired)
-                {
-                    mutex.Dispose();
-                    return false;
-                }
+                sec.AddAccessRule(new MutexAccessRule(authUsers, MutexRights.Synchronize | MutexRights.Modify, AccessControlType.Allow));
+                sec.AddAccessRule(new MutexAccessRule(admins, MutexRights.FullControl, AccessControlType.Allow));
+                sec.AddAccessRule(new MutexAccessRule(localSystem, MutexRights.FullControl, AccessControlType.Allow));
 
-                _appMutex = mutex;
-                return true;
+                return MutexAcl.Create(false, name, out _, sec);
             }
             catch
             {
-                return false;
+                try
+                {
+                    return new Mutex(false, name);
+                }
+                catch
+                {
+                    string localName = name.StartsWith(@"Global\", StringComparison.OrdinalIgnoreCase)
+                        ? @"Local\" + name.Substring(7)
+                        : name;
+                    return new Mutex(false, localName);
+                }
+            }
+        }
+
+        private static void OnProcessExitCleanup(object? sender, EventArgs e)
+        {
+            ReleaseSingleInstanceLock();
+        }
+
+        internal static bool TryTakeSingleInstanceLock(string? customMutexName = null)
+        {
+            lock (_mutexLock)
+            {
+                try
+                {
+                    if (_appMutex != null) return false;
+                    string name = customMutexName ?? MutexName;
+                    var mutex = CreateSafeMutex(name);
+                    bool acquired = false;
+                    try
+                    {
+                        acquired = mutex.WaitOne(TimeSpan.Zero, false);
+                    }
+                    catch (AbandonedMutexException)
+                    {
+                        acquired = true;
+                    }
+                    catch
+                    {
+                        try { mutex.Dispose(); } catch { }
+                        throw;
+                    }
+
+                    if (!acquired)
+                    {
+                        try { mutex.Dispose(); } catch { }
+                        return false;
+                    }
+
+                    _appMutex = mutex;
+                    try
+                    {
+                        AppDomain.CurrentDomain.ProcessExit -= OnProcessExitCleanup;
+                        AppDomain.CurrentDomain.ProcessExit += OnProcessExitCleanup;
+                    }
+                    catch { }
+                    return true;
+                }
+                catch
+                {
+                    return false;
+                }
             }
         }
 
         internal static void ReleaseSingleInstanceLock()
         {
-            var mtx = Interlocked.Exchange(ref _appMutex, null);
-            if (mtx != null)
+            lock (_mutexLock)
             {
-                try { mtx.ReleaseMutex(); } catch { }
-                try { mtx.Dispose(); } catch { }
+                var mtx = _appMutex;
+                _appMutex = null;
+                if (mtx != null)
+                {
+                    try { mtx.ReleaseMutex(); } catch { }
+                    try { mtx.Dispose(); } catch { }
+                }
             }
         }
 
@@ -70,8 +128,29 @@ namespace PredatorControlApp
             }
         }
 
+        internal static bool IsBenignCancellation(Exception? ex)
+        {
+            if (ex == null) return true;
+            if (ex is OperationCanceledException or TaskCanceledException) return true;
+            if (ex is AggregateException agg)
+            {
+                var flat = agg.Flatten();
+                if (flat.InnerExceptions.Count > 0 && flat.InnerExceptions.All(IsBenignCancellation))
+                    return true;
+            }
+            if (ex is System.Net.Sockets.SocketException se &&
+                (se.SocketErrorCode == System.Net.Sockets.SocketError.OperationAborted ||
+                 se.SocketErrorCode == System.Net.Sockets.SocketError.TimedOut))
+            {
+                return true;
+            }
+            return false;
+        }
+
         internal static void Report(Exception ex, bool fatal)
         {
+            if (!fatal && IsBenignCancellation(ex)) return;
+
             string key = $"{ex.GetType().FullName}|{ex.StackTrace}";
 
             lock (_reportLock)
@@ -80,13 +159,31 @@ namespace PredatorControlApp
                 {
                     var path = LogPath;
                     Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                    File.AppendAllText(path, $"[{DateTime.Now:u}] {(fatal ? "FATAL" : "ERROR")} {ex}\n\n");
+                    if (File.Exists(path) && new FileInfo(path).Length > 2 * 1024 * 1024)
+                    {
+                        try { File.Move(path, path + ".old", true); } catch { try { File.Delete(path); } catch { } }
+                    }
+                    File.AppendAllText(path, $"[{DateTime.UtcNow:u}] {(fatal ? "FATAL" : "ERROR")} {ex}\n\n");
                 }
-                catch { }
+                catch
+                {
+                    try
+                    {
+                        string tempLog = Path.Combine(Path.GetTempPath(), "PredatorControl-crash.log");
+                        File.AppendAllText(tempLog, $"[{DateTime.UtcNow:u}] {(fatal ? "FATAL" : "ERROR")} {ex}\n\n");
+                    }
+                    catch { }
+                }
 
                 if (_dialogOpen || !_reported.Add(key)) return;
                 _dialogOpen = true;
             }
+
+            try
+            {
+                PowerWakeLock.ReleaseAll();
+            }
+            catch { }
 
             try
             {
@@ -107,9 +204,11 @@ namespace PredatorControlApp
         [STAThread]
         static void Main(string[] args)
         {
-            if (args != null && args.Any(a => a.Equals("-apply-power", StringComparison.OrdinalIgnoreCase) ||
-                                              a.Equals("--apply-power", StringComparison.OrdinalIgnoreCase) ||
-                                              a.Equals("/apply-power", StringComparison.OrdinalIgnoreCase)))
+            if (args != null && args.Any(a => {
+                if (string.IsNullOrWhiteSpace(a)) return false;
+                string clean = a.Trim().TrimStart('-', '/');
+                return clean.Equals("apply-power", StringComparison.OrdinalIgnoreCase);
+            }))
             {
                 ApplyPowerAtBootFast();
                 return;
@@ -134,21 +233,40 @@ namespace PredatorControlApp
 
             try
             {
-                ApplicationConfiguration.Initialize();
+                try
+            {
+                using var currentProc = Process.GetCurrentProcess();
+                currentProc.PriorityClass = ProcessPriorityClass.High;
+            }
+            catch { }
+
+            ApplicationConfiguration.Initialize();
                 SelfCheck.Run();
 
                 Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
-                Application.ThreadException += (s, e) => Report(e.Exception, false);
+                Application.ThreadException += (s, e) =>
+                {
+                    if (e.Exception != null && !IsBenignCancellation(e.Exception))
+                    {
+                        Report(e.Exception, false);
+                    }
+                };
 
                 AppDomain.CurrentDomain.UnhandledException += (s, e) =>
                 {
-                    if (e.ExceptionObject is Exception ex) Report(ex, true);
+                    if (e.ExceptionObject is Exception ex && !IsBenignCancellation(ex))
+                    {
+                        Report(ex, true);
+                    }
                 };
 
                 TaskScheduler.UnobservedTaskException += (s, e) =>
                 {
-                    if (e.Exception != null) Report(e.Exception, false);
                     e.SetObserved();
+                    if (e.Exception != null && !IsBenignCancellation(e.Exception))
+                    {
+                        Report(e.Exception, false);
+                    }
                 };
 
                 Form1 form;
@@ -387,7 +505,7 @@ namespace PredatorControlApp
             return false;
         }
 
-        internal static void ResolveFanSpeeds(bool onBattery, out byte cpu, out byte gpu)
+        internal static void ResolveFanSpeeds(bool onBattery, out byte cpu, out byte gpu, string subKeyPath = @"SOFTWARE\PredatorControl")
         {
             cpu = 50;
             gpu = 50;
@@ -411,7 +529,7 @@ namespace PredatorControlApp
             // 1. Try HKCU (user-specific preference)
             try
             {
-                using var hkcu = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\PredatorControl");
+                using var hkcu = Registry.CurrentUser.OpenSubKey(subKeyPath);
                 if (TryReadSpeedsFromKey(hkcu, ref cpu, ref gpu)) return;
             }
             catch { }
@@ -439,28 +557,43 @@ namespace PredatorControlApp
             catch { }
         }
 
-        internal static void TryApplyLcdOverdriveAtBoot(WmiController wmi)
+        internal static void TryApplyStartupPowerLimits(WmiController? wmi = null, byte? powerMode = null)
         {
             try
             {
-                int? od = null;
-                void ReadOd(RegistryKey? key)
+                var settings = AppSettings.Load();
+                var power = SystemInformation.PowerStatus;
+                bool isCharging = (power.BatteryChargeStatus & BatteryChargeStatus.Charging) != 0;
+                bool onBattery = power.PowerLineStatus != PowerLineStatus.Online && !isCharging;
+                byte modeByte = powerMode ?? ResolvePowerMode(onBattery);
+                var opMode = (OperatingMode)modeByte;
+
+                var (userPl1, userPl2) = settings.GetUserPowerLimitsForMode(opMode);
+                bool hasUserLimits = userPl1 > 0 && userPl2 > 0;
+                if (settings.EnableCustomPowerLimits || hasUserLimits)
                 {
-                    if (key != null && !od.HasValue && TryParseInt(key.GetValue("LcdOverdrive"), out int val))
-                        od = val;
-                }
-                try { using var hkcu = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\PredatorControl"); ReadOd(hkcu); } catch { }
-                if (!od.HasValue)
-                {
-                    try { using var hklm = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\PredatorControl"); ReadOd(hklm); } catch { }
-                }
-                if (od.HasValue)
-                {
-                    wmi.SetLcdOverdrive(od.Value == 1);
+                    var (pl1, pl2) = settings.GetEffectiveLimitsForMode(opMode);
+                    if (pl1 > 0 && pl2 > 0)
+                    {
+                        // 1. Ensure active profile ACPI power mode is set in WMI
+                        if (wmi != null)
+                        {
+                            try { wmi.TrySetPowerMode(modeByte, forceRetry: true); } catch { }
+                        }
+
+                        // 2. Apply active profile CPU power limits via PawnIO (initialize kernel handle if needed)
+                        var pawn = PawnIoController.Instance;
+                        if (pawn.IsAvailable || pawn.EnsureInitialized() == PowerLimitApplyStatus.Success)
+                        {
+                            pawn.ApplyPowerLimits(pl1, pl2);
+                        }
+                    }
                 }
             }
             catch { }
         }
+
+        internal static void TryApplyPowerLimitsAtBoot(byte powerMode) => TryApplyStartupPowerLimits(null, powerMode);
 
         internal static void ApplyPowerAtBootFast()
         {
@@ -486,7 +619,7 @@ namespace PredatorControlApp
                             ResolveFanSpeeds(onBattery, out byte cpu, out byte gpu);
                             wmi.SetFanSpeed(cpu, gpu);
                         }
-                        TryApplyLcdOverdriveAtBoot(wmi);
+                        TryApplyStartupPowerLimits(wmi, powerMode);
                         break;
                     }
                     Thread.Sleep(200);

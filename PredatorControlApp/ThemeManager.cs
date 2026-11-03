@@ -62,14 +62,45 @@ namespace PredatorControlApp
                     {
                         try
                         {
-                            if (Application.OpenForms.Count > 0 && Application.OpenForms[0] is Form f && f.IsHandleCreated)
+                            Form? mainForm = null;
+                            try
                             {
-                                f.BeginInvoke(new Action(() => ThemeChanged?.Invoke()));
+                                var forms = Application.OpenForms;
+                                for (int i = 0; i < forms.Count; i++)
+                                {
+                                    var f = forms[i];
+                                    if (f != null && !f.IsDisposed && f.IsHandleCreated)
+                                    {
+                                        mainForm = f;
+                                        break;
+                                    }
+                                }
+                            }
+                            catch { }
+
+                            if (mainForm != null && !mainForm.IsDisposed && !mainForm.Disposing && mainForm.IsHandleCreated)
+                            {
+                                try
+                                {
+                                    mainForm.BeginInvoke(new Action(() =>
+                                    {
+                                        try
+                                        {
+                                            if (!mainForm.IsDisposed && !mainForm.Disposing)
+                                                SafeInvokeThemeChanged(ThemeChanged);
+                                        }
+                                        catch { }
+                                    }));
+                                }
+                                catch { }
                                 return;
+                            }
+                            else
+                            {
+                                SafeInvokeThemeChanged(ThemeChanged);
                             }
                         }
                         catch { }
-                        ThemeChanged?.Invoke();
                     }
 
                 };
@@ -89,6 +120,21 @@ namespace PredatorControlApp
 
 
         public static event Action? ThemeChanged;
+
+        private static void SafeInvokeThemeChanged(Action? handler)
+        {
+            if (handler == null) return;
+            var list = handler.GetInvocationList();
+            foreach (var d in list)
+            {
+                try
+                {
+                    if (d is Action action)
+                        action();
+                }
+                catch { }
+            }
+        }
 
 
 
@@ -136,6 +182,8 @@ namespace PredatorControlApp
 
         // Modern High-Contrast Theme Palette (Dark & Light)
 
+        public static Color WindowBg => FormBg;
+        public static Color SubHeaderText => TextSecondary;
         public static Color FormBg => IsDarkThemeActive ? Color.FromArgb(0x12, 0x18, 0x2B) : Color.FromArgb(0xF4, 0xEF, 0xE6);
 
         public static Color SidebarBg => IsDarkThemeActive ? Color.FromArgb(0x1A, 0x21, 0x38) : Color.FromArgb(0xED, 0xE7, 0xDA);
@@ -186,6 +234,45 @@ namespace PredatorControlApp
 
         public static Color FocusRing => IsDarkThemeActive ? Color.FromArgb(0x00, 0xE5, 0xB8) : Color.FromArgb(0x00, 0x7A, 0x60);
 
+        public static Color RedStatus => IsDarkThemeActive ? Color.FromArgb(0xFF, 0x55, 0x55) : Color.FromArgb(0xD3, 0x2F, 0x2F);
+
+        public static Color YellowStatus => IsDarkThemeActive ? Color.FromArgb(0xFF, 0xCC, 0x00) : Color.FromArgb(0xF5, 0x7F, 0x17);
+
+        public static Color TealAccent => Accent;
+
+        public static Color SuccessGreen => IsDarkThemeActive ? Color.FromArgb(0x00, 0xE6, 0x8C) : Color.FromArgb(0x00, 0x8A, 0x4B);
+
+        /// <summary>
+        /// Gets the power mode indicator color for an OperatingMode.
+        /// </summary>
+        public static Color GetPowerModeColor(OperatingMode mode) => mode switch
+        {
+            OperatingMode.Quiet => GetPowerModeColor((byte)0x00),
+            OperatingMode.Balanced => GetPowerModeColor((byte)0x01),
+            OperatingMode.Performance => GetPowerModeColor((byte)0x04),
+            OperatingMode.Turbo => GetPowerModeColor((byte)0x05),
+            OperatingMode.Eco => GetPowerModeColor((byte)0x06),
+            _ => Accent
+        };
+
+        /// <summary>
+        /// Explicit power mode pill color helper mapping for OperatingMode.
+        /// </summary>
+        public static Color GetPowerModePillColor(OperatingMode mode) => GetPowerModeColor(mode);
+
+        /// <summary>
+        /// Returns the hex code string for the given power mode pill color for OperatingMode.
+        /// </summary>
+        public static string GetPowerModePillColorHex(OperatingMode mode) => mode switch
+        {
+            OperatingMode.Quiet => GetPowerModePillColorHex((byte)0x00),
+            OperatingMode.Balanced => GetPowerModePillColorHex((byte)0x01),
+            OperatingMode.Performance => GetPowerModePillColorHex((byte)0x04),
+            OperatingMode.Turbo => GetPowerModePillColorHex((byte)0x05),
+            OperatingMode.Eco => GetPowerModePillColorHex((byte)0x06),
+            _ => IsDarkThemeActive ? "#00E5B8" : "#007A60"
+        };
+
         /// <summary>
         /// Gets the power mode indicator color.
         /// Quiet (0x00): White (#FFFFFF)
@@ -195,6 +282,10 @@ namespace PredatorControlApp
         /// Eco (0x06): Green (#00FF78)
         /// Fallback: ThemeManager.Accent
         /// </summary>
+        public static Color GetPowerModeColor(int mode) => GetPowerModeColor((byte)mode);
+        public static Color GetPowerModePillColor(int mode) => GetPowerModePillColor((byte)mode);
+        public static string GetPowerModePillColorHex(int mode) => GetPowerModePillColorHex((byte)mode);
+
         public static Color GetPowerModeColor(byte mode) => mode switch
         {
             0x00 => Color.FromArgb(255, 255, 255),
@@ -345,36 +436,72 @@ namespace PredatorControlApp
                 catch { }
 
                 try
-
                 {
-
                     using var key = Registry.CurrentUser.CreateSubKey(@"SOFTWARE\PredatorControl");
-
                     key?.SetValue("AppTheme", (int)theme);
-
                     key?.SetValue("Theme", theme.ToString());
-
                 }
-
                 catch { }
 
                 handler = ThemeChanged;
-
             }
 
-            handler?.Invoke();
+            if (handler != null)
+            {
+                Form? main = null;
+                try
+                {
+                    var forms = Application.OpenForms;
+                    for (int i = 0; i < forms.Count; i++)
+                    {
+                        var f = forms[i];
+                        if (f != null && !f.IsDisposed && !f.Disposing && f.IsHandleCreated)
+                        {
+                            main = f;
+                            break;
+                        }
+                    }
+                }
+                catch { }
 
+                if (main != null && !main.IsDisposed && !main.Disposing && main.IsHandleCreated && main.InvokeRequired)
+                {
+                    try
+                    {
+                        main.BeginInvoke(new Action(() =>
+                        {
+                            try
+                            {
+                                if (!main.IsDisposed && !main.Disposing)
+                                    SafeInvokeThemeChanged(handler);
+                            }
+                            catch { }
+                        }));
+                    }
+                    catch { }
+                }
+                else
+                {
+                    SafeInvokeThemeChanged(handler);
+                }
+            }
         }
 
 
+
+        public static void ApplyTheme(AppTheme theme) => SetTheme(theme);
 
         public static void ApplyTheme(Form form)
 
         {
 
-            if (form.IsDisposed) return;
+            if (form.IsDisposed || form.Disposing) return;
 
-
+            if (form.IsHandleCreated && form.InvokeRequired)
+            {
+                try { form.BeginInvoke(new Action(() => ApplyTheme(form))); } catch { }
+                return;
+            }
 
             bool suspended = false;
 
@@ -404,7 +531,7 @@ namespace PredatorControlApp
 
             {
 
-                if (suspended)
+                if (suspended && !form.IsDisposed && form.IsHandleCreated)
 
                 {
 
@@ -414,7 +541,7 @@ namespace PredatorControlApp
 
                 }
 
-                else
+                else if (!form.IsDisposed)
 
                 {
 
@@ -431,10 +558,23 @@ namespace PredatorControlApp
         public static void ApplyToControls(Control.ControlCollection controls)
 
         {
+            if (controls == null || controls.Count == 0) return;
+            Control[] snapshot;
+            try
+            {
+                snapshot = new Control[controls.Count];
+                controls.CopyTo(snapshot, 0);
+            }
+            catch
+            {
+                return;
+            }
 
-            foreach (Control c in controls)
+            foreach (Control c in snapshot)
 
             {
+
+                if (c == null || c.IsDisposed || c.Disposing) continue;
 
                 if (c is Panel pnl)
 

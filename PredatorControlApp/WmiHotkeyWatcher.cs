@@ -142,7 +142,7 @@ namespace PredatorControlApp
                     {
                         Interlocked.Exchange(ref _isRestarting, 0);
                     }
-                });
+                }, System.Threading.Tasks.TaskContinuationOptions.ExecuteSynchronously);
             }
         }
 
@@ -215,29 +215,46 @@ namespace PredatorControlApp
                         var fwEvent = FirmwareEvent.Decode(bytes);
                         if (fwEvent != null)
                         {
-                            if (fwEvent.Kind == FirmwareEventKind.ModeKey || fwEvent.Value == 7 || fwEvent.Value == 0x82 || fwEvent.Value == 0x86 || fwEvent.Value == 0x87 ||
-                                bytes[0] == 7 || bytes[0] == 0x82 || bytes[0] == 0x86 || bytes[0] == 0x87)
+                            // Mode switch event:
+                            // Dedicated Acer physical Mode button events:
+                            // 1. Explicit ModeKey packet with multi-byte payload (e.g. [7, 1], where byte[1] != 0 and byte[1] != 7).
+                            // 2. Dedicated Acer Turbo/Mode hardware buttons: 0x82, 0x86, 0x87.
+                            // Crucial: Standard hotkeys such as Fn+F7 (single byte 7, or [1, 7], or [7, 0])
+                            // MUST NOT be treated as ModeKey and MUST NOT trigger mode cycling!
+                            bool isDedicatedModeKey =
+                                (fwEvent.Kind == FirmwareEventKind.ModeKey && bytes.Length >= 2 && bytes[1] != 0 && bytes[1] != 7) ||
+                                (fwEvent.Kind == FirmwareEventKind.Hotkey && (fwEvent.Value == 0x82 || fwEvent.Value == 0x86 || fwEvent.Value == 0x87)) ||
+                                (bytes[0] == 0x82 || bytes[0] == 0x86 || bytes[0] == 0x87) ||
+                                (bytes.Length > 1 && (bytes[1] == 0x82 || bytes[1] == 0x86 || bytes[1] == 0x87));
+
+                            if (isDedicatedModeKey)
                             {
                                 FireModeKeyPressed();
                             }
                             else if (fwEvent.Kind == FirmwareEventKind.Hotkey)
                             {
-                                if (fwEvent.Value == 7 || fwEvent.Value == 0x82 || fwEvent.Value == 0x86 || fwEvent.Value == 0x87)
-                                    FireModeKeyPressed();
-                                else
-                                {
-                                    try { _onHotkeyEvent(fwEvent.Value); } catch { }
-                                }
+                                try { _onHotkeyEvent(fwEvent.Value); } catch { }
                             }
                             else
                             {
-                                try { _onHotkeyEvent(bytes[0]); } catch { }
+                                try { _onHotkeyEvent(fwEvent.Value != 0 ? fwEvent.Value : bytes[0]); } catch { }
                             }
                         }
                         else if (bytes.Length > 0)
                         {
-                            if (bytes[0] == 7 || bytes[0] == 0x82 || bytes[0] == 0x86 || bytes[0] == 0x87 ||
-                                (bytes.Length > 1 && (bytes[1] == 7 || bytes[1] == 0x82 || bytes[1] == 0x86 || bytes[1] == 0x87)))
+                            // Raw byte buffer fallback:
+                            // Only trigger mode key for dedicated Acer Mode button IDs (0x82, 0x86, 0x87)
+                            // or multi-byte mode packet where byte[0] == 7 and byte[1] != 0 and byte[1] != 7.
+                            // Single-byte 7 or [7, 0] is Fn+F7 (touchpad toggle) and must never trigger mode cycling!
+                            if (bytes[0] == 0x82 || bytes[0] == 0x86 || bytes[0] == 0x87)
+                            {
+                                FireModeKeyPressed();
+                            }
+                            else if (bytes.Length > 1 && (bytes[1] == 0x82 || bytes[1] == 0x86 || bytes[1] == 0x87))
+                            {
+                                FireModeKeyPressed();
+                            }
+                            else if (bytes.Length >= 2 && bytes[0] == (byte)FirmwareEventKind.ModeKey && bytes[1] != 0 && bytes[1] != 7)
                             {
                                 FireModeKeyPressed();
                             }
@@ -250,7 +267,9 @@ namespace PredatorControlApp
                     else
                     {
                         int eventDetail = Convert.ToInt32(detailProp.Value);
-                        if (eventDetail == 7 || eventDetail == 0x82 || eventDetail == 0x86 || eventDetail == 0x87)
+                        // Only dedicated Acer Turbo/Mode button codes 0x82, 0x86, 0x87 trigger mode key.
+                        // Event detail 7 (Fn+F7) or 5 (PredatorSense) are dispatched to hotkey event handler.
+                        if (eventDetail == 0x82 || eventDetail == 0x86 || eventDetail == 0x87)
                         {
                             FireModeKeyPressed();
                         }

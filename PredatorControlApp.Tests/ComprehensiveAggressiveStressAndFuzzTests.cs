@@ -559,7 +559,7 @@ namespace PredatorControlApp.Tests
             Assert.Equal(0, settings.FanSpeedSysBattery);
 
             Assert.Equal(0, settings.RefreshRate);
-            Assert.Equal(10, settings.RgbMode);
+            Assert.Equal(33, settings.RgbMode);
             Assert.Equal(0, settings.RgbBrightness);
             Assert.Equal(100, settings.RgbSpeed);
             Assert.Equal(0, settings.RgbR);

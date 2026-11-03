@@ -12,6 +12,7 @@ using Xunit;
 
 namespace PredatorControlApp.Tests
 {
+    [Collection("NoParallel")]
     public class UltraChaosAndStressTests
     {
         #region 1. AppSettings Concurrency & Chaos Fuzzing

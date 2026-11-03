@@ -9,6 +9,7 @@ using Xunit;
 
 namespace PredatorControlApp.Tests
 {
+    [Collection("NoParallel")]
     public class SecurityAuditTests : IDisposable
     {
         private readonly string _tempDir;
@@ -270,7 +271,7 @@ namespace PredatorControlApp.Tests
 
             object hookStruct = Activator.CreateInstance(structType)!;
             structType.GetField("scanCode")!.SetValue(hookStruct, (uint)0x76); // SC_MODE
-            structType.GetField("vkCode")!.SetValue(hookStruct, (uint)0x76);
+            structType.GetField("vkCode")!.SetValue(hookStruct, (uint)0x00); // Dedicated hardware mode key has vkCode 0x00 (not VK_F7 0x76)
             structType.GetField("flags")!.SetValue(hookStruct, (uint)0x10); // LLKHF_INJECTED
 
             IntPtr pStruct = Marshal.AllocHGlobal(Marshal.SizeOf(hookStruct));

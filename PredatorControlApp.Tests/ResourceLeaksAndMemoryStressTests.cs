@@ -7,6 +7,7 @@ using PredatorControlApp;
 
 namespace PredatorControlApp.Tests
 {
+    [Collection("NoParallel")]
     public class ResourceLeaksAndMemoryStressTests
     {
         [Fact]

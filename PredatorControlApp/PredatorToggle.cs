@@ -28,11 +28,23 @@ namespace PredatorControlApp
             get => _checked;
             set
             {
+                if (IsHandleCreated && InvokeRequired)
+                {
+                    try { BeginInvoke(new Action(() => { if (!IsDisposed && !Disposing) Checked = value; })); } catch { }
+                    return;
+                }
                 if (_checked != value)
                 {
                     _checked = value;
                     _targetProgress = value ? 1f : 0f;
-                    _animTimer.Start();
+                    if (!IsHandleCreated)
+                    {
+                        _knobProgress = _targetProgress;
+                    }
+                    else
+                    {
+                        _animTimer.Start();
+                    }
                     CheckedChanged?.Invoke(this, EventArgs.Empty);
                 }
             }
@@ -42,7 +54,14 @@ namespace PredatorControlApp
 
         public PredatorToggle()
         {
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.UserPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.Selectable, true);
+
             this.DoubleBuffered = true;
+            this.TabStop = true;
             this.Size = new Size(48, 24);
             this.Cursor = Cursors.Hand;
 
@@ -54,9 +73,16 @@ namespace PredatorControlApp
 
             _themeHandler = () =>
             {
-                if (!IsDisposed && IsHandleCreated)
+                if (!IsDisposed && !Disposing && IsHandleCreated)
                 {
-                    try { Invalidate(); } catch { }
+                    try
+                    {
+                        if (InvokeRequired)
+                            BeginInvoke(new Action(() => { if (!IsDisposed && !Disposing) Invalidate(); }));
+                        else
+                            Invalidate();
+                    }
+                    catch { }
                 }
             };
             ThemeManager.ThemeChanged += _themeHandler;
@@ -64,18 +90,25 @@ namespace PredatorControlApp
 
         private void OnAnimTick(object? sender, EventArgs e)
         {
+            if (IsDisposed || Disposing || !IsHandleCreated)
+            {
+                try { _animTimer.Stop(); } catch { }
+                return;
+            }
+            if (float.IsNaN(_knobProgress) || float.IsInfinity(_knobProgress))
+                _knobProgress = _targetProgress;
             float diff = _targetProgress - _knobProgress;
-            if (MathF.Abs(diff) < 0.005f)
+            if (float.IsNaN(diff) || float.IsInfinity(diff) || MathF.Abs(diff) < 0.005f)
             {
                 _knobProgress = _targetProgress;
-                _animTimer.Stop();
+                try { _animTimer.Stop(); } catch { }
             }
             else
             {
                 _knobProgress += diff * AnimSpeed;
-                _knobProgress = Math.Clamp(_knobProgress, 0f, 1f);
+                _knobProgress = (float.IsNaN(_knobProgress) || float.IsInfinity(_knobProgress)) ? _targetProgress : Math.Clamp(_knobProgress, 0f, 1f);
             }
-            Invalidate();
+            try { Invalidate(); } catch { }
         }
 
         protected override void OnMouseEnter(EventArgs e) { _isHovered = true; Invalidate(); base.OnMouseEnter(e); }
@@ -90,21 +123,27 @@ namespace PredatorControlApp
 
         private static Color LerpColor(Color a, Color b, float t)
         {
+            if (float.IsNaN(t) || float.IsInfinity(t)) t = 0f;
             t = Math.Clamp(t, 0f, 1f);
-            return Color.FromArgb(
-                (int)(a.R + (b.R - a.R) * t),
-                (int)(a.G + (b.G - a.G) * t),
-                (int)(a.B + (b.B - a.B) * t));
+            int r = Math.Clamp((int)Math.Round(a.R + (b.R - a.R) * t), 0, 255);
+            int g = Math.Clamp((int)Math.Round(a.G + (b.G - a.G) * t), 0, 255);
+            int blue = Math.Clamp((int)Math.Round(a.B + (b.B - a.B) * t), 0, 255);
+            return Color.FromArgb(r, g, blue);
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            if (Width <= 3 || Height <= 3) return;
+            if (Width <= 8 || Height <= 8) return;
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.Clear(Parent?.BackColor ?? ThemeManager.CardBg);
+            Color parentBg = ThemeManager.CardBg;
+            try { parentBg = Parent?.BackColor ?? ThemeManager.CardBg; } catch { }
+            if (parentBg.A < 255) parentBg = ThemeManager.CardBg;
+            g.Clear(parentBg);
 
             float t = _knobProgress;
+            if (float.IsNaN(t) || float.IsInfinity(t)) t = _targetProgress;
+            t = Math.Clamp(t, 0f, 1f);
 
             Color trackOff = ThemeManager.ControlBg;
             Color trackOn = ThemeManager.ControlActive;
@@ -129,11 +168,13 @@ namespace PredatorControlApp
                 g.DrawPath(pen, path);
             }
 
-            int knobSize = Height - 6;
-            float knobMinX = 3f;
-            float knobMaxX = Width - knobSize - 3f;
+            float dpi = DeviceDpi > 0 ? DeviceDpi / 96f : 1f;
+            float knobPad = Math.Max(2f, (float)Math.Round(3f * dpi));
+            float knobSize = Math.Max(1f, Height - knobPad * 2f);
+            float knobMinX = knobPad;
+            float knobMaxX = Math.Max(knobMinX, Width - knobSize - knobPad);
             float knobX = knobMinX + (knobMaxX - knobMinX) * t;
-            int knobY = 3;
+            float knobY = knobPad;
 
             using (var knobBrush = new SolidBrush(knobColor))
                 g.FillEllipse(knobBrush, knobX, knobY, knobSize, knobSize);
@@ -144,19 +185,50 @@ namespace PredatorControlApp
 
             if (t > 0.5f)
             {
-                int alpha = (int)((t - 0.5f) * 2f * 255f);
-                using var pen = new Pen(Color.FromArgb(Math.Clamp(alpha, 0, 255), 255, 255, 255), 1.8f);
+                int alpha = Math.Clamp((int)Math.Round((t - 0.5f) * 2f * 255f), 0, 255);
+                using var pen = new Pen(Color.FromArgb(alpha, 255, 255, 255), 1.8f);
                 g.DrawLine(pen, cx, cy - iconR, cx, cy + iconR);
             }
             else
             {
-                int alpha = (int)((0.5f - t) * 2f * 200f);
+                int alpha = Math.Clamp((int)Math.Round((0.5f - t) * 2f * 200f), 0, 255);
                 Color iconOffColor = ThemeManager.IsDarkThemeActive
-                    ? Color.FromArgb(Math.Clamp(alpha, 0, 255), 200, 200, 200)
-                    : Color.FromArgb(Math.Clamp(alpha, 0, 255), 70, 75, 90);
+                    ? Color.FromArgb(alpha, 200, 200, 200)
+                    : Color.FromArgb(alpha, 70, 75, 90);
                 using var pen = new Pen(iconOffColor, 1.5f);
-                g.DrawEllipse(pen, cx - iconR, cy - iconR, iconR * 2, iconR * 2);
+                float iconD = Math.Max(1f, iconR * 2);
+                g.DrawEllipse(pen, cx - iconD / 2f, cy - iconD / 2f, iconD, iconD);
             }
+
+            if (Focused && ShowFocusCues && Width > 4 && Height > 4)
+            {
+                using var focusPen = new Pen(ThemeManager.FocusRing, 1f) { DashStyle = DashStyle.Dot };
+                g.DrawRectangle(focusPen, 0, 0, Width - 1, Height - 1);
+            }
+
+            base.OnPaint(e);
+        }
+
+        protected override void OnGotFocus(EventArgs e)
+        {
+            Invalidate();
+            base.OnGotFocus(e);
+        }
+
+        protected override void OnLostFocus(EventArgs e)
+        {
+            Invalidate();
+            base.OnLostFocus(e);
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if (Enabled && (e.KeyCode == Keys.Space || e.KeyCode == Keys.Enter))
+            {
+                Checked = !Checked;
+                e.Handled = true;
+            }
+            base.OnKeyDown(e);
         }
 
         private static GraphicsPath GetRoundedRectPath(Rectangle rect, int radius)
@@ -165,6 +237,11 @@ namespace PredatorControlApp
             if (rect.Width <= 0 || rect.Height <= 0)
             {
                 path.AddRectangle(new Rectangle(rect.X, rect.Y, Math.Max(1, rect.Width), Math.Max(1, rect.Height)));
+                return path;
+            }
+            if (rect.Width < 6 || rect.Height < 6)
+            {
+                path.AddRectangle(rect);
                 return path;
             }
             int maxRadius = Math.Max(1, Math.Min(rect.Width, rect.Height) / 2);

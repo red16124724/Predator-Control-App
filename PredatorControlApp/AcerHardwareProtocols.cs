@@ -11,6 +11,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security.Principal;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using Microsoft.Win32;
 using Microsoft.Win32.SafeHandles;
@@ -55,7 +56,9 @@ namespace PredatorControlApp
         CustomBootLogo = 8,
         GpuModeSupport = 9,
         SupportedOperatingModes = 10,
-        OperatingMode = 11
+        OperatingMode = 11,
+        LCD_OVERDRIVE = 0x0F,
+        LcdOverdrive = 0x0F
     }
 
     public enum GpuMode : byte
@@ -99,7 +102,8 @@ namespace PredatorControlApp
     public enum FanLock
     {
         QuietMode,
-        EcoMode
+        EcoMode,
+        TurboMode
     }
 
     public enum FanId
@@ -161,11 +165,12 @@ namespace PredatorControlApp
         public static FirmwareEvent? Decode(byte[]? detail)
         {
             if (detail == null || detail.Length == 0) return null;
+            FirmwareEventKind kind = (FirmwareEventKind)detail[0];
             byte val = (byte)(detail.Length > 1 ? detail[1] : 0);
-            return new FirmwareEvent((FirmwareEventKind)detail[0], val, detail.ToArray());
+            return new FirmwareEvent(kind, val, detail.ToArray());
         }
 
-        public override string ToString() => $"{Kind} Value={Value} Data={Convert.ToHexString(Detail)}";
+        public override string ToString() => $"{Kind} Value={Value} Data={(Detail != null ? Convert.ToHexString(Detail) : string.Empty)}";
     }
 
     public readonly record struct EcHidVersion(byte Major, byte Minor)
@@ -215,6 +220,11 @@ namespace PredatorControlApp
 
         public static bool TryWmiModeToEcMode(byte wmiMode, out byte ecMode, int modeCount = 5)
         {
+            if (NativeAcerProtocol.TryEncode(16, wmiMode, NativeAcerProtocol.Signed(modeCount), 0, 0, out ulong native))
+            {
+                ecMode = (byte)native;
+                return (native & 0x100) != 0;
+            }
             switch (wmiMode)
             {
                 case 0x05:
@@ -246,12 +256,11 @@ namespace PredatorControlApp
 
         public static bool TryEcModeToWmiMode(byte ecMode, out byte wmiMode, int modeCount = 5)
         {
-            if (ecMode >= modeCount)
+            if (NativeAcerProtocol.TryEncode(17, ecMode, NativeAcerProtocol.Signed(modeCount), 0, 0, out ulong native))
             {
-                wmiMode = 0x01; // Balanced fallback
-                return false;
+                wmiMode = (byte)native;
+                return (native & 0x100) != 0;
             }
-
             switch (ecMode)
             {
                 case 0:
@@ -284,15 +293,15 @@ namespace PredatorControlApp
         public static readonly int[] UsbChargingFloors = { 10, 20, 30 };
         private static readonly string[] FanTableModels = { "AN515-46", "AN515-47", "AN515-58", "AN517-42", "AN517-43", "AN517-55" };
 
-        public static byte Status(ulong output) => (byte)(output & 0xFF);
+        public static byte Status(ulong output) => NativeAcerProtocol.TryEncode(15, output, 0, 0, 0, out ulong native) ? (byte)native : (byte)(output & 0xFF);
         public static bool IsOk(ulong output) => Status(output) == 0;
 
-        public static uint SensorReadInput(SensorId id) => 1u | ((uint)id << 8);
-        public static int SensorValue(ulong output) => (int)((output >> 8) & 0xFFFF);
+        public static uint SensorReadInput(SensorId id) => NativeAcerProtocol.TryEncode(0, (byte)id, 0, 0, 0, out ulong native) ? (uint)native : 1u | ((uint)id << 8);
+        public static int SensorValue(ulong output) => NativeAcerProtocol.TryEncode(1, output, 0, 0, 0, out ulong native) ? (int)native : (int)((output >> 8) & 0xFFFF);
 
         public static IReadOnlyList<SensorId> DecodeSensorMask(ulong output)
         {
-            ulong mask = output >> 24;
+            ulong mask = NativeAcerProtocol.TryEncode(21, output, 0, 0, 0, out ulong native) ? native : output >> 24;
             var list = new List<SensorId>();
             foreach (SensorId id in Enum.GetValues<SensorId>())
             {
@@ -305,32 +314,46 @@ namespace PredatorControlApp
 
         public static ulong FanBehaviorInput(IEnumerable<(FanChannel Fan, FanBehavior Behavior)> settings)
         {
+            if (settings == null) return 0UL;
             ulong mask = 0UL;
             ulong val = 0UL;
             foreach (var s in settings)
             {
-                int bit = s.Fan.GroupBit ?? 0;
+                if (s.Fan == null || !s.Fan.GroupBit.HasValue) continue;
+                int bit = s.Fan.GroupBit.Value;
+                if (bit < 0 || bit >= 24) continue;
+                if (NativeAcerProtocol.TryEncode(18, (ulong)bit, (ulong)s.Behavior, 0, 0, out ulong native))
+                {
+                    val |= native;
+                    continue;
+                }
                 mask |= 1UL << bit;
-                val |= (ulong)s.Behavior << (16 + 2 * bit);
+                val |= ((ulong)s.Behavior & 0x03UL) << (16 + 2 * bit);
             }
             return mask | val;
         }
 
         public static ulong FanSpeedInput(FanChannel fan, int percent)
         {
-            byte speedId = fan.SpeedId ?? 1;
+            if (fan == null) throw new ArgumentNullException(nameof(fan));
+            if (!fan.SpeedId.HasValue)
+                throw new ArgumentException($"Fan channel '{fan.Name}' has no hardware SpeedId.", nameof(fan));
+            byte speedId = fan.SpeedId.Value;
+            if (NativeAcerProtocol.TryEncode(2, speedId, NativeAcerProtocol.Signed(percent), 0, 0, out ulong native)) return native;
             return (ulong)(speedId | ((long)Math.Clamp(percent, 0, 100) << 8));
         }
 
         public static int NearestFanSpeed(int percent)
         {
+            if (NativeAcerProtocol.TryEncode(3, NativeAcerProtocol.Signed(percent), 0, 0, 0, out ulong native)) return (int)native;
             return (int)Math.Round(Math.Clamp(percent, 0, 100) / 10.0, MidpointRounding.AwayFromZero) * 10;
         }
 
-        public static ulong FanTableInput(FanTable table) => (ulong)table;
+        public static ulong FanTableInput(FanTable table) => NativeAcerProtocol.TryEncode(27, (byte)table, 0, 0, 0, out ulong native) ? native : (ulong)table;
 
         public static FanTable? FanTableValue(ulong output)
         {
+            if (NativeAcerProtocol.TryEncode(19, output, 0, 0, 0, out ulong native)) return native == 0 ? null : (FanTable)native;
             byte val = (byte)(output >> 8);
             return Enum.IsDefined(typeof(FanTable), val) ? (FanTable)val : null;
         }
@@ -341,47 +364,93 @@ namespace PredatorControlApp
             return FanTableModels.Any(m => model.Contains(m, StringComparison.OrdinalIgnoreCase));
         }
 
-        public static ulong CoolBoostSetInput(bool on) => 7UL | ((ulong)(on ? 1 : 0) << 16);
-        public static bool CoolBoostValue(ulong output) => ((output >> 8) & 0xFF) == 1;
+        public static ulong CoolBoostSetInput(bool on) => NativeAcerProtocol.TryEncode(4, on ? 1UL : 0, 0, 0, 0, out ulong native) ? native : 7UL | ((ulong)(on ? 1 : 0) << 16);
+        public static bool CoolBoostValue(ulong output) => NativeAcerProtocol.TryEncode(5, output, 0, 0, 0, out ulong native) ? native != 0 : ((output >> 8) & 0xFF) == 1;
 
         public static ulong UsbChargingInput(bool on, int floor)
         {
+            if (NativeAcerProtocol.TryEncode(6, on ? 1UL : 0, NativeAcerProtocol.Signed(floor), 0, 0, out ulong native)) return native;
             byte flag = (byte)(on ? 15 : 31);
             return 4UL | ((ulong)flag << 8) | ((ulong)floor << 16);
         }
 
         public static UsbChargingState UsbChargingValue(ulong output)
         {
+            if (UsbChargingFloors[0] == 10 && UsbChargingFloors[1] == 20 && UsbChargingFloors[2] == 30 &&
+                NativeAcerProtocol.TryEncode(20, output, 0, 0, 0, out ulong native))
+            {
+                int nativeFloor = (int)(native >> 8);
+                return new UsbChargingState((native & 1) != 0, nativeFloor == 0 ? null : nativeFloor);
+            }
             bool enabled = ((output >> 8) & 0xFF) == 15;
             int floor = (int)((output >> 16) & 0xFF);
             return new UsbChargingState(enabled, UsbChargingFloors.Contains(floor) ? floor : null);
         }
 
-        public static uint MiscGetInput(MiscSetting setting) => (uint)setting;
-        public static ulong MiscSetInput(MiscSetting setting, byte value) => (ulong)setting | ((ulong)value << 8);
-        public static byte MiscValue(ulong output) => (byte)((output >> 8) & 0xFF);
+        public static uint MiscGetInput(MiscSetting setting) => NativeAcerProtocol.TryEncode(28, (byte)setting, 0, 0, 0, out ulong native) ? (uint)native : (uint)setting;
+        public static ulong MiscSetInput(MiscSetting setting, byte value) => NativeAcerProtocol.TryEncode(7, (ulong)setting, value, 0, 0, out ulong native) ? native : (ulong)setting | ((ulong)value << 8);
+        public static ulong LcdOverdriveProfileInput(bool enable) => NativeAcerProtocol.TryEncode(24, enable ? 1UL : 0, 0, 0, 0, out ulong native) ? native : enable ? 0x1000000000010UL : 0x10UL;
+        public static ulong LcdOverdriveProfileSettingInput(bool enable) => NativeAcerProtocol.TryEncode(25, enable ? 1UL : 0, 0, 0, 0, out ulong native) ? native : enable ? (0x10UL | (1UL << 8)) : 0x10UL;
+        public static ulong LcdOverdriveMiscSettingInput(bool enable, byte settingId = 0x0F) => NativeAcerProtocol.TryEncode(26, enable ? 1UL : 0, settingId, 0, 0, out ulong native) ? native : (ulong)settingId | ((ulong)(enable ? 1 : 0) << 8);
+        public static byte MiscValue(ulong output) => NativeAcerProtocol.TryEncode(23, output, 0, 0, 0, out ulong native) ? (byte)native : (byte)((output >> 8) & 0xFF);
 
         public static IReadOnlyList<OperatingMode> DecodeOperatingModeMask(ulong output)
         {
-            ulong mask = (output >> 8) & 0xFFFF;
+            ulong mask = NativeAcerProtocol.TryEncode(22, output, 0, 0, 0, out ulong native) ? native : (output >> 8) & 0xFFFF;
             var list = new List<OperatingMode>();
             foreach (OperatingMode m in Enum.GetValues<OperatingMode>())
             {
-                if ((mask & (1UL << (int)m)) != 0)
+                int bit = (int)m;
+                if (bit >= 0 && bit < 64 && (mask & (1UL << bit)) != 0)
                     list.Add(m);
             }
             return list;
         }
 
-        public static uint BacklightTimeoutQuery(byte hotkey) => 1u | ((uint)hotkey << 8) | 0x80000u;
-        public static ulong BacklightTimeoutInput(byte hotkey, int brightnessPercent, int timeoutSeconds)
+        public const uint GamingSysInfoConfigQuery = 0x0004u;
+        public const ulong GamingSysInfoWinKeyBit = 0x01UL << 8;
+        public const ulong GamingSysInfoUsbChargeBit = 0x04UL << 8;
+        public const ulong GamingSysInfoLcdOverdriveBit = 0x0FUL << 8;
+
+        /// <summary>
+        /// Strict Read-Modify-Write helper for system config bits to preserve upper status bytes
+        /// containing volatile Fn/Media Key mode bits so they are never zeroed.
+        /// </summary>
+        public static ulong ApplySystemConfigBitPreservingUpperBytes(ulong currentSysInfo, ulong featureBitMask, bool enable)
         {
+            if (NativeAcerProtocol.TryEncode(8, currentSysInfo, featureBitMask, enable ? 1UL : 0, 0, out ulong native)) return native;
+            ulong baseVal = currentSysInfo & ~featureBitMask;
+            return enable ? (baseVal | featureBitMask) : baseVal;
+        }
+
+        public static ulong UsbChargingInputWithPreservedState(bool on, int floor, ulong currentSysInfo = 0)
+        {
+            if (NativeAcerProtocol.TryEncode(9, on ? 1UL : 0, NativeAcerProtocol.Signed(floor), currentSysInfo, 0, out ulong native)) return native;
+            byte flag = (byte)(on ? 15 : 31);
+            ulong basePayload = 4UL | ((ulong)flag << 8) | ((ulong)floor << 16);
+            ulong preservedUpper = currentSysInfo & 0xFFFFFFFFFF000000UL;
+            return basePayload | preservedUpper;
+        }
+
+        public static ulong LcdOverdriveInputWithPreservedState(bool enable, ulong currentSysInfo = 0)
+        {
+            if (NativeAcerProtocol.TryEncode(10, enable ? 1UL : 0, currentSysInfo, 0, 0, out ulong native)) return native;
+            ulong basePayload = (ulong)MiscSetting.LcdOverdrive | ((ulong)(enable ? 1 : 0) << 8);
+            ulong preservedUpper = currentSysInfo & 0xFFFFFFFFFFFF0000UL;
+            return basePayload | preservedUpper;
+        }
+
+        public static uint BacklightTimeoutQuery(byte hotkey) => NativeAcerProtocol.TryEncode(11, hotkey, 0, 0, 0, out ulong native) ? (uint)native : 1u | ((uint)hotkey << 8) | 0x80000u;
+        public static ulong BacklightTimeoutInput(byte hotkey, int brightnessPercent, int timeoutSeconds, ulong preservedUpperFlags = 0x80000UL)
+        {
+            if (NativeAcerProtocol.TryEncode(12, hotkey, NativeAcerProtocol.Signed(brightnessPercent), NativeAcerProtocol.Signed(timeoutSeconds), preservedUpperFlags, out ulong native)) return native;
             byte b = (byte)Math.Clamp(brightnessPercent, 0, 100);
             byte t = (byte)Math.Clamp(timeoutSeconds, 0, 255);
-            return 2UL | ((ulong)hotkey << 8) | 0x80000UL | ((ulong)b << 32) | ((ulong)t << 40);
+            ulong flags = (preservedUpperFlags & 0xFFFF0000UL) | 0x80000UL;
+            return 2UL | ((ulong)hotkey << 8) | flags | ((ulong)b << 32) | ((ulong)t << 40);
         }
-        public static int BacklightBrightnessValue(ulong output) => (int)((output >> 32) & 0xFF);
-        public static int BacklightTimeoutValue(ulong output) => (int)((output >> 40) & 0xFF);
+        public static int BacklightBrightnessValue(ulong output) => NativeAcerProtocol.TryEncode(13, output, 0, 0, 0, out ulong native) ? (int)native : (int)((output >> 32) & 0xFF);
+        public static int BacklightTimeoutValue(ulong output) => NativeAcerProtocol.TryEncode(14, output, 0, 0, 0, out ulong native) ? (int)native : (int)((output >> 40) & 0xFF);
     }
 
     #endregion
@@ -408,6 +477,9 @@ namespace PredatorControlApp
         public static BatteryHealthStatus? DecodeStatus(ulong functionList, byte[]? statusBytes)
         {
             if (statusBytes == null) return null;
+            ulong status = (statusBytes.Length > 0 ? (ulong)statusBytes[0] : 0) | (statusBytes.Length > 1 ? (ulong)statusBytes[1] << 8 : 0);
+            if (NativeAcerProtocol.TryEncode(29, functionList, status, 0, 0, out ulong native))
+                return new BatteryHealthStatus((native & 1) != 0, (native & 2) != 0, (native & 4) != 0, (native & 8) != 0);
             bool healthSupported = (functionList & (ulong)BatteryFunction.HealthMode) != 0;
             bool calSupported = (functionList & (ulong)BatteryFunction.Calibration) != 0;
 
@@ -586,7 +658,7 @@ namespace PredatorControlApp
             var paths = new List<string>();
             Guid guid = GUID_DEVICE_BATTERY;
             IntPtr hDevInfo = SetupDiGetClassDevs(ref guid, IntPtr.Zero, IntPtr.Zero, 0x12); // DIGCF_PRESENT | DIGCF_DEVICEINTERFACE
-            if (hDevInfo == (IntPtr)(-1)) return paths;
+            if (hDevInfo == (IntPtr)(-1) || hDevInfo == IntPtr.Zero) return paths;
 
             try
             {
@@ -595,12 +667,13 @@ namespace PredatorControlApp
                 while (SetupDiEnumDeviceInterfaces(hDevInfo, IntPtr.Zero, ref guid, index++, ref did))
                 {
                     SetupDiGetDeviceInterfaceDetail(hDevInfo, ref did, IntPtr.Zero, 0, out uint requiredSize, IntPtr.Zero);
-                    if (requiredSize <= 4) continue;
+                    int minDetailSize = IntPtr.Size == 8 ? 8 : 6;
+                    if (requiredSize < (uint)minDetailSize) continue;
 
                     IntPtr pDetail = Marshal.AllocHGlobal((int)requiredSize);
                     try
                     {
-                        Marshal.WriteInt32(pDetail, IntPtr.Size == 8 ? 8 : 6); // cbSize
+                        Marshal.WriteInt32(pDetail, minDetailSize); // cbSize
                         if (SetupDiGetDeviceInterfaceDetail(hDevInfo, ref did, pDetail, requiredSize, out _, IntPtr.Zero))
                         {
                             IntPtr pPath = (IntPtr)((long)pDetail + 4);
@@ -651,24 +724,33 @@ namespace PredatorControlApp
             {
                 uint rsmb = 0x52534D42; // 'RSMB'
                 uint size = GetSystemFirmwareTable(rsmb, 0, IntPtr.Zero, 0);
-                if (size < 8) return Empty;
+                if (size < 8 || size > 16 * 1024 * 1024) return Empty;
 
                 byte[] buf = new byte[size];
                 GCHandle pin = GCHandle.Alloc(buf, GCHandleType.Pinned);
+                uint bytesRead = 0;
                 try
                 {
-                    if (GetSystemFirmwareTable(rsmb, 0, pin.AddrOfPinnedObject(), size) != size)
+                    bytesRead = GetSystemFirmwareTable(rsmb, 0, pin.AddrOfPinnedObject(), size);
+                    if (bytesRead < 8 || bytesRead > size)
                         return Empty;
                 }
                 finally { pin.Free(); }
 
-                int len = (int)Math.Min(BinaryPrimitives.ReadUInt32LittleEndian(buf.AsSpan(4)), (uint)(buf.Length - 8));
+                uint declaredLen = BinaryPrimitives.ReadUInt32LittleEndian(buf.AsSpan(4));
+                int len = (int)Math.Min((long)declaredLen, (long)(bytesRead - 8));
+                if (len <= 0) return Empty;
                 return Parse(buf.AsSpan(8, len));
             }
             catch { return Empty; }
         }
 
         internal static AcerSmbios Parse(ReadOnlySpan<byte> table)
+        {
+            return FirmwareParsingNative.TryParseSmbios(table, out var native) ? native : ParseManaged(table);
+        }
+
+        internal static AcerSmbios ParseManaged(ReadOnlySpan<byte> table)
         {
             byte? major = null, minor = null;
             var gaming = new List<AcerSmbiosRecord>();
@@ -712,9 +794,52 @@ namespace PredatorControlApp
 
     #region SystemInfo & Hardware Identity
 
+    public static class SystemInfo
+    {
+        public static string Model => HardwareIdentity.ReadModel();
+    }
+
     [SupportedOSPlatform("windows")]
     public static class HardwareIdentity
     {
+        public static string ReadCpuModel()
+        {
+            try
+            {
+                using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"HARDWARE\DESCRIPTION\System\CentralProcessor\0");
+                string? name = key?.GetValue("ProcessorNameString") as string;
+                if (!string.IsNullOrWhiteSpace(name))
+                    return CleanCpuModelString(name);
+            }
+            catch { }
+
+            try
+            {
+                using var searcher = new ManagementObjectSearcher("SELECT Name, MaxClockSpeed FROM Win32_Processor");
+                using var coll = searcher.Get();
+                foreach (ManagementObject obj in coll)
+                {
+                    using (obj)
+                    {
+                        string? name = obj["Name"]?.ToString();
+                        if (!string.IsNullOrWhiteSpace(name))
+                            return CleanCpuModelString(name);
+                    }
+                }
+            }
+            catch { }
+
+            return "Intel Core Processor";
+        }
+
+        private static string CleanCpuModelString(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                return "Intel Core Processor";
+
+            return Regex.Replace(name.Trim(), @"\s+", " ", RegexOptions.None, TimeSpan.FromMilliseconds(50));
+        }
+
         public static string ReadModel()
         {
             try
@@ -788,7 +913,256 @@ namespace PredatorControlApp
 
     #endregion
 
-    #region Direct Embedded Controller (EC) HID Protocol
+    #region CPU Architecture & Specification Detection Engine
+
+    public enum CpuArchitectureFamily
+    {
+        IntelCoreUltraSeries1, // Meteor Lake (e.g. Ultra 5/7/9 1xxH, Ultra 1xxU)
+        IntelCoreUltraSeries2, // Arrow Lake / Lunar Lake (e.g. Ultra 2xxV, 2xxH, 2xxHX, 2xxU)
+        IntelCoreHx,           // 12th/13th/14th Gen HX (e.g. 14900HX, 13700HX, 12900HX)
+        IntelCoreH,            // 10th-14th Gen H / HK (e.g. 14700H, 13700H, 12700H, 11800H)
+        IntelCoreU,            // U-series / Thin laptops (15W base TDP)
+        IntelCoreDesktop,      // Desktop K / non-K
+        AmdRyzenHx,            // Ryzen HX (55W)
+        AmdRyzenHs,            // Ryzen HS (35W)
+        AmdRyzenH,             // Ryzen H (45W)
+        AmdRyzenU,             // Ryzen U (15W)
+        GenericIntel,
+        GenericAmd,
+        Unknown
+    }
+
+    public sealed record CpuHardwareSpec
+    {
+        public string CpuModel { get; init; } = string.Empty;
+        public string Architecture { get; init; } = string.Empty;
+        public CpuArchitectureFamily Family { get; init; } = CpuArchitectureFamily.Unknown;
+        public int BaseTdpWatts { get; init; }
+        public int MinPowerWatts { get; init; }
+        public int MaxPl1Watts { get; init; }
+        public int MaxPl2Watts { get; init; }
+        public bool IsDynamicDetection { get; init; }
+        public IReadOnlyDictionary<byte, (int Pl1, int Pl2)> DefaultModePowerLimits { get; init; } = new Dictionary<byte, (int, int)>();
+    }
+
+    public sealed record CpuSpecInfo(
+        string ModelName,
+        int BaseTdpWatts,
+        int MinPowerWatts,
+        int MaxPl1Watts,
+        int MaxPl2Watts
+    );
+
+    public static class CpuSpecDetector
+    {
+        private static readonly TimeSpan RegexTimeout = TimeSpan.FromMilliseconds(50);
+        private static readonly Regex Ultra2Regex = new(@"\bULTRA\s+[3579]\s+(2\d{2})([A-Z]*)\b|\bULTRA\s+(2\d{2})([A-Z]*)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, RegexTimeout);
+        private static readonly Regex Ultra1Regex = new(@"\bULTRA\s+[3579]\s+(1\d{2})([A-Z]*)\b|\bULTRA\s+(1\d{2})([A-Z]*)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, RegexTimeout);
+        private static readonly Regex UltraGenericRegex = new(@"\bULTRA\s+[3579]\b|\bCORE\s+ULTRA\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, RegexTimeout);
+
+        private static readonly Regex IntelHxRegex = new(@"\b(?:\d{4,5}|[iI][3579]-\d{4,5})HX\b|\bHX\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, RegexTimeout);
+        private static readonly Regex IntelHRegex = new(@"\b(?:\d{4,5}|[iI][3579]-\d{4,5})(?:H|HK)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, RegexTimeout);
+        private static readonly Regex IntelURegex = new(@"\b(?:\d{4,5}|[iI][3579]-\d{4,5})U\b|\b\d{4}G[147]\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, RegexTimeout);
+        private static readonly Regex IntelDesktopKRegex = new(@"\b(?:\d{4,5}|[iI][3579]-\d{4,5})(?:K|KF|KS)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, RegexTimeout);
+
+        private static readonly Regex AmdHxRegex = new(@"\bHX3D\b|\bHX\b|\bAI\s+9\s+HX\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, RegexTimeout);
+        private static readonly Regex AmdHsRegex = new(@"\bHS\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, RegexTimeout);
+        private static readonly Regex AmdHRegex = new(@"\b\d{4}H\b|\bH\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, RegexTimeout);
+        private static readonly Regex AmdURegex = new(@"\b\d{4}U\b|\bU\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, RegexTimeout);
+
+        public static CpuHardwareSpec DetectCpuSpec(string? cpuModel = null) => Detect(cpuModel);
+
+        public static CpuHardwareSpec Detect(string? cpuModel = null)
+        {
+            string rawModel = !string.IsNullOrWhiteSpace(cpuModel)
+                ? cpuModel.Trim()
+                : (OperatingSystem.IsWindows() ? HardwareIdentity.ReadCpuModel() : "Intel Core Processor");
+
+            string upper = rawModel.ToUpperInvariant();
+
+            // 1. AMD Ryzen architectures
+            if (upper.Contains("RYZEN") || upper.Contains("AMD"))
+            {
+                if (AmdHxRegex.IsMatch(upper))
+                {
+                    return CreateSpec(rawModel, "AMD Ryzen HX (High Performance Mobile)", CpuArchitectureFamily.AmdRyzenHx, 55, 15, 125, 140);
+                }
+                if (AmdHsRegex.IsMatch(upper))
+                {
+                    return CreateSpec(rawModel, "AMD Ryzen HS (Slim & High Performance)", CpuArchitectureFamily.AmdRyzenHs, 35, 15, 65, 80);
+                }
+                if (AmdHRegex.IsMatch(upper))
+                {
+                    return CreateSpec(rawModel, "AMD Ryzen H-Series (High Performance Mobile)", CpuArchitectureFamily.AmdRyzenH, 45, 12, 80, 95);
+                }
+                if (AmdURegex.IsMatch(upper))
+                {
+                    return CreateSpec(rawModel, "AMD Ryzen U-Series (Ultra Low Power Mobile)", CpuArchitectureFamily.AmdRyzenU, 15, 5, 30, 45);
+                }
+
+                return CreateSpec(rawModel, "AMD Ryzen Processor (Mobile)", CpuArchitectureFamily.GenericAmd, 45, 12, 80, 95);
+            }
+
+            // 2. Intel Core Ultra Series 2 (Arrow Lake / Lunar Lake)
+            var mUltra2 = Ultra2Regex.Match(upper);
+            if (mUltra2.Success)
+            {
+                string suffix = mUltra2.Groups[2].Value;
+                if (string.IsNullOrEmpty(suffix) && mUltra2.Groups.Count > 4)
+                    suffix = mUltra2.Groups[4].Value;
+
+                if (suffix.Contains("V"))
+                {
+                    // Lunar Lake (e.g. Ultra 7 258V, 268V, 256V, 226V)
+                    return CreateSpec(rawModel, "Intel Lunar Lake (Core Ultra Series 2 - V)", CpuArchitectureFamily.IntelCoreUltraSeries2, 17, 8, 30, 37);
+                }
+                if (suffix.Contains("HX"))
+                {
+                    // Arrow Lake HX (e.g. Ultra 9 285HX, 275HX, 265HX)
+                    return CreateSpec(rawModel, "Intel Arrow Lake (Core Ultra Series 2 - HX)", CpuArchitectureFamily.IntelCoreUltraSeries2, 55, 15, 157, 175);
+                }
+                if (suffix.Contains("U"))
+                {
+                    // Arrow Lake U (e.g. Ultra 7 255U)
+                    return CreateSpec(rawModel, "Intel Arrow Lake (Core Ultra Series 2 - U)", CpuArchitectureFamily.IntelCoreUltraSeries2, 15, 5, 28, 57);
+                }
+
+                // Arrow Lake H (e.g. Ultra 9 285H, Ultra 7 265H, Ultra 5 245H, Ultra 5 225H)
+                return CreateSpec(rawModel, "Intel Arrow Lake (Core Ultra Series 2 - H)", CpuArchitectureFamily.IntelCoreUltraSeries2, 28, 8, 64, 115);
+            }
+
+            // 3. Intel Core Ultra Series 1 (Meteor Lake)
+            var mUltra1 = Ultra1Regex.Match(upper);
+            if (mUltra1.Success)
+            {
+                string suffix = mUltra1.Groups[2].Value;
+                if (string.IsNullOrEmpty(suffix) && mUltra1.Groups.Count > 4)
+                    suffix = mUltra1.Groups[4].Value;
+
+                if (suffix.Contains("U"))
+                {
+                    // Meteor Lake U (e.g. Ultra 7 165U, Ultra 7 155U, Ultra 5 135U, Ultra 5 125U)
+                    return CreateSpec(rawModel, "Intel Meteor Lake (Core Ultra Series 1 - U)", CpuArchitectureFamily.IntelCoreUltraSeries1, 15, 5, 28, 57);
+                }
+
+                // Meteor Lake H (e.g. Ultra 9 185H, Ultra 7 165H, Ultra 7 155H, Ultra 5 135H, Ultra 5 125H)
+                return CreateSpec(rawModel, "Intel Meteor Lake (Core Ultra Series 1 - H)", CpuArchitectureFamily.IntelCoreUltraSeries1, 28, 8, 64, 115);
+            }
+
+            // Generic Core Ultra without SKU number (fallback)
+            if (UltraGenericRegex.IsMatch(upper))
+            {
+                return CreateSpec(rawModel, "Intel Core Ultra Processor", CpuArchitectureFamily.IntelCoreUltraSeries1, 28, 8, 64, 115);
+            }
+
+            // 4. Intel 12th/13th/14th Gen HX (e.g. 14900HX, 13700HX, 12900HX)
+            if (IntelHxRegex.IsMatch(upper))
+            {
+                bool isI9 = upper.Contains("I9") || upper.Contains("14900") || upper.Contains("13900") || upper.Contains("13980") || upper.Contains("13950") || upper.Contains("12900");
+                int maxPl2 = isI9 ? 175 : 160;
+                return CreateSpec(rawModel, "Intel Raptor Lake / Alder Lake HX", CpuArchitectureFamily.IntelCoreHx, 55, 15, 157, maxPl2);
+            }
+
+            // 5. Intel 10th-14th Gen H / HK (e.g. 14700H, 13700H, 12700H, 11800H)
+            if (IntelHRegex.IsMatch(upper))
+            {
+                bool isHighTier = upper.Contains("I9") || upper.Contains("I7");
+                int maxPl1 = isHighTier ? 95 : 80;
+                int maxPl2 = isHighTier ? 115 : 95;
+                return CreateSpec(rawModel, "Intel Core H-Series (High Performance Mobile)", CpuArchitectureFamily.IntelCoreH, 45, 12, maxPl1, maxPl2);
+            }
+
+            // 6. Intel Desktop Unlocked (K / KF / KS)
+            if (IntelDesktopKRegex.IsMatch(upper))
+            {
+                return CreateSpec(rawModel, "Intel Core Desktop (Unlocked)", CpuArchitectureFamily.IntelCoreDesktop, 125, 35, 253, 253);
+            }
+
+            // 7. Intel U-series / Thin Laptops (e.g. 1335U, 1235U, 1165G7)
+            if (IntelURegex.IsMatch(upper))
+            {
+                return CreateSpec(rawModel, "Intel Core U-Series (Ultra Low Power Mobile)", CpuArchitectureFamily.IntelCoreU, 15, 5, 30, 55);
+            }
+
+            // 8. Generic / Unknown Fallback
+            return CreateSpec(rawModel, "Intel Core Processor (Mobile)", CpuArchitectureFamily.GenericIntel, 45, 12, 95, 115);
+        }
+
+        private static CpuHardwareSpec CreateSpec(string model, string arch, CpuArchitectureFamily family, int baseTdp, int minPower, int maxPl1, int maxPl2)
+        {
+            var modeDefaults = ComputeModeDefaults(baseTdp, minPower, maxPl1, maxPl2);
+            return new CpuHardwareSpec
+            {
+                CpuModel = model,
+                Architecture = arch,
+                Family = family,
+                BaseTdpWatts = baseTdp,
+                MinPowerWatts = minPower,
+                MaxPl1Watts = maxPl1,
+                MaxPl2Watts = maxPl2,
+                IsDynamicDetection = true,
+                DefaultModePowerLimits = modeDefaults
+            };
+        }
+
+        public static IReadOnlyDictionary<byte, (int Pl1, int Pl2)> ComputeModeDefaults(int baseTdp, int minPower, int maxPl1, int maxPl2)
+        {
+            int safeMaxPl2 = Math.Max(minPower, maxPl2);
+            int safeMaxPl1 = Math.Clamp(maxPl1, minPower, safeMaxPl2);
+            safeMaxPl2 = Math.Max(safeMaxPl1, safeMaxPl2);
+
+            int ecoPl1 = Math.Clamp((int)Math.Round(baseTdp * 0.55), minPower, safeMaxPl1);
+            int ecoPl2 = Math.Clamp((int)Math.Round(baseTdp * 0.75), ecoPl1, safeMaxPl2);
+
+            int quietPl1 = Math.Clamp((int)Math.Round(baseTdp * 0.75), minPower, safeMaxPl1);
+            int quietPl2 = Math.Clamp(baseTdp, quietPl1, safeMaxPl2);
+
+            int balancedPl1 = Math.Clamp(baseTdp, minPower, safeMaxPl1);
+            int balancedPl2 = Math.Clamp((int)Math.Round(baseTdp * 1.45), balancedPl1, safeMaxPl2);
+
+            int perfPl1 = Math.Clamp((int)Math.Round(baseTdp * 1.55), balancedPl1, safeMaxPl1);
+            int perfPl2 = Math.Clamp((int)Math.Round(baseTdp * 2.00), perfPl1, safeMaxPl2);
+
+            int turboPl1 = Math.Clamp((int)Math.Round(baseTdp * 2.00), perfPl1, safeMaxPl1);
+            int turboPl2 = Math.Max(turboPl1, safeMaxPl2);
+
+            return new Dictionary<byte, (int, int)>
+            {
+                { 0x06, (ecoPl1, ecoPl2) },           // Eco
+                { 0x00, (quietPl1, quietPl2) },       // Quiet
+                { 0x01, (balancedPl1, balancedPl2) }, // Balanced
+                { 0x04, (perfPl1, perfPl2) },         // Performance
+                { 0x05, (turboPl1, turboPl2) }        // Turbo
+            };
+        }
+
+        public static (int Pl1, int Pl2) EstimateProportionalLimits(int tdpWatts, byte mode)
+        {
+            int tdp = Math.Clamp(tdpWatts, 5, 250);
+            int minP = Math.Max(5, (int)Math.Round(tdp * 0.20));
+            int maxP2 = (int)Math.Round(tdp * 2.55);
+            int maxP1 = (int)Math.Round(maxP2 * 0.85);
+            var dict = ComputeModeDefaults(tdp, minP, maxP1, maxP2);
+            if (dict.TryGetValue(mode, out var p)) return p;
+            return (tdp, (int)Math.Round(tdp * 1.35));
+        }
+
+        public static int EstimatePl1(int tdpWatts, byte mode) => EstimateProportionalLimits(tdpWatts, mode).Pl1;
+        public static int EstimatePl2(int tdpWatts, byte mode) => EstimateProportionalLimits(tdpWatts, mode).Pl2;
+
+        public static IReadOnlyDictionary<byte, (int Pl1, int Pl2)> GetDefaultModeDictionary(int tdpWatts)
+        {
+            int tdp = Math.Clamp(tdpWatts, 5, 250);
+            int minP = Math.Max(5, (int)Math.Round(tdp * 0.20));
+            int maxP2 = (int)Math.Round(tdp * 2.55);
+            int maxP1 = (int)Math.Round(maxP2 * 0.85);
+            return ComputeModeDefaults(tdp, minP, maxP1, maxP2);
+        }
+    }
+
+    #endregion
+
+        #region Direct Embedded Controller (EC) HID Protocol
 
     [SupportedOSPlatform("windows")]
     public sealed class EcHidDevice : IDisposable
@@ -807,14 +1181,59 @@ namespace PredatorControlApp
         private Mutex? _globalLock;
         private int _reportLength = ReportLength;
         private readonly object _localLock = new();
+        private DateTime _lastReopenAttempt = DateTime.MinValue;
+        private static readonly TimeSpan ReopenCooldown = TimeSpan.FromMilliseconds(500);
         private bool _disposed;
+        private bool _wasEverOpened;
 
-        public bool IsOpen => _deviceHandle != null && !_deviceHandle.IsInvalid;
+        /// <summary>
+        /// True when the device is owned by the native EC-HID transport
+        /// (<c>predator_core::ec_hid</c>). The managed handle then stays closed, so the
+        /// EC HID endpoint is never opened twice.
+        /// </summary>
+        private bool _usesNative;
+
+        public bool IsOpen
+        {
+            get
+            {
+                lock (_localLock)
+                {
+                    if (_disposed) return false;
+                    if (_usesNative) return PredatorNativeCore.EcHidIsOpen();
+                    return _deviceHandle != null && !_deviceHandle.IsInvalid;
+                }
+            }
+        }
+
+        /// <summary>True when this instance is driven by the native transport.</summary>
+        public bool UsesNativeTransport => _usesNative;
         public EcHidVersion? Version { get; private set; }
         public int ReportLengthActual => _reportLength;
 
         public static EcHidDevice? TryOpen()
         {
+            // 1. Native transport first: one C-ABI call owns enumeration, CreateFile and
+            //    the feature exchange, and its handle is closed by Rust's Drop impl.
+            try
+            {
+                if (PredatorNativeCore.IsNativeCoreAvailable &&
+                    PredatorNativeCore.EcHidOpen(VendorId, ProductId, UsagePage, Usage))
+                {
+                    int nativeReportLength = Math.Clamp(PredatorNativeCore.EcHidReportLength(), ReportLength, 4096);
+                    var nativeDevice = new EcHidDevice
+                    {
+                        _usesNative = true,
+                        _reportLength = nativeReportLength,
+                        _wasEverOpened = true
+                    };
+                    if (nativeDevice.ReadVersion() != null) return nativeDevice;
+                    nativeDevice.Dispose();
+                }
+            }
+            catch { }
+
+            // 2. Managed fallback.
             try
             {
                 var paths = FindDevicePaths();
@@ -853,9 +1272,20 @@ namespace PredatorControlApp
 
                         Mutex? mtx = null;
                         try { mtx = new Mutex(false, MutexName); } catch { }
-                        var dev = new EcHidDevice { _deviceHandle = handle, _globalLock = mtx, _reportLength = repLen };
-                        if (dev.ReadVersion() != null) return dev;
-                        dev.Dispose();
+                        EcHidDevice? dev = null;
+                        try
+                        {
+                            dev = new EcHidDevice { _deviceHandle = handle, _globalLock = mtx, _reportLength = repLen, _wasEverOpened = true };
+                            if (dev.ReadVersion() != null) return dev;
+                            dev.Dispose();
+                            dev = null;
+                        }
+                        catch
+                        {
+                            dev?.Dispose();
+                            mtx?.Dispose();
+                            handle.Dispose();
+                        }
                     }
                     catch
                     {
@@ -887,8 +1317,12 @@ namespace PredatorControlApp
         public byte? ReadMode()
         {
             var rep = Exchange(BuildRequest(EcHidCommand.Mode, 2));
-            if (rep != null && rep.Done && rep.Command == (ushort)EcHidCommand.Mode)
+            if (rep != null && rep.Done && rep.Command == (ushort)EcHidCommand.Mode && rep.Data != null && rep.Data.Length > 4)
+            {
+                if (Version?.EchoesStatusType == true || (rep.Byte(4) == 2 && rep.Data.Length > 5))
+                    return rep.Byte(5);
                 return rep.Byte(4);
+            }
             return null;
         }
 
@@ -901,7 +1335,7 @@ namespace PredatorControlApp
         public (int Brightness, int TimeoutSeconds)? ReadBacklightTimeout()
         {
             var rep = Exchange(BuildRequest(EcHidCommand.Device, 2, 2));
-            if (rep != null && rep.Done && rep.Command == (ushort)EcHidCommand.Device && rep.Byte(5) == 2)
+            if (rep != null && rep.Done && rep.Command == (ushort)EcHidCommand.Device && rep.Byte(5) == 2 && rep.Data != null && rep.Data.Length >= 12)
                 return (rep.Word(8), rep.Word(10));
             return null;
         }
@@ -920,7 +1354,9 @@ namespace PredatorControlApp
 
         private bool Reopen()
         {
-            if (_disposed) return false;
+            if (_disposed || !_wasEverOpened) return false;
+            if ((DateTime.UtcNow - _lastReopenAttempt) < ReopenCooldown) return false;
+            _lastReopenAttempt = DateTime.UtcNow;
             try
             {
                 _deviceHandle?.Dispose();
@@ -975,6 +1411,16 @@ namespace PredatorControlApp
         public EcHidReply? Exchange(byte[] request)
         {
             if (_disposed) return null;
+
+            if (_usesNative)
+            {
+                lock (_localLock)
+                {
+                    if (_disposed) return null;
+                    return ExchangeNative(request);
+                }
+            }
+
             lock (_localLock)
             {
                 if (_disposed) return null;
@@ -984,10 +1430,11 @@ namespace PredatorControlApp
 
                     if (_deviceHandle == null || _deviceHandle.IsInvalid)
                     {
-                        if (!Reopen()) continue;
+                        if (!Reopen()) return null;
                     }
 
                     bool lockTaken = false;
+                    bool needReopen = false;
                     try
                     {
                         if (_globalLock != null)
@@ -997,25 +1444,33 @@ namespace PredatorControlApp
                         }
                         if (_globalLock != null && !lockTaken) continue;
 
+                        // Call HidD_GetFeature before HidD_SetFeature to sync feature state
+                        // and ensure volatile BIOS / EC mode bits (e.g. Media/Fn keys) are never clobbered.
+                        int repLen = Math.Clamp(_reportLength > 0 ? _reportLength : ReportLength, 65, 4096);
+                        byte[] preBuf = new byte[repLen];
+                        preBuf[0] = ReportId;
+                        GetFeature(_deviceHandle!, preBuf);
+
                         if (!SetFeature(_deviceHandle!, request))
                         {
-                            Reopen();
-                            continue;
+                            needReopen = true;
                         }
-                        Thread.Sleep(20);
-
-                        byte[] replyBuf = new byte[_reportLength];
-                        replyBuf[0] = ReportId;
-                        if (!GetFeature(_deviceHandle!, replyBuf))
+                        else
                         {
-                            Reopen();
-                            continue;
-                        }
+                            Thread.Sleep(20);
 
-                        if (replyBuf.Length >= 6 && replyBuf[0] == ReportId)
-                        {
-                            byte[] data = replyBuf.AsSpan(1).ToArray();
-                            return new EcHidReply(BinaryPrimitives.ReadUInt16LittleEndian(data), BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(2)), data);
+                            repLen = Math.Clamp(_reportLength > 0 ? _reportLength : ReportLength, 65, 4096);
+                            byte[] replyBuf = new byte[repLen];
+                            replyBuf[0] = ReportId;
+                            if (!GetFeature(_deviceHandle!, replyBuf))
+                            {
+                                needReopen = true;
+                            }
+                            else if (replyBuf.Length >= 6 && replyBuf[0] == ReportId)
+                            {
+                                byte[] data = replyBuf.AsSpan(1).ToArray();
+                                return new EcHidReply(BinaryPrimitives.ReadUInt16LittleEndian(data), BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(2)), data);
+                            }
                         }
                     }
                     catch { }
@@ -1026,23 +1481,75 @@ namespace PredatorControlApp
                             try { _globalLock?.ReleaseMutex(); } catch { }
                         }
                     }
+
+                    if (needReopen)
+                    {
+                        Reopen();
+                    }
                 }
                 return null;
             }
         }
 
+        /// <summary>
+        /// One exchange through the native transport. Returns null (and lets the caller
+        /// retry) when the reply report is malformed or the EC did not answer.
+        /// </summary>
+        private EcHidReply? ExchangeNative(byte[] request)
+        {
+            if (request == null || request.Length == 0) return null;
+
+            if (!PredatorNativeCore.EcHidIsOpen())
+            {
+                if (!ReopenNative()) return null;
+            }
+
+            int reportLength = Math.Clamp(PredatorNativeCore.EcHidReportLength(), ReportLength, 4096);
+            if (reportLength <= 0) return null;
+
+            byte[] reply = new byte[reportLength];
+            int written = PredatorNativeCore.EcHidExchange(request, reply);
+            if (written < 6 || reply[0] != ReportId) return null;
+
+            int payloadLength = Math.Min(written, reportLength) - 1;
+            if (payloadLength < 4) return null;
+
+            byte[] data = reply.AsSpan(1, payloadLength).ToArray();
+            return new EcHidReply(
+                BinaryPrimitives.ReadUInt16LittleEndian(data),
+                BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(2)),
+                data);
+        }
+
+        private bool ReopenNative()
+        {
+            if (_disposed || !_wasEverOpened) return false;
+            if ((DateTime.UtcNow - _lastReopenAttempt) < ReopenCooldown) return false;
+            _lastReopenAttempt = DateTime.UtcNow;
+            try
+            {
+                if (PredatorNativeCore.EcHidOpen(VendorId, ProductId, UsagePage, Usage))
+                {
+                    _reportLength = Math.Clamp(PredatorNativeCore.EcHidReportLength(), ReportLength, 4096);
+                    return true;
+                }
+            }
+            catch { }
+            return false;
+        }
+
         private byte[] BuildRequest(EcHidCommand cmd, byte func, params byte[] data)
         {
-            int dataLen = data?.Length ?? 0;
-            int repLen = Math.Max(_reportLength, 6 + dataLen);
-            byte[] buf = new byte[repLen];
+            int targetLen = Math.Clamp(_reportLength > 0 ? _reportLength : ReportLength, 65, 4096);
+            byte[] buf = new byte[targetLen];
             buf[0] = ReportId;
             BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(1), RequestHeader);
             BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(3), (ushort)cmd);
             buf[5] = func;
             if (data != null && data.Length > 0)
             {
-                int copyLen = Math.Min(data.Length, buf.Length - 6);
+                int maxPayload = Math.Max(0, targetLen - 6);
+                int copyLen = Math.Min(data.Length, maxPayload);
                 data.AsSpan(0, copyLen).CopyTo(buf.AsSpan(6));
             }
             return buf;
@@ -1132,7 +1639,7 @@ namespace PredatorControlApp
             var candidateMatches = new List<string>();
             HidD_GetHidGuid(out Guid hidGuid);
             IntPtr hDevInfo = SetupDiGetClassDevs(ref hidGuid, IntPtr.Zero, IntPtr.Zero, 0x12);
-            if (hDevInfo == (IntPtr)(-1)) return exactMatches;
+            if (hDevInfo == (IntPtr)(-1) || hDevInfo == IntPtr.Zero) return exactMatches;
 
             try
             {
@@ -1141,12 +1648,13 @@ namespace PredatorControlApp
                 while (SetupDiEnumDeviceInterfaces(hDevInfo, IntPtr.Zero, ref hidGuid, index++, ref did))
                 {
                     SetupDiGetDeviceInterfaceDetail(hDevInfo, ref did, IntPtr.Zero, 0, out uint reqSize, IntPtr.Zero);
-                    if (reqSize <= 4) continue;
+                    int minDetailSize = IntPtr.Size == 8 ? 8 : 6;
+                    if (reqSize < (uint)minDetailSize) continue;
 
                     IntPtr pDetail = Marshal.AllocHGlobal((int)reqSize);
                     try
                     {
-                        Marshal.WriteInt32(pDetail, IntPtr.Size == 8 ? 8 : 6);
+                        Marshal.WriteInt32(pDetail, minDetailSize);
                         if (SetupDiGetDeviceInterfaceDetail(hDevInfo, ref did, pDetail, reqSize, out _, IntPtr.Zero))
                         {
                             IntPtr pPath = (IntPtr)((long)pDetail + 4);
@@ -1170,11 +1678,17 @@ namespace PredatorControlApp
                                                     var caps = new HIDP_CAPS();
                                                     if (HidP_GetCaps(pData, ref caps) >= 0)
                                                     {
-                                                        if (caps.UsagePage == UsagePage && caps.Usage == Usage)
+                                                        // Exclude standard keyboard (UsagePage == 0x0001, Usage == 0x0006) and consumer controls (UsagePage == 0x000C)
+                                                        if ((caps.UsagePage == 0x0001 && caps.Usage == 0x0006) || caps.UsagePage == 0x000C || caps.UsagePage == 0x0001)
+                                                        {
+                                                            continue;
+                                                        }
+
+                                                        if (caps.UsagePage == UsagePage && caps.Usage == Usage && caps.FeatureReportByteLength >= ReportLength)
                                                         {
                                                             isExact = true;
                                                         }
-                                                        else if (caps.FeatureReportByteLength > 0 || caps.UsagePage >= 0xFF00)
+                                                        else if (caps.UsagePage >= 0xFF00 && caps.FeatureReportByteLength >= ReportLength)
                                                         {
                                                             isCandidate = true;
                                                         }
@@ -1204,6 +1718,11 @@ namespace PredatorControlApp
             return exactMatches;
         }
 
+        public static bool IsStandardKeyboardOrConsumerCollection(ushort usagePage, ushort usage)
+        {
+            return (usagePage == 0x0001 && usage == 0x0006) || usagePage == 0x000C || usagePage == 0x0001;
+        }
+
         private static bool SetFeature(SafeFileHandle h, byte[] buf) => HidD_SetFeature(h, buf, buf.Length);
         private static bool GetFeature(SafeFileHandle h, byte[] buf) => HidD_GetFeature(h, buf, buf.Length);
 
@@ -1213,6 +1732,11 @@ namespace PredatorControlApp
             {
                 if (_disposed) return;
                 _disposed = true;
+                if (_usesNative)
+                {
+                    try { PredatorNativeCore.EcHidClose(); } catch { }
+                    _usesNative = false;
+                }
                 try { _deviceHandle?.Dispose(); } catch { }
                 _deviceHandle = null;
                 try { _globalLock?.Dispose(); } catch { }
@@ -1229,124 +1753,28 @@ namespace PredatorControlApp
 
     #endregion
 
-    #region GPU Power State Awareness (D3Cold / Sleep)
+    #region GPU Power State Awareness (AC-Only Telemetry)
 
     [SupportedOSPlatform("windows")]
     public static class GpuPowerMonitor
     {
-        private const uint CR_SUCCESS = 0;
-        private static readonly Guid GUID_DEVCLASS_DISPLAY = new("4d36e968-e325-11ce-bfc1-08002be10318");
-        private static uint _cachedDevInst = 0;
-        private static DateTime _lastDevInstCheck = DateTime.MinValue;
-        private static readonly object _gpuPowerLock = new();
+        private static volatile bool _isOnBattery = false;
 
-        [StructLayout(LayoutKind.Sequential)]
-        private struct DEVPROPKEY
+        public static void SetPowerState(bool onBattery)
         {
-            public Guid fmtid;
-            public uint pid;
+            _isOnBattery = onBattery;
         }
 
-        private static readonly DEVPROPKEY PKEY_Device_PowerData = new()
+        public static void ResetDebounce()
         {
-            fmtid = new Guid("83da6326-97a6-4088-9453-a1923f573b29"),
-            pid = 15
-        };
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct CM_POWER_DATA
-        {
-            public uint PD_Size;
-            public int PD_MostRecentPowerState; // 1 = D0, 2 = D1, 3 = D2, 4 = D3
-            public uint PD_Capabilities;
-            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 7)] public int[] PD_PowerStateMapping;
-            public int PD_D1Latency;
-            public int PD_D2Latency;
-            public int PD_D3Latency;
         }
-
-        [DllImport("cfgmgr32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        private static extern uint CM_Get_Device_ID_List_Size(out uint pulLen, string? pszFilter, uint ulFlags);
-
-        [DllImport("cfgmgr32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        private static extern uint CM_Get_Device_ID_List(string? pszFilter, IntPtr Buffer, uint BufferLen, uint ulFlags);
-
-        [DllImport("cfgmgr32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        private static extern uint CM_Locate_DevNode(out uint pdnDevInst, string pDeviceID, uint ulFlags);
-
-        [DllImport("cfgmgr32.dll", SetLastError = true)]
-        private static extern uint CM_Get_DevNode_Property(
-            uint dnDevInst, ref DEVPROPKEY PropertyKey, out uint PropertyType,
-            IntPtr PropertyBuffer, ref uint PropertyBufferSize, uint ulFlags);
 
         public static bool IsGpuAsleep()
         {
-            lock (_gpuPowerLock)
-            {
-                try
-                {
-                    if (_cachedDevInst != 0 && (DateTime.UtcNow - _lastDevInstCheck).TotalSeconds < 60)
-                    {
-                        int size = Marshal.SizeOf<CM_POWER_DATA>();
-                    IntPtr pData = Marshal.AllocHGlobal(size);
-                    try
-                    {
-                        uint bufSize = (uint)size;
-                        var propKey = PKEY_Device_PowerData;
-                        if (CM_Get_DevNode_Property(_cachedDevInst, ref propKey, out _, pData, ref bufSize, 0) == CR_SUCCESS)
-                        {
-                            var pd = Marshal.PtrToStructure<CM_POWER_DATA>(pData);
-                            return pd.PD_MostRecentPowerState >= 2;
-                        }
-                    }
-                    finally { Marshal.FreeHGlobal(pData); }
-                    _cachedDevInst = 0;
-                }
-
-                _lastDevInstCheck = DateTime.UtcNow;
-                string filter = GUID_DEVCLASS_DISPLAY.ToString("B");
-                if (CM_Get_Device_ID_List_Size(out uint len, filter, 0x300) != CR_SUCCESS || len == 0)
-                    return false;
-
-                IntPtr pBuf = Marshal.AllocHGlobal((int)len * 2);
-                try
-                {
-                    if (CM_Get_Device_ID_List(filter, pBuf, len, 0x300) != CR_SUCCESS)
-                        return false;
-
-                    string raw = Marshal.PtrToStringUni(pBuf, (int)len);
-                    var ids = raw.Split('\0', StringSplitOptions.RemoveEmptyEntries);
-                    string? targetId = ids.FirstOrDefault(id => id.Contains("VEN_10DE", StringComparison.OrdinalIgnoreCase))
-                        ?? ids.FirstOrDefault(id => id.Contains("VEN_1002", StringComparison.OrdinalIgnoreCase) && !id.Contains("DEV_1638", StringComparison.OrdinalIgnoreCase));
-
-                    if (!string.IsNullOrEmpty(targetId))
-                    {
-                        if (CM_Locate_DevNode(out uint devInst, targetId, 0) == CR_SUCCESS)
-                        {
-                            _cachedDevInst = devInst;
-                            int size = Marshal.SizeOf<CM_POWER_DATA>();
-                            IntPtr pData = Marshal.AllocHGlobal(size);
-                            try
-                            {
-                                uint bufSize = (uint)size;
-                                var propKey = PKEY_Device_PowerData;
-                                if (CM_Get_DevNode_Property(devInst, ref propKey, out _, pData, ref bufSize, 0) == CR_SUCCESS)
-                                {
-                                    var pd = Marshal.PtrToStructure<CM_POWER_DATA>(pData);
-                                    return pd.PD_MostRecentPowerState >= 2;
-                                }
-                            }
-                            finally { Marshal.FreeHGlobal(pData); }
-                        }
-                    }
-                }
-                finally { Marshal.FreeHGlobal(pBuf); }
-            }
-            catch { }
-            return false;
-            }
+            // GPU telemetry turns on ONLY when connected to AC power.
+            // On battery, GPU telemetry stays in low power standby regardless of 3D workloads.
+            return _isOnBattery;
         }
     }
-
     #endregion
 }

@@ -6,6 +6,7 @@ using Xunit;
 
 namespace PredatorControlApp.Tests
 {
+    [Collection("NoParallel")]
     public class Win32AndWmiTests
     {
         [Fact]
@@ -281,6 +282,8 @@ namespace PredatorControlApp.Tests
                         normPath.StartsWith(".git/") || normPath.Contains("/.git/") ||
                         normPath.StartsWith("publish/") || normPath.Contains("/publish/") ||
                         normPath.StartsWith("publish_out/") || normPath.Contains("/publish_out/") ||
+                        normPath.StartsWith("publish_final/") || normPath.Contains("/publish_final/") ||
+                        normPath.StartsWith(".backup_audit/") || normPath.Contains("/.backup_audit/") ||
                         normPath.StartsWith("testresults/") || normPath.Contains("/testresults/") ||
                         normPath.StartsWith("predatorcontrolapp-code/") || normPath.Contains("/predatorcontrolapp-code/") ||
                         normPath.EndsWith(".exe") || normPath.EndsWith(".zip") ||
@@ -292,7 +295,7 @@ namespace PredatorControlApp.Tests
                     }
 
                     string entryName = relPath.Replace('\\', '/');
-                    archive.CreateEntryFromFile(file.FullName, entryName, System.IO.Compression.CompressionLevel.Optimal);
+                    archive.CreateEntryFromFile(file.FullName, entryName, System.IO.Compression.CompressionLevel.Fastest);
                 }
             }
 

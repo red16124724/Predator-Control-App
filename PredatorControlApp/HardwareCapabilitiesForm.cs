@@ -24,17 +24,17 @@ namespace PredatorControlApp
 
         #region Theme Colors & Fonts
 
-        private static readonly Color FormBg = Color.FromArgb(22, 22, 26);
-        private static readonly Color TitleBarBg = Color.FromArgb(18, 18, 21);
-        private static readonly Color CardBg = Color.FromArgb(28, 28, 33);
-        private static readonly Color CardBorder = Color.FromArgb(44, 44, 52);
-        private static readonly Color SeparatorColor = Color.FromArgb(40, 40, 46);
-        private static readonly Color HeaderColor = Color.FromArgb(130, 130, 145);
-        private static readonly Color SubHeaderColor = Color.FromArgb(105, 105, 118);
-        private static readonly Color AccentColor = Color.FromArgb(0, 200, 160);
-        private static readonly Color TextColor = Color.FromArgb(220, 220, 226);
-        private static readonly Color SuccessGreen = Color.FromArgb(0, 230, 140);
-        private static readonly Color WarningAmber = Color.FromArgb(245, 158, 11);
+        private static Color FormBg => ThemeManager.FormBg;
+        private static Color TitleBarBg => ThemeManager.TitleBarBg;
+        private static Color CardBg => ThemeManager.CardBg;
+        private static Color CardBorder => ThemeManager.CardBorder;
+        private static Color SeparatorColor => ThemeManager.Separator;
+        private static Color HeaderColor => ThemeManager.HeaderText;
+        private static Color SubHeaderColor => ThemeManager.TextSecondary;
+        private static Color AccentColor => ThemeManager.Accent;
+        private static Color TextColor => ThemeManager.TextPrimary;
+        private static Color SuccessGreen => ThemeManager.SuccessGreen;
+        private static Color WarningAmber => ThemeManager.YellowStatus;
 
         private static readonly Font FontTitle = new("Segoe UI", 10f, FontStyle.Bold);
         private static readonly Font FontSection = new("Segoe UI", 8.5f, FontStyle.Bold);
@@ -49,9 +49,12 @@ namespace PredatorControlApp
         private readonly WmiController? _wmi;
         private readonly DeviceCapabilities _capabilities;
         private readonly Action<DeviceCapabilities>? _onOverridesSaved;
+        private bool _isClosing;
+        private readonly Action _themeHandler;
         private float _dpiScale = 1.0f;
         private int _formW;
         private Bitmap? _appIconBitmap;
+        private PictureBox? _picIcon;
 
         private DarkScrollPanel _contentPanel = null!;
         private PredatorDropDown _cboCoolBoost = null!;
@@ -83,17 +86,73 @@ namespace PredatorControlApp
             _capabilities = capabilities;
             _onOverridesSaved = onOverridesSaved;
 
-            using (var g = CreateGraphics()) _dpiScale = g.DpiX / 96f;
+            _dpiScale = this.DeviceDpi > 0 ? this.DeviceDpi / 96f : 1.0f;
+
+            _themeHandler = () =>
+            {
+                SafeBeginInvoke(ApplyThemeColors);
+            };
+            ThemeManager.ThemeChanged += _themeHandler;
 
             InitializeLayout();
         }
 
-        private int S(int pixels) => (int)Math.Round(pixels * _dpiScale);
+        private void SafeBeginInvoke(Action action)
+        {
+            try
+            {
+                if (IsDisposed || Disposing || _isClosing) return;
+                if (IsHandleCreated && InvokeRequired)
+                {
+                    BeginInvoke(new Action(() =>
+                    {
+                        try
+                        {
+                            if (!IsDisposed && !Disposing && !_isClosing)
+                                action();
+                        }
+                        catch { }
+                    }));
+                }
+                else
+                {
+                    if (!IsDisposed && !Disposing && !_isClosing)
+                        action();
+                }
+            }
+            catch { }
+        }
+
+        private void ApplyThemeColors()
+        {
+            if (IsDisposed || Disposing || _isClosing) return;
+            BackColor = FormBg;
+            ForeColor = TextColor;
+            ThemeManager.ApplyTheme(this);
+            Invalidate(true);
+        }
+
+        private int S(int pixels) => pixels == 0 ? 0 : Math.Max(1, (int)Math.Round(pixels * _dpiScale));
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            _isClosing = true;
+            base.OnFormClosing(e);
+        }
 
         protected override void OnDpiChanged(DpiChangedEventArgs e)
         {
             base.OnDpiChanged(e);
             _dpiScale = e.DeviceDpiNew / 96f;
+            try
+            {
+                _contentPanel?.SetDpiScale(_dpiScale);
+                _formW = S(580);
+                int workH = Screen.PrimaryScreen?.WorkingArea.Height ?? S(900);
+                int formH = Math.Min(S(760), workH - S(60));
+                ClientSize = new Size(_formW, formH);
+            }
+            catch { }
         }
 
         private void InitializeLayout()
@@ -121,9 +180,8 @@ namespace PredatorControlApp
             {
                 Name = "pnlTitle",
                 Height = S(42),
-                Width = _formW,
-                BackColor = TitleBarBg,
-                Location = new Point(0, 0)
+                Dock = DockStyle.Top,
+                BackColor = TitleBarBg
             };
             pnlTitle.MouseDown += TitleBar_MouseDown;
             this.Controls.Add(pnlTitle);
@@ -135,11 +193,13 @@ namespace PredatorControlApp
                 Location = new Point(pad, S(12)),
                 BackColor = Color.Transparent
             };
+            _picIcon = picIcon;
             try
             {
                 using var extIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
                 if (extIcon != null)
                 {
+                    _appIconBitmap?.Dispose();
                     _appIconBitmap = extIcon.ToBitmap();
                     picIcon.Image = _appIconBitmap;
                 }
@@ -170,7 +230,8 @@ namespace PredatorControlApp
                 Location = new Point(_formW - pad - S(6), S(10)),
                 Cursor = Cursors.Hand,
                 BackColor = Color.Transparent,
-                UseMnemonic = false
+                UseMnemonic = false,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
             lblClose.Click += (s, e) => this.Close();
             pnlTitle.Controls.Add(lblClose);
@@ -180,7 +241,7 @@ namespace PredatorControlApp
             _contentPanel = new DarkScrollPanel
             {
                 Location = new Point(0, y),
-                Size = new Size(_formW + DarkScrollPanel.NativeBarWidth, this.ClientSize.Height - y),
+                Size = new Size(_formW + DarkScrollPanel.NativeBarWidth, Math.Max(1, this.ClientSize.Height - y)),
                 BackColor = FormBg
             };
             _contentPanel.SetDpiScale(_dpiScale);
@@ -198,8 +259,9 @@ namespace PredatorControlApp
             string bios = HardwareIdentity.ReadBiosVersion();
             string sn = HardwareIdentity.ReadSerialNumber();
             string snid = HardwareIdentity.ComputeSnid(sn) ?? "N/A";
+            var catalogProfile = AcerLaptopModelCatalog.Lookup(model);
             var smbios = AcerSmbios.Read();
-            bool hasEcHid = (_wmi != null && _wmi.EcHid != null && _wmi.EcHid.IsOpen) || _capabilities.HasEcHid;
+            bool hasEcHid = (_wmi?.EcHid?.IsOpen == true) || (_capabilities.HasEcHid == true);
             string protocolName = hasEcHid ? (_wmi?.EcHid?.Version != null ? $"Direct EC HID (v{_wmi.EcHid.Version.Value.Major}.{_wmi.EcHid.Version.Value.Minor})" : "Direct EC HID Protocol") : "Acer ACPI WMI";
             string gamingVer = smbios.GamingVersion.HasValue ? smbios.GamingVersion.Value.ToString("0.00") : "Absent";
 
@@ -207,7 +269,7 @@ namespace PredatorControlApp
             int cy = S(10);
             int col1 = S(14), col2 = contentW / 2 + S(6);
 
-            AddCardKeyValue(cardInfo, "Hardware Model:", model, col1, cy, S(105));
+            AddCardKeyValue(cardInfo, "Hardware Model:", $"{model} ({catalogProfile.MarketingName})", col1, cy, S(105));
             AddCardKeyValue(cardInfo, "BIOS Version:", bios, col2, cy, S(95));
             cy += S(24);
 
@@ -234,6 +296,38 @@ namespace PredatorControlApp
 
             _contentPanel.Controls.Add(cardInfo);
             curY += cardInfo.Height + S(18);
+
+            // ==========================================
+            // Section 1B: CPU Power Limits & Hardware RAPL Capabilities
+            // ==========================================
+            MakeSectionHeader("CPU POWER LIMITS & MSR 0x610 RAPL CAPABILITIES", pad, curY);
+            curY += S(22);
+
+            var cardPowerCaps = CreateCard(pad, curY, contentW, S(120));
+            int pcy = S(10);
+            int pcol1 = S(14), pcol2 = contentW / 2 + S(6);
+
+            string pawnIoDisplay = _capabilities.PawnIoAvailable
+                ? "Active (MSR & MMIO Unlocked)"
+                : (_capabilities.PawnIoRequiresAdmin
+                    ? "Detected (Requires Administrator)"
+                    : (_capabilities.PawnIoInstalled ? "Detected (Service Stopped)" : "Not Detected (Falling back to EC/ACPI)"));
+            Color pawnIoColor = _capabilities.PawnIoAvailable
+                ? SuccessGreen
+                : (_capabilities.PawnIoRequiresAdmin || _capabilities.PawnIoInstalled ? WarningAmber : WarningAmber);
+            AddCardKeyValue(cardPowerCaps, "PawnIO Driver:", pawnIoDisplay, pcol1, pcy, S(110), pawnIoColor);
+            AddCardKeyValue(cardPowerCaps, "MSR 0x610 Lock:", _capabilities.IsMsr0x610Locked ? "Locked (Bit 63 Set)" : "Unlocked (Writable)", pcol2, pcy, S(110), _capabilities.IsMsr0x610Locked ? WarningAmber : SuccessGreen);
+            pcy += S(24);
+
+            AddCardKeyValue(cardPowerCaps, "Rated CPU TDP:", $"{_capabilities.CpuTdpWatts} W [{_capabilities.CpuModel}]", pcol1, pcy, S(110));
+            AddCardKeyValue(cardPowerCaps, "Scanned Bounds:", $"Min {_capabilities.ScannedMinPowerWatts}W | Max PL1 {_capabilities.ScannedMaxPl1Watts}W | PL2 {_capabilities.ScannedMaxPl2Watts}W", pcol2, pcy, S(110));
+            pcy += S(24);
+
+            string defsSummary = $"Eco: {_capabilities.GetScannedPl1(0x06)}/{_capabilities.GetScannedPl2(0x06)}W  |  Quiet: {_capabilities.GetScannedPl1(0x00)}/{_capabilities.GetScannedPl2(0x00)}W  |  Bal: {_capabilities.GetScannedPl1(0x01)}/{_capabilities.GetScannedPl2(0x01)}W  |  Perf: {_capabilities.GetScannedPl1(0x04)}/{_capabilities.GetScannedPl2(0x04)}W  |  Turbo: {_capabilities.GetScannedPl1(0x05)}/{_capabilities.GetScannedPl2(0x05)}W";
+            AddCardKeyValue(cardPowerCaps, "Mode Defaults:", defsSummary, pcol1, pcy, S(110), AccentColor);
+
+            _contentPanel.Controls.Add(cardPowerCaps);
+            curY += cardPowerCaps.Height + S(18);
 
             // ==========================================
             // Section 2: Capability Overrides (Persistence)
@@ -318,7 +412,8 @@ namespace PredatorControlApp
             {
                 try
                 {
-                    Clipboard.SetText(_capabilities.Diagnostics);
+                    string text = string.IsNullOrWhiteSpace(_capabilities.Diagnostics) ? "No diagnostics available." : _capabilities.Diagnostics;
+                    Clipboard.SetText(text);
                     MessageBox.Show(this, "Hardware & SMBIOS diagnostics report copied to clipboard!", "Predator Hardware", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 catch (Exception ex)
@@ -365,7 +460,7 @@ namespace PredatorControlApp
             {
                 Text = title,
                 Font = FontBodyBold,
-                ForeColor = Color.White,
+                ForeColor = TextColor,
                 Location = new Point(padX, y),
                 AutoSize = true,
                 UseMnemonic = false
@@ -373,13 +468,16 @@ namespace PredatorControlApp
             parent.Controls.Add(lblTitle);
 
             string probedStatus = probedValue ? "probed: YES" : "probed: NO";
+            int maxSubW = Math.Max(100, parent.Width - dropW - padX * 2 - S(4));
             var lblSub = new Label
             {
                 Text = $"{subtitle} ({probedStatus})",
                 Font = FontSubHeader,
                 ForeColor = SubHeaderColor,
                 Location = new Point(padX, y + S(18)),
-                AutoSize = true,
+                Size = new Size(maxSubW, S(16)),
+                AutoEllipsis = true,
+                AutoSize = false,
                 UseMnemonic = false
             };
             parent.Controls.Add(lblSub);
@@ -485,14 +583,19 @@ namespace PredatorControlApp
         {
             var pnl = new Panel
             {
+                Name = "card",
+                Tag = "card",
                 Location = new Point(x, y),
                 Size = new Size(width, height),
                 BackColor = CardBg
             };
             pnl.Paint += (s, e) =>
             {
-                using var pen = new Pen(CardBorder, 1);
-                e.Graphics.DrawRectangle(pen, 0, 0, width - 1, height - 1);
+                if (pnl.Width > 1 && pnl.Height > 1)
+                {
+                    using var pen = new Pen(CardBorder, 1);
+                    e.Graphics.DrawRectangle(pen, 0, 0, pnl.Width - 1, pnl.Height - 1);
+                }
             };
             return pnl;
         }
@@ -514,7 +617,7 @@ namespace PredatorControlApp
             {
                 Text = value,
                 Font = FontBodyBold,
-                ForeColor = valColor ?? Color.White,
+                ForeColor = valColor ?? TextColor,
                 Location = new Point(x + keyWidth, y),
                 AutoSize = true,
                 UseMnemonic = false
@@ -535,8 +638,11 @@ namespace PredatorControlApp
         {
             if (disposing)
             {
+                _isClosing = true;
+                ThemeManager.ThemeChanged -= _themeHandler;
+                if (_picIcon != null) _picIcon.Image = null;
                 try { Icon?.Dispose(); } catch { }
-                try { _appIconBitmap?.Dispose(); } catch { }
+                try { _appIconBitmap?.Dispose(); _appIconBitmap = null; } catch { }
             }
             base.Dispose(disposing);
         }

@@ -61,15 +61,18 @@ namespace PredatorControlApp.Tests
                     {
                         try
                         {
-                            if (step % 10 == 0)
+                            lock (curve)
                             {
-                                curve.Clear();
-                                curve.Add(new Point(30, 20));
-                                curve.Add(new Point(100, 100));
-                            }
-                            else
-                            {
-                                curve.Add(new Point((tid * 20 + step) % 100, (step * 3) % 100));
+                                if (step % 10 == 0)
+                                {
+                                    curve.Clear();
+                                    curve.Add(new Point(30, 20));
+                                    curve.Add(new Point(100, 100));
+                                }
+                                else
+                                {
+                                    curve.Add(new Point((tid * 20 + step) % 100, (step * 3) % 100));
+                                }
                             }
                             Interlocked.Increment(ref mutations);
                         }

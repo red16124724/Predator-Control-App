@@ -1,36 +1,56 @@
 # 🦅 Predator Control App
 
+The sidebar version label displays “Made by RED4724”. This local build is unsigned; trusted signing requires a suitable code-signing certificate and signing tool.
+
+The clean ZIP contains the executable and source, but excludes build output and standalone test projects. To rebuild it, run `cargo build --release` in `Source/predator_core`, copy `target/release/predator_core.dll` to `Source/PredatorControlApp/predator_core.dll`, then publish `Source/PredatorControlApp/PredatorControlApp.csproj` for `win-x64`. The full release folder retains tests and build files.
+
+The local 1.5.5 improvements add a privacy-reviewed compatibility report in Settings, retain the detailed report behind an identifier warning, check for updates once on startup and on request, require asset-specific checksums, and preserve a previous executable on update. Native loading verifies the embedded DLL; telemetry and PawnIO start on demand. The executable is unsigned and physical hardware validation is pending.
+
 <div align="center">
 
-![Predator Control App](https://img.shields.io/badge/Predator_Control-v1.5.0-red?style=for-the-badge&logo=acer&logoColor=white)
-[![Latest Release](https://img.shields.io/badge/Download-v1.5.0_Standalone-brightgreen?style=for-the-badge&logo=github)](https://github.com/red16124724/Predator-Control-App/releases)
+![Predator Control App](https://img.shields.io/badge/Predator_Control-v1.5.5-red?style=for-the-badge&logo=acer&logoColor=white)
+[![Upstream Releases](https://img.shields.io/badge/GitHub-Upstream_Releases-brightgreen?style=for-the-badge&logo=github)](https://github.com/red16124724/Predator-Control-App/releases)
 [![Platform](https://img.shields.io/badge/Windows-10%20%7C%2011%20(64--bit)-blue?style=for-the-badge&logo=windows)](https://github.com/red16124724/Predator-Control-App/releases)
 [![License](https://img.shields.io/badge/License-MIT-orange?style=for-the-badge)](LICENSE)
 [![No Install Needed](https://img.shields.io/badge/Portable-Zero_Install_Required-purple?style=for-the-badge)](#-quick-start--easy-installation-for-beginners)
-[![100% Offline](https://img.shields.io/badge/Privacy-100%25_Offline-success?style=for-the-badge)](#-100-offline-privacy-guarantee)
+[![Update Behavior](https://img.shields.io/badge/Network-GitHub_Update_Checks-blue?style=for-the-badge)](#network-and-update-behavior)
 
 **A lightning-fast, ultra-lightweight, and feature-packed control center for Acer Predator gaming laptops.**  
-*Get 100% direct control over your fans, power modes, CPU power limits, screen refresh rate, keyboard lighting, battery health, and GPU MUX switch — without the bloat, battery drain, or lag of PredatorSense.*
+*Get 100% direct control over your fans, power modes, screen refresh rate, keyboard lighting, battery health, and GPU MUX switch — without the bloat, battery drain, or lag of PredatorSense.*
 
 </div>
+
+## Rust parsing and rule migration, local version 1.5.5
+
+This update moves Acer SMBIOS type 170 hotkey and type 172 gaming-record parsing, selected Acer hardware-protocol encoding/decoding, and selected lighting rules into the native Rust core. The existing ACPI PPCC parser was already native-first. Windows discovery, WMI calls, user-interface logic, and managed fallbacks remain in C#. Existing hardware transport and write paths are unchanged; the EC-HID transport already includes Rust. See `RUST-MIGRATION.md` for exact scope and verification. Physical laptop testing has not been performed for this migration.
+
+## Local brightness fix, version 1.5.5
+
+This is a locally rebuilt update, not an official upstream release. It addresses keyboard lighting that stayed dim after the brightness slider was raised, and brightness being applied twice on some lighting paths.
+
+Acknowledged firmware brightness commands now own dimming while RGB packets retain their original color values. If firmware brightness is unavailable, supported fallback paths scale colors in software instead. Static, managed/native animation, and audio-reactive paths apply slider brightness once; transparent color alpha is applied once. Keyboard service requests are serialized. Before a WMI write, the app drains an active service request and skips older queued requests; successful WMI writes do not trigger a second keyboard service write. The controller prefers WMI and uses the service as a fallback. Two-color zone input now reaches all four physical zones.
+
+At 100%, the app requests full supported brightness without extra software dimming. Actual light output still depends on keyboard firmware, the selected color/effect, and the laptop's power state. Physical brightness on each laptop model has not been measured during this update.
 
 ---
 
 ## 📖 Table of Contents
 
 - [⚡ Quick Start — Easy Installation for Beginners](#-quick-start--easy-installation-for-beginners)
-- [🔌 How to Install PawnIO (Optional — CPU Power Limits)](#-how-to-install-pawnio-optional--for-cpu-power-limits)
 - [❓ Common Questions & Troubleshooting](#-common-questions--troubleshooting)
 - [✨ Key Features](#-key-features)
   - [🚀 Power & Performance Modes](#-power--performance-modes)
-  - [⚡ CPU Power Limit Control (PL1 / PL2)](#-cpu-power-limit-control-pl1--pl2-via-pawnio)
+  - [⚡ CPU Power Limits (PL1/PL2) via PawnIO & Native Ring-0 MMIO/MSR](#-cpu-power-limits-pl1pl2-via-pawnio--native-ring-0-mmiomsr)
+  - [🦀 Full Native Rust Core (`predator_core`)](#-full-native-rust-core-predator_core)
   - [❄️ Advanced Fan & Cooling Control](#️-advanced-fan--cooling-control)
   - [🎮 GPU & Display Control (MUX Switch)](#-gpu--display-control-mux-switch)
-  - [🌈 34 Keyboard RGB Lighting Effects](#-34-keyboard-rgb-lighting-effects)
+  - [🌈 Dynamic RGB Engine & Lighting Control](#-dynamic-rgb-engine--lighting-control)
+  - [⌨️ Embedded Custom Mode Shortcuts](#️-embedded-custom-mode-shortcuts)
   - [🔋 Battery Care & Health](#-battery-care--health)
   - [📊 Live Hardware Telemetry](#-live-hardware-telemetry)
   - [🎨 Themes & Diagnostics](#-themes--diagnostics)
-- [🛡️ 100% Offline Privacy Guarantee](#️-100-offline-privacy-guarantee)
+- [Network and update behavior](#network-and-update-behavior)
+- [🧪 Automated Testing & Code Quality](#-automated-testing--code-quality)
 - [🧹 How to Safely Disable PredatorSense (Optional)](#-how-to-safely-disable-predatorsense-optional)
 - [💻 Building from Source](#-building-from-source)
 - [⚠️ Disclaimer](#️-disclaimer)
@@ -43,86 +63,67 @@
 You **do NOT need to install anything** or set up complicated developer tools! Just follow these 3 simple steps:
 
 ### 1️⃣ Step 1: Download the App
-Head over to the **[Releases Page](https://github.com/red16124724/Predator-Control-App/releases)** and download:
-- 📥 **`PredatorControlApp-Standalone.exe`** *(Recommended)* — Everything is bundled into this single file. You do not even need to install .NET!
+Use `PredatorControlApp.exe` from the supplied local 1.5.5 package. The **[upstream releases page](https://github.com/red16124724/Predator-Control-App/releases)** contains the maintainer's releases and may not include this local fix.
+- **`PredatorControlApp.exe`** is a portable, self-contained Windows x64 executable. It bundles the .NET 10 runtime and native `predator_core.dll`; native components are extracted automatically when needed. No manual runtime installation or DLL extraction is required.
 
 ### 2️⃣ Step 2: Run as Administrator
-1. Move the downloaded file to a folder you like (for example, inside `C:\Program Files\Predator Control` or a folder in your `Documents`).
-2. **Right-click** on `PredatorControlApp-Standalone.exe` and select **"Run as administrator"**.
+1. Move `PredatorControlApp.exe` to a folder you like (for example, `C:\Program Files\PredatorControl` or a folder in your `Documents`).
+2. **Right-click** on `PredatorControlApp.exe` and select **"Run as administrator"**.
 
 > 💡 **Why does it need Administrator rights?**  
-> Windows strictly protects laptop hardware controls (like fan speeds, power limits, and BIOS MUX switches) so accidental programs cannot change them. Running as administrator gives the app permission to adjust your fans and power modes safely.
+> Windows strictly protects laptop hardware controls (such as embedded controller fan registers, Intel RAPL power limits, and BIOS MUX switches) so unprivileged software cannot alter them. Running as administrator grants the permissions required to adjust cooling and power profiles safely.
 
 ### 3️⃣ Step 3: You're Done!
-The app will open up with your laptop's live temperatures, fan controls, and power modes.
-- When you close or minimize the window, it quietly stays in your **System Tray** (the notification area down by your clock in the bottom-right corner of your screen).
-- It will automatically launch quietly whenever you turn on your laptop so your cooling settings always apply.
+The app opens immediately with your laptop's live temperatures, fan controls, and power profiles.
+- **Physical Predator Key & Caption Controls**: Instant window preemption over fullscreen 3D games with priority boost. Pressing the physical Predator key, `_btnCaptionMin`, or `_btnCaptionClose` delivers immediate foreground demotion and clean system tray minimization.
+- Automatically launches quietly on Windows startup if configured so your customized cooling settings always apply.
 
----
+### Optional: PawnIO Driver (for CPU Power Limits)
 
-## 🔌 How to Install PawnIO (Optional — For CPU Power Limits)
+Fan, lighting, battery, display control, and telemetry all work out of the box. Custom **PL1/PL2 CPU power limits** additionally utilize the signed **PawnIO** kernel driver to interface with Intel MSR and MMIO registers:
 
-Predator Control App works **100% out of the box** for fan speeds, power modes, RGB lighting, battery care, and MUX switching without installing anything extra.
+1. **WinGet (recommended):**
 
-If you also want **direct CPU Power Limit control (PL1 and PL2 wattage tuning and undervolting/capping)**, you can install **PawnIO** — a trusted, lightweight open-source Ring-0 driver:
-
-### 🚀 Option A: One-Line WinGet Install (Fastest)
-Open **PowerShell** or **Command Prompt as Administrator** and run:
-```cmd
-winget install -e --id namazso.PawnIO
-```
-
-### 📥 Option B: Manual Installer
-1. Download the installer directly from **[pawnio.eu](https://pawnio.eu)** or from the **[PawnIO Setup GitHub Releases](https://github.com/namazso/PawnIO.Setup/releases/latest)**.
-2. Run `PawnIO.Setup.exe` and complete the quick installation wizard.
-3. Completely close and relaunch **Predator Control App as Administrator**.
-4. Inside the app, click the **"⚡ Hardware Capabilities"** button. You will see:
+   ```powershell
+   winget install -e --id namazso.PawnIO
    ```
-   PawnIO Driver: Active (MSR & MMIO Unlocked)
-   ```
-   Your CPU's PL1 and PL2 power limit sliders are now fully operational!
+
+2. **Manual:** download `PawnIO.Setup.exe` from [pawnio.eu](https://pawnio.eu) or the [PawnIO releases page](https://github.com/namazso/PawnIO/releases), run it as administrator, then restart Predator Control App.
+
+Without PawnIO the app still runs normally: the CPU power card clearly reports that the driver is missing while every other feature keeps functioning smoothly.
 
 ---
 
 ## ❓ Common Questions & Troubleshooting
 
 <details>
-<summary><b>🔌 Do I have to install PawnIO?</b></summary>
-
-> **No!** PawnIO is completely optional. The app works normally without it for fan curves, modes, lighting, refresh rate, and battery control. PawnIO is only needed if you wish to adjust your Intel CPU's PL1 and PL2 wattage limits directly at the silicon level.
-</details>
-
-<details>
 <summary><b>🔵 Windows shows a blue screen saying "Windows protected your PC"?</b></summary>
 
-> This is called **Windows SmartScreen**. Microsoft shows this warning for any new or community open-source app that hasn't paid thousands of dollars for commercial publisher certificates.  
-> **How to continue:**
-> 1. Click **"More info"** on the blue popup.
-> 2. Click the **"Run anyway"** button that appears.
+> The local executable is unsigned, so Windows may show an unknown-publisher or SmartScreen warning. This warning does not establish whether an executable is safe. Verify that you are opening the intended local package and compare its supplied SHA-256 checksum before deciding whether to run it.
 </details>
 
 <details>
-<summary><b>🧩 Do I need to install .NET runtime?</b></summary>
+<summary><b>🧩 Do I need to install .NET runtime or extract native DLLs?</b></summary>
 
-> **No!** If you download `PredatorControlApp-Standalone.exe`, the entire runtime is built right inside the file. It runs out of the box on any 64-bit Windows 10 or Windows 11 laptop.
+> No manual installation is required. The executable bundles .NET 10 and its native core. The app automatically extracts its embedded native DLL to its versioned local cache when needed. Only the embedded native core is loaded, after SHA-256 verification in a hash-specific cache.
 </details>
 
 <details>
 <summary><b>📍 I closed the window and it disappeared. Where did it go?</b></summary>
 
-> The app does not quit when you close it — it minimizes to your **System Tray** next to the clock in the bottom-right corner of Windows. Click the little up-arrow (`^`) on your taskbar, and you will see the red Predator icon. Click it to bring the window back or right-click it for quick controls!
+> The app minimizes to your **System Tray** next to the clock in the bottom-right corner of Windows. Click the up-arrow (`^`) on your taskbar to reveal the red Predator icon. Click it to restore the window, or right-click it for instant quick controls!
 </details>
 
 <details>
 <summary><b>⚡ Do I have to uninstall Acer PredatorSense first?</b></summary>
 
-> **No!** You can keep PredatorSense installed. Predator Control App works alongside it or completely replaces it. Once you are comfortable with Predator Control App, you can disable the background PredatorSense services (see [How to Disable PredatorSense](#-how-to-safely-disable-predatorsense-optional) below) to free up RAM and CPU usage.
+> **No!** Predator Control App works cleanly alongside PredatorSense or completely replaces it. Once comfortable with Predator Control App, you can disable background PredatorSense services (see [How to Disable PredatorSense](#-how-to-safely-disable-predatorsense-optional) below) to eliminate background CPU and RAM drain.
 </details>
 
 <details>
 <summary><b>🔄 How do I check for updates?</b></summary>
 
-> Inside the app, simply click the **"Check for Updates"** button. If a new version is available on GitHub, the app will show you what's new and update smoothly. It **never** checks in the background without your permission.
+> The app checks GitHub once at startup, including when launched hidden, and again when you click **"Check for Updates"** in Settings. There is no periodic polling. An upstream release can replace local changes; installation requires an asset-specific SHA-256 and keeps a `.previous.exe` backup.
 </details>
 
 ---
@@ -131,58 +132,102 @@ winget install -e --id namazso.PawnIO
 
 ### 🚀 Power & Performance Modes
 - **5 Hardware Power Profiles**: Instantly switch between **Quiet / Silent**, **Balanced**, **Performance**, **Turbo**, and **Eco**.
-- **Auto AC/Battery Switching**: Automatically switches to battery-saving profiles when you unplug your charger, and restores high performance when plugged back in.
-- **Physical Predator Key**: Press the dedicated physical "Mode" key on your laptop's keyboard to cycle power modes, with the Mode Key LED in sync!
-- **Fast Keyboard Shortcuts**: `Predator + 1` (Eco), `Predator + 2` (Quiet), `Predator + 3` (Balanced), `Predator + 4` (Performance), `Predator + 5` (Turbo).
+- **Auto AC/Battery Switching**: Automatically transitions to energy-efficient profiles when unplugged from AC power, restoring full high performance when reconnected.
+- **Physical Predator Key & Fullscreen Preemption**: Press the dedicated physical "Mode" key on your laptop keyboard to cycle power profiles with synchronized Mode Key LED status. Incorporates Win32 thread-input attachment (`AttachThreadInput`), `SetWindowPos(HWND_TOPMOST)`, `BringWindowToTop`, and `SwitchToThisWindow` routines with process priority escalation (`High` process priority class, `AboveNormal` UI thread priority) to preempt exclusive and borderless fullscreen DirectX/Vulkan game surfaces instantly.
+- **Smooth Mode Switching**: One serialized, latest-wins hardware dispatch per switch. Windows power overlay synchronization is deferred and telemetry pauses during the settle window, completely eliminating USB/Bluetooth renegotiation stutter and peripheral dropouts.
+- **Instant Caption & Minimize Controls**: Dedicated title bar caption buttons (`_btnCaptionMin`, `_btnCaptionClose`) immediately release capture, strip topmost status, and demote foreground priority to guarantee instantaneous background hiding without UI thread hanging.
 
-### ⚡ CPU Power Limit Control (PL1 / PL2) via PawnIO
-- **Intel RAPL Control**: Real-time adjustment of PL1 (Sustained Power) and PL2 (Short Burst Power) limits in Watts.
-- **Dynamic Thermal Safety Arbitration**: Automatic thermal ceiling protection without overwriting your saved custom profiles.
+### ⚡ CPU Power Limits (PL1/PL2) via PawnIO & Native Ring-0 MMIO/MSR
+- **Expanded Custom PL1 Sliders up to CPU Max PL2**: Custom PL1 sliders expand all the way up to CPU Max PL2 (`PL1 == Max PL2`), unlocking maximum continuous thermal headroom for sustained multi-threaded rendering and gaming.
+- **Directional Split-Write Hazard Protection**: Ring-0 MMIO/MSR engine eliminates transient out-of-order power limits when writing 64-bit Package RAPL registers (`0xFED159A0` / `0xFED159A4`):
+  ```
+  NewPL1 > OldPL2 ? Write PL2 then PL1 : Write PL1 then PL2
+  ```
+- **Firmware-Derived & Immutable BIOS Defaults**: Automatically captures authentic OEM baseline limits per mode (`Eco`, `Quiet`, `Balanced`, `Performance`, `Turbo`) from SMBIOS, zero-copy ACPI/AML `PPCC` tables, Acer BIOS MOF WMI classes, and Intel RAPL MSRs (`0x606`, `0x614`). Factory defaults remain immutable per profile.
+- **Atomic RAPL Execution**: Single locked MSR `0x610` transaction preserving Tau time windows and mirroring settings to MCHBAR while verifying BIOS lock bit assertions.
+- **Active Drift Re-Verification**: Periodically inspects package power limits every 2 seconds and re-asserts target wattage if firmware drifts limits by more than 1 W.
+- **One-Click Reset & Dedicated Re-Scan**: Instant restoration of OEM per-mode defaults with a dedicated, fully responsive **🔍 Re-Scan** button that re-evaluates silicon capabilities and firmware tables on demand.
+
+### 🦀 Full Native Rust Core (`predator_core`)
+High-performance native Rust core compiled to `predator_core.dll` and embedded directly inside the executable, accelerating critical hot paths:
+- **Fan Curve Piece-Wise Linear Interpolation & Damping**: Native sub-millisecond calculation of fan speeds from custom multi-point curves with historical EMA damping buffers to eliminate abrupt fan oscillation.
+- **Low-Level Keyboard Hook Pre-Filter**: High-frequency Win32 keyboard hook interpretation executed in compiled native code with minimal OS dispatch latency, including a passthrough rule that guarantees Windows, modifier, navigation and OEM keys are never hijacked by a scancode collision.
+- **High-Resolution Telemetry Worker**: Ultra-low-overhead sensor acquisition engine polling temperatures, fan tachometers, and wattage without managed garbage collection pauses.
+- **PawnIO Ring-0 Engine**: Direct kernel-mode execution with directional hazard protection for MMIO MCHBAR and MSR register read/write operations.
+- **Multi-Stage Thermal Safety Coordinator**: Native safety supervisor evaluating warning, ceiling, and critical stages with automatic hardware fan step rate limiting.
+- **RGB Animation Frame Generator**: High-speed frame rendering engine calculating 33 hardware-matched dynamic lighting effects plus Off/Static states.
+- **WASAPI Real-Time Audio Spectrum Analyzer**: Zero-allocation lock-free ring buffer with `realfft` Hann-windowed FFT spectrum analysis, log-spaced frequency bands, decaying peak tracking, and automatic reconnect backoff loops on audio device disconnect/unplug.
+- **Zero-Copy ACPI/AML PPCC Parser**: Slice-based binary AML parser extracting platform power capabilities safely without intermediate managed heap allocations.
+- **EC-HID Direct Transport**: Native SetupAPI enumeration and synchronized HID feature report exchanges with zero-copy buffer transfers.
+- **Native Keyboard Decision Engine**: Keystroke interpretation for the low-level hook — modifier tracking, injected-key rejection, function/media pass-through, Predator/Mode scancode disambiguation, hold timeouts, Predator+number combos and custom mode shortcut matching — all decided in compiled native code. `SetWindowsHookEx` itself stays managed for thread affinity and delegate lifetime.
+- **Native Shortcut Rule Engine**: All validation rules for custom mode shortcuts (function keys, Win chords, modifier-only keys, reserved system keys, OS-owned chords, standard Ctrl editing chords) and duplicate-combination detection, with messages still composed in the UI layer.
+- **Native Battery ETA Engine**: EMA smoothing, phase-change handling, sleep/clock-skew re-baselining and plausibility clamps for calibration charge/discharge estimates.
+- **Native Telemetry History**: Fixed-capacity ring buffer with gap-aware min/max/average and bounded snapshot export behind an opaque handle.
+- **Native Graph Projection**: The per-frame series-to-pixel transform for the live telemetry charts.
+- **Native Process Matching**: Executable/process name normalisation, per-profile match checks and game-profile field clamping for Game Sync.
+- **Native Pipe Framing**: Control-character stripping, UTF-8-safe truncation and message validation for the secure named-pipe channel.
 
 ### ❄️ Advanced Fan & Cooling Control
-- **Direct EC Hardware Access**: Communicates directly with your laptop's Embedded Controller (EC) chip via high-speed HID commands, with automatic fallback to Acer WMI.
-- **3-Fan Support**: Full controls for laptops with CPU, GPU, and 3rd Chassis/System fans.
-- **Acer CoolBoost Toggle**: Unlocks elevated maximum fan RPM limits for intense gaming sessions.
-- **Interactive Fan Curve Editor**: Design custom multi-point fan curves with your mouse.
-- **Spike Damping & Hysteresis**: Prevents irritating fan spin-up and spin-down noises caused by momentary 1-second CPU usage spikes.
-- **FanLock Channel Locking**: Lock any individual fan to a specific speed independently.
+- **Direct EC Hardware Access**: Native HID transport talks directly to the Embedded Controller (EC) chip with transparent fallback to Acer WMI.
+- **3-Fan Modern Architecture**: Independent speed controls and tachometers for modern Predator laptops with CPU, GPU, and 3rd System/Chassis fans.
+- **Acer CoolBoost Hardware Toggle**: Elevates maximum fan RPM limits beyond stock curves for peak thermal dissipation during heavy gaming.
+- **Interactive Multi-Point Fan Curve Editor**: Intuitive visual curve editor to build custom temperature-to-RPM response curves.
+- **Spike Damping & Hysteresis**: Eliminates irritating spin-up/spin-down noise cycles triggered by momentary 1-second CPU usage bursts.
+- **FanLock Channel Locking**: Lock any individual fan channel to a constant speed independently.
+- **Multi-Stage Thermal Guard**: Native coordinator featuring Warn, Ceiling, and Critical thermal tiers per CPU/GPU with configurable thresholds, fan floors, EMA smoothing, and dynamic CPU watt capping.
 
 ### 🎮 GPU & Display Control (MUX Switch)
-- **BIOS MUX Switch Toggle**: Switch between **Hybrid Mode (Nvidia Optimus)** for long battery life and **Discrete GPU Mode** for maximum gaming FPS without display bottlenecking. *(Note: Requires a normal system reboot to switch hardware displays).*
-- **GPU Sleep (D3Cold) Status**: Live indicator showing when your dedicated Nvidia graphics card is in deep low-power sleep, saving valuable watts on battery.
-- **Display Refresh Rate Switcher**: Instantly toggle your screen between 60 Hz (for battery preservation) and your panel's maximum (144 Hz, 165 Hz, or 240 Hz).
+- **BIOS MUX Switch Toggle**: Easily toggle between **Hybrid (Nvidia Optimus)** for maximum battery life and **Discrete GPU** for uncompromised display performance with zero Optimus overhead *(requires standard system reboot)*.
+- **GPU Sleep (D3Cold) Status**: Live UI indicator displaying when your dedicated Nvidia graphics card enters deep power-saving sleep.
+- **Display Refresh Rate Switcher**: Instantly toggle display panels between 60 Hz (for battery preservation) and maximum factory refresh rates (144 Hz, 165 Hz, or 240 Hz).
 
-### 🌈 34 Keyboard RGB Lighting Effects
-Upgrade from the 8 basic factory presets to **34 dynamic lighting effects**:
-- *Static, Breathing, Neon, Wave, Shifting, Zoom, Meteor, Twinkling, Rainbow, Spiral, Fire, Waterfall, and 22 more!*
-- Adjustable lighting speed, brightness slider, and custom 4-zone colors.
-  
+### 🌈 Dynamic RGB Engine & Lighting Control
+- **33 Dynamic Effects + Off / Static**: Upgraded lighting engine offering 33 fluid, hardware-matched dynamic lighting effects (*Breathing, Neon, Wave, Shifting, Zoom, Meteor, Rainbow, Spiral, Fire, Waterfall, Audio Reactive, and 22 more*), with complete removal of the unstable legacy "Twinkling" mode.
+- **Explicit "Off" Mode**: Added clean, dedicated "Off" presets for both Static Per-Zone and dynamic modes to disable keyboard lighting entirely.
+- **Strict Color State Separation**: Persisted per-zone static colors are strictly decoupled from transient dynamic animation colors. Booting into dynamic lighting or previewing effects never clobbers your custom saved per-zone static palette.
+- **Independent Zone & Key Editing**: Granular 4-zone palette editor and experimental per-key matrix mapping with verified hardware capability detection.
+
+### ⌨️ Embedded Custom Mode Shortcuts
+- **Integrated Settings Card 5**: Embedded directly into the Settings tab (Card 5) with zero secondary dialog windows required.
+- **Per-Profile Hotkey Binding**: Assign custom system-wide key combinations to switch between **Eco**, **Quiet**, **Balanced**, **Performance**, and **Turbo** modes.
+- **Intuitive Workflow Controls**:
+  - **Record**: Click to capture any key sequence with real-time modifier tracking (Ctrl, Alt, Shift, Win).
+  - **Clear**: Remove active shortcut binding for a specific profile.
+  - **Reset Defaults**: Restore standard factory shortcut configurations in one click.
+  - **Save & Apply**: Immediately persist hotkey registrations to active low-level hook listeners.
+
 ### 🔋 Battery Care & Health
-- **Live Battery Health & Wear**: See your laptop battery's real wear percentage, designed capacity, and full charge capacity.
-- **Battery Cycle Count**: Track how many charge cycles your battery has completed.
-- **Hardware Battery Calibration Cycle**: Automated cycle to reset and recalibrate internal battery fuel-gauge sensors.
-- **Power-Off USB Charging Toggle**: Control whether external devices can charge from your laptop's USB ports while the laptop is turned off, with a low-battery cutoff floor.
+- **Live Battery Health & Wear**: Real-time readouts of designed battery capacity, current full charge capacity, and degradation wear percentage.
+- **Battery Cycle Counter**: Monitor total accumulated hardware charge cycles.
+- **Hardware Battery Calibration Cycle**: Automated conditioning workflow with wake-lock protection and real-time EMA discharge ETA computation to recalibrate battery fuel-gauge sensors.
+- **Power-Off USB Charging Toggle**: Control external USB charging while your laptop is powered off, complete with a low-battery safety cutoff threshold.
 
 ### 📊 Live Hardware Telemetry
-- **Accurate CPU & GPU Temperatures**: Real-time readouts in the app window and right in the system tray.
-- **Windows Hardware Load**: Monitors CPU and GPU utilization using lightweight Windows performance counters.
-- **Real-Time Streaming Graph**: Watch fan speeds and temperatures stream live on an interactive chart.
+- **Accurate Real-Time Telemetry**: Real-time CPU & GPU temperatures and fan tachometer speeds displayed in-app and in the system notification tray.
+- **Windows PDH Hardware Load**: Low-overhead hardware utilization tracking leveraging native Windows Performance Data Helper counters.
+- **Real-Time Streaming Graph**: Live charting of thermal histories and fan RPM curves.
 
 ### 🎨 Themes & Diagnostics
-- **Theme Switcher**: Switch between modern **Dark**, **Light**, or your Windows **System** theme.
-- **One-Click Diagnostic Dump**: Click one button to copy all your laptop's hardware specifications, sensor states, and EC identifiers to your clipboard for easy sharing on forums or bug reports.
+- **Theme Switcher**: Instant switching between modern **Dark**, **Light**, or Windows **System** themes with high-DPI font scaling.
+- **One-Click Diagnostic Dump**: Generate comprehensive hardware reports containing SMBIOS platform IDs, ACPI tables, and sensor registers to your clipboard for quick troubleshooting.
 
 ---
 
-## 🛡️ 100% Offline Privacy Guarantee
+## Network and update behavior
 
-Predator Control App is built with a **strict offline-first privacy architecture**:
-- ❌ **Zero Telemetry**: No tracking, no analytics, no identifiers sent anywhere.
-- ❌ **No Background Web Traffic**: The application never touches the internet on startup or while running in the background.
-- 🔒 **Secure On-Demand Updates Only**: The app only connects to GitHub when you explicitly click the "Check for Updates" button.
-- 🛡️ **SHA-256 Checksum Verification**: Every download is verified against published cryptographic hashes to protect against tampering.
+Hardware controls do not require internet access. The app checks GitHub once at startup, including when launched hidden, and when requested through Settings. It does not perform periodic update polling or analytics.
 
+The updater restricts download URLs to HTTPS and permitted GitHub hosts. It requires and verifies an asset-specific SHA-256 before installing an executable. A checksum is an integrity comparison, not a publisher signature. The local build remains unsigned.
 
+---
+
+## 🧪 Automated Testing & Code Quality
+
+The previous brightness update passed 243 selected .NET and 126 pure Rust tests; those are historical results. Earlier migration verification: 262 selected .NET tests passed; Release build had zero warnings and errors; 137 Rust tests passed across 15 filtered module runs. The complete inherited hardware/integration suite, UI launch, and physical keyboard brightness require separate verification.
+
+Brightness regressions use hardware-disabled controllers or audited pure functions. The complete inherited .NET suite includes tests that can access live hardware and was not run indiscriminately. Automated packet checks do not measure keyboard light output; compare the new build on the target laptop at 0%, intermediate values, and 100%, including rapid changes, static colors, dynamic effects, and audio-reactive lighting.
+
+---
 
 <img width="2510" height="1384" alt="image" src="https://github.com/user-attachments/assets/9b314410-fec7-4ceb-af88-52d6e8d0823e" />
 
@@ -198,55 +243,55 @@ Predator Control App is built with a **strict offline-first privacy architecture
 
 ## 🧹 How to Safely Disable PredatorSense (Optional)
 
-Predator Control App talks directly to your laptop's built-in Windows ACPI/WMI/EC drivers. You do **not** need Acer's background services running. If you want to disable them to save RAM and CPU:
+Predator Control App communicates directly with your laptop's hardware via ACPI, WMI, and EC transports. Acer's background services are not required:
 
 ### Step 1: Disable Background Services
-1. Press `Win + R` on your keyboard, type **`services.msc`**, and press **Enter**.
-2. Locate the following services(it will vary in your device):
+1. Press `Win + R`, type **`services.msc`**, and press **Enter**.
+2. Locate the following services:
    - `Acer Gaming Service`
+   - `Acer Quick Access Service`
    - `AcerService`
    - `Acer Power Button Service`
-   - `Acer Agent Service`
-   - `Acer System Monitor Service`
-3. For each one:
-   - Double-click the service.
-   - Change **Startup type** to **Disabled**.
-   - Click **Stop** if it is currently running.
+3. For each service:
+   - Double-click the entry.
+   - Set **Startup type** to **Disabled**.
+   - Click **Stop** if running.
    - Click **OK**.
 
 ### Step 2: Disable PredatorSense Startup
 1. Press `Ctrl + Shift + Esc` to open **Task Manager**.
-2. Click the **Startup apps** tab on the left.
-3. Find **PredatorSense** in the list, right-click it, and choose **Disable**.
-
-> 💡 *Note: You can easily reverse these steps at any time if you ever want to re-enable PredatorSense.*
+2. Navigate to the **Startup apps** tab.
+3. Locate **PredatorSense**, right-click, and select **Disable**.
 
 ---
 
 ## 💻 Building from Source
 
-If you are a developer and want to build the application yourself:
-
 ### Requirements
 - Windows 10 or 11 (64-bit)
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
+- [Rust Toolchain (stable-x86_64-pc-windows-msvc)](https://www.rust-lang.org/) *(optional, required for rebuilding `predator_core`)*
 
 ### Quick Commands
 ```powershell
-# 1. Clone the repository
+# 1. Clone repository
 git clone https://github.com/red16124724/Predator-Control-App.git
 cd Predator-Control-App
 
-# 2. Restore dependencies
+# 2. Build and test native Rust core (optional)
+cd predator_core
+cargo test --release
+cargo build --release
+Copy-Item target/release/predator_core.dll ../PredatorControlApp/predator_core.dll
+cd ..
+
+# 3. Restore .NET dependencies
 dotnet restore PredatorControlApp.slnx
 
-# 3. Build the solution
-dotnet build PredatorControlApp.slnx -c Release
+# 4. Run only tests audited for no intentional hardware writes
+# See CONTRIBUTING.md before selecting tests from the inherited suite.
 
-# 4. Run automated test suite
-dotnet test PredatorControlApp.slnx
-
-# 5. Publish the standalone single-file binary
+# 5. Publish standalone single-file binary (54.4 MB)
 dotnet publish PredatorControlApp/PredatorControlApp.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 ```
 
@@ -254,13 +299,16 @@ dotnet publish PredatorControlApp/PredatorControlApp.csproj -c Release -r win-x6
 
 ## ⚠️ Disclaimer
 
-This is a free, open-source community utility. It is not affiliated with, endorsed by, or sponsored by Acer Inc.
-
+This is an independent open-source utility and is not affiliated with, endorsed by, or sponsored by Acer Inc.
 - Acer, Predator, PredatorSense, CoolBoost, and DustDefender are registered trademarks of Acer Inc.
-- While this application has been carefully designed with failsafes, hardware controls directly adjust cooling and power states. Use responsibly.
+- Hardware controls directly adjust fan speeds and power states. Use responsibly.
 
 ---
 
 ## 📄 License
 
 This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+
+Migration test scope: targeted tests do not intentionally issue hardware writes. In the earlier migration, loading PredatorNativeCore could open PawnIO and start telemetry/NVAPI polling. The current build initializes those facilities on demand; tests that request hardware operations still require care. Physical hardware effects were not measured.
+
+Local audit update: see AUDIT.md at the source root for fixes, exact verification scope, and unresolved hardware-policy findings.

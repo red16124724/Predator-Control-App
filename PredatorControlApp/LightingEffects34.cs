@@ -15,50 +15,75 @@ namespace PredatorControlApp
         Shifting = 4,
         Zoom = 5,
         Meteor = 6,
-        Twinkling = 7,
-        Snake = 8,
-        Lightning = 9,
-        Stack = 10,
-        MotionPoint = 11,
-        ZoomIn = 12,
-        Ripple = 13,
-        Raindrop = 14,
-        Fireball = 15,
-        Snow = 16,
-        Heartbeat = 17,
-        Dazzling = 18,
-        Matrix = 19,
-        Swiping = 20,
-        RowWave = 21,
-        Racing = 22,
-        Sprouting = 23,
-        Disco = 24,
-        PingPong = 25,
-        LightShow = 26,
-        FollowOperatingMode = 27,
-        PerKey = 28,
-        Combo = 29,
-        Rainbow = 30,
-        RainbowSpectrum = 30,
-        Slash = 31,
-        Star = 32,
-        Blasting = 33
+        Snake = 7,
+        Lightning = 8,
+        Stack = 9,
+        MotionPoint = 10,
+        ZoomIn = 11,
+        Ripple = 12,
+        Raindrop = 13,
+        Fireball = 14,
+        Snow = 15,
+        Heartbeat = 16,
+        Dazzling = 17,
+        Matrix = 18,
+        Swiping = 19,
+        RowWave = 20,
+        Racing = 21,
+        Sprouting = 22,
+        Disco = 23,
+        PingPong = 24,
+        LightShow = 25,
+        FollowOperatingMode = 26,
+        PerKey = 27,
+        Combo = 28,
+        Rainbow = 29,
+        RainbowSpectrum = 29,
+        Slash = 30,
+        Star = 31,
+        Blasting = 32
     }
 
     public static class LightingEffectsManager
     {
         public static readonly string[] EffectNames =
         {
-            "Static", "Breathing", "Neon", "Wave", "Shifting", "Zoom", "Meteor", "Twinkling",
+            "Static", "Breathing", "Neon", "Wave", "Shifting", "Zoom", "Meteor",
             "Snake", "Lightning", "Stack", "Motion Point", "Zoom In", "Ripple", "Raindrop",
             "Fireball", "Snow", "Heartbeat", "Dazzling", "Matrix", "Swiping", "Row Wave",
             "Racing", "Sprouting", "Disco", "Ping Pong", "Light Show", "Follow Power Mode",
             "Per-Key Rainbow", "Combo Pulse", "Rainbow Spectrum", "Slash", "Starry Night", "Blasting"
         };
 
+        public static int GetEffectIndex(string? name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return 0;
+            string trimmed = name.Trim();
+            if (string.Equals(trimmed, "Off", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(trimmed, "Off (Static)", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(trimmed, "Static", StringComparison.OrdinalIgnoreCase))
+            {
+                return 0;
+            }
+
+            for (int i = 0; i < EffectNames.Length; i++)
+            {
+                if (string.Equals(EffectNames[i], trimmed, StringComparison.OrdinalIgnoreCase))
+                    return i;
+            }
+            return 0;
+        }
+
         private static CancellationTokenSource? _softwareAnimCts;
         private static readonly object _animLock = new();
         private static int _currentAnimationGeneration;
+
+        /// <summary>Number of keyboard lighting zones driven by software animation.</summary>
+        private const int ZoneCount = 4;
+
+        /// <summary>Reusable native frame buffer (zones * RGB), one per worker thread.</summary>
+        [ThreadStatic]
+        private static byte[]? _nativeFrameBuffer;
 
         public static bool IsSoftwareAnimationRunning
         {
@@ -78,7 +103,7 @@ namespace PredatorControlApp
                 Interlocked.Increment(ref _currentAnimationGeneration);
                 if (_softwareAnimCts != null)
                 {
-                    try { _softwareAnimCts.Cancel(); } catch { }
+                    try { _softwareAnimCts.Cancel(); _softwareAnimCts.Dispose(); } catch { }
                     _softwareAnimCts = null;
                 }
             }
@@ -93,7 +118,7 @@ namespace PredatorControlApp
             byte r = (byte)Math.Clamp(Math.Round(color.R * alphaScale), 0, 255);
             byte g = (byte)Math.Clamp(Math.Round(color.G * alphaScale), 0, 255);
             byte b = (byte)Math.Clamp(Math.Round(color.B * alphaScale), 0, 255);
-            byte effectiveBrightness = (byte)Math.Clamp(Math.Round(brightness * alphaScale), 0, 100);
+            byte effectiveBrightness = color.A == 0 ? (byte)0 : brightness;
             ApplyEffect(effectIndex, wmi, r, g, b, effectiveBrightness, speed, direction, currentPowerMode);
         }
 
@@ -104,7 +129,7 @@ namespace PredatorControlApp
             OperatingMode currentPowerMode = OperatingMode.Balanced)
         {
             // Clamp inputs to safe boundaries
-            effectIndex = Math.Clamp(effectIndex, 0, 33);
+            effectIndex = Math.Clamp(effectIndex, 0, EffectNames.Length - 1);
             brightness = Math.Clamp(brightness, (byte)0, (byte)100);
             speed = Math.Clamp(speed, (byte)1, (byte)100);
             direction = (byte)(direction != 0 ? 1 : 0);
@@ -123,7 +148,7 @@ namespace PredatorControlApp
                 return;
             }
 
-            if (effectIndex <= 7)
+            if (effectIndex <= 6)
             {
                 // Native hardware effect supported directly by EC / WMI
                 byte hwSpeed = (byte)Math.Clamp(speed <= 9 ? speed : Math.Round(speed * 9.0 / 100.0), 1, 9);
@@ -131,7 +156,7 @@ namespace PredatorControlApp
                 return;
             }
 
-            // Advanced effects (8..33)
+            // Advanced effects (7..32)
             var effect = (LightingEffect34)effectIndex;
             if (effect == LightingEffect34.FollowOperatingMode)
             {
@@ -147,10 +172,16 @@ namespace PredatorControlApp
                 return;
             }
 
+            // For software animations (7..32), explicitly halt hardware EC animations (e.g. Meteor mode 6)
+            // so the EC yields control of the LEDs to SetZoneColor / SetGamingRgbKb.
+            wmi.SetRgbMode(0, r, g, b, brightness, 1, 0);
+            wmi.LastMode = effectIndex;
+
             // Software-driven animated effects across 4 zones
             lock (_animLock)
             {
                 int generation = ++_currentAnimationGeneration;
+                try { _softwareAnimCts?.Cancel(); _softwareAnimCts?.Dispose(); } catch { }
                 var cts = new CancellationTokenSource();
                 _softwareAnimCts = cts;
                 var token = cts.Token;
@@ -162,8 +193,12 @@ namespace PredatorControlApp
                     {
                         try
                         {
-                            ApplyAnimationFrame(effect, wmi, step++, r, g, b, brightness, speed, token, generation);
-                            int delayMs = Math.Max(125, 200 - ((speed <= 9 ? speed * 10 : speed) * 8 / 10));
+                            ApplyAnimationFrame(effect, wmi, step++, r, g, b, token, generation);
+                            // Frame pacing lives in the native core when available.
+                            uint nativeDelay = PredatorNativeCore.RgbFrameDelayMs(speed);
+                            int delayMs = nativeDelay > 0
+                                ? (int)nativeDelay
+                                : Math.Max(125, 200 - ((speed <= 9 ? speed * 10 : speed) * 8 / 10));
                             await Task.Delay(delayMs, token);
                         }
                         catch (OperationCanceledException) { break; }
@@ -173,15 +208,37 @@ namespace PredatorControlApp
             }
         }
 
-        private static void ApplyAnimationFrame(
+        internal static void ApplyAnimationFrame(
             LightingEffect34 effect, WmiController wmi, int step,
-            byte baseR, byte baseG, byte baseB, byte brightness, byte speed,
-            CancellationToken token, int generation)
+            byte baseR, byte baseG, byte baseB,
+            CancellationToken token, int generation, bool forceManaged = false)
         {
             if (token.IsCancellationRequested || generation != Volatile.Read(ref _currentAnimationGeneration))
                 return;
 
-            float scale = Math.Clamp(brightness, (byte)0, (byte)100) / 100f;
+            // Native frame generation: the whole 4-zone frame is computed and written in
+            // one C-ABI call with no managed allocation.
+            byte[]? buffer = _nativeFrameBuffer;
+            if (buffer == null || buffer.Length < PredatorNativeCore.MaxNativeZones * 3)
+            {
+                buffer = new byte[PredatorNativeCore.MaxNativeZones * 3];
+                _nativeFrameBuffer = buffer;
+            }
+            // SetZoneColor applies the slider brightness once at the transport boundary.
+            if (!forceManaged && PredatorNativeCore.RgbRenderFrame((int)effect, (ulong)step, baseR, baseG, baseB, 100, buffer, ZoneCount) == ZoneCount)
+            {
+                if (token.IsCancellationRequested || generation != Volatile.Read(ref _currentAnimationGeneration))
+                    return;
+                for (int zone = 1; zone <= ZoneCount; zone++)
+                {
+                    int offset = (zone - 1) * 3;
+                    wmi.SetZoneColor(zone, buffer[offset], buffer[offset + 1], buffer[offset + 2]);
+                }
+                return;
+            }
+
+            // Managed fallback (native core not loaded).
+            const float scale = 1f;
             byte scaleR(byte c) => (byte)Math.Clamp(Math.Round(c * scale), 0, 255);
             byte scaleG(byte c) => (byte)Math.Clamp(Math.Round(c * scale), 0, 255);
             byte scaleB(byte c) => (byte)Math.Clamp(Math.Round(c * scale), 0, 255);
@@ -241,6 +298,38 @@ namespace PredatorControlApp
                     }
                     break;
             }
+        }
+
+        /// <summary>Reusable audio-reactive frame buffer, one per thread.</summary>
+        [ThreadStatic]
+        private static byte[]? _audioFrameBuffer;
+
+        /// <summary>
+        /// Drives the lighting zones from the audio spectrum: bass lights the first zone,
+        /// treble the last, with transient (beat) boost applied by the native analyzer.
+        /// Returns false when the native spectrum analyzer is unavailable.
+        /// </summary>
+        public static bool ApplyAudioReactiveFrame(AudioMeter meter, WmiController wmi, byte r, byte g, byte b, byte brightness)
+        {
+            if (meter == null || wmi == null) return false;
+
+            byte[]? buffer = _audioFrameBuffer;
+            if (buffer == null || buffer.Length < ZoneCount * 3)
+            {
+                buffer = new byte[ZoneCount * 3];
+                _audioFrameBuffer = buffer;
+            }
+
+            if (meter.RenderZones(r, g, b, 100, buffer, ZoneCount) != ZoneCount)
+                return false;
+
+            wmi.SetBrightness(brightness, applyMode: false);
+            for (int zone = 1; zone <= ZoneCount; zone++)
+            {
+                int offset = (zone - 1) * 3;
+                wmi.SetZoneColor(zone, buffer[offset], buffer[offset + 1], buffer[offset + 2]);
+            }
+            return true;
         }
 
         private static Color ColorFromHsv(double hue, double saturation, double value)
