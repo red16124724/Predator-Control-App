@@ -600,3 +600,122 @@ fn test_ffi_misaligned_handles_and_migration_stress() {
         assert_eq!(extracted, "a🎮b");
     }
 }
+
+#[test]
+fn test_ffi_null_partition_pointer_protection() {
+        use predator_core::migration_exports::*;
+    use predator_core::thermal::NativeThermalDecision;
+
+    unsafe {
+        let low_ptrs = [0x8usize, 0x10, 0x20, 0x100, 0x1000, 0xFFF8];
+
+        for &addr in &low_ptrs {
+            // Curve follower
+            let curve_handle = addr as *mut predator_core::curve::FanCurveFollower;
+            let pts = [ControlPoint { temp: 40, speed: 20 }];
+            assert_eq!(predator_curve_update(curve_handle, 50.0, pts.as_ptr(), pts.len(), 0), 50);
+            assert_eq!(predator_curve_update(std::ptr::null_mut(), 50.0, addr as *const ControlPoint, 1, 0), 50);
+            assert_eq!(predator_curve_interpolate(addr as *const ControlPoint, 1, 50), 50);
+            predator_curve_reset(curve_handle);
+            predator_curve_destroy(curve_handle);
+
+            // Thermal coordinator
+            let th_handle = addr as *mut predator_core::thermal::ThermalCoordinator;
+            assert_eq!(predator_thermal_evaluate(th_handle, 50.0, 50.0, 45, 15, 45, std::ptr::null_mut()), -1);
+            let real_th = predator_thermal_create();
+            assert_eq!(predator_thermal_evaluate(real_th, 50.0, 50.0, 45, 15, 45, addr as *mut NativeThermalDecision), -1);
+            predator_thermal_destroy(real_th);
+            assert_eq!(predator_thermal_reset(th_handle), -1);
+            predator_thermal_destroy(th_handle);
+
+            // RGB engine
+            let rgb_handle = addr as *mut predator_core::rgb::RgbAnimator;
+            assert_eq!(predator_rgb_next_frame(rgb_handle, addr as *mut u8, 4), -1);
+            assert_eq!(predator_rgb_delay_ms(rgb_handle), 0);
+            predator_rgb_set_brightness(rgb_handle, 100);
+            predator_rgb_reset(rgb_handle);
+            predator_rgb_destroy(rgb_handle);
+            assert_eq!(predator_rgb_hsv_to_rgb(0.0, 1.0, 1.0, addr as *mut u8), -1);
+            assert_eq!(predator_rgb_blend(addr as *mut u8, addr as *const u8, 4, 0.5), -1);
+            assert_eq!(predator_rgb_apply_brightness(addr as *mut u8, 4, 128), -1);
+
+            // Audio analyzer
+            let audio_handle = addr as *mut predator_core::audio::SpectrumAnalyzer;
+            assert_eq!(predator_audio_push(audio_handle, addr as *const f32, 16, 2), -1);
+            assert_eq!(predator_audio_get_bands(audio_handle, addr as *mut f32, 16), -1);
+            assert_eq!(predator_audio_get_level(audio_handle), 0.0);
+            assert_eq!(predator_audio_is_beat(audio_handle), 0);
+            assert_eq!(predator_audio_beat_strength(audio_handle), 0.0);
+            assert_eq!(predator_audio_render_zones(audio_handle, 255, 255, 255, 100, addr as *mut u8, 4), -1);
+            predator_audio_reset(audio_handle);
+            predator_audio_destroy(audio_handle);
+
+            // History buffer
+            let hist_handle = addr as *mut std::ffi::c_void;
+            predator_history_add(hist_handle, 42.0, 1);
+            assert_eq!(predator_history_count(hist_handle), 0);
+            assert_eq!(predator_history_get(hist_handle, 0, addr as *mut f64), 0);
+            assert_eq!(predator_history_min(hist_handle, addr as *mut f64), 0);
+            assert_eq!(predator_history_max(hist_handle, addr as *mut f64), 0);
+            assert_eq!(predator_history_average(hist_handle, addr as *mut f64), 0);
+            assert_eq!(predator_history_latest(hist_handle, addr as *mut f64), 0);
+            assert_eq!(predator_history_snapshot(hist_handle, addr as *mut f64, 8), 0);
+            predator_history_clear(hist_handle);
+            predator_history_destroy(hist_handle);
+
+            // PawnIO & Telemetry & NVAPI out pointers
+            assert_eq!(predator_pawnio_read_msr(0x610, addr as *mut u64), -1);
+            assert_eq!(predator_pawnio_read_mmio32(0xFED159A0, addr as *mut u32), -1);
+            assert_eq!(predator_telemetry_get_snapshot(addr as *mut predator_core::telemetry::NativeTelemetrySnapshot), -1);
+            assert_eq!(predator_nvapi_get_gpu_load(addr as *mut f64), -1);
+            assert_eq!(predator_nvapi_get_gpu_temperature(addr as *mut f64), -1);
+        }
+    }
+}
+
+#[test]
+fn test_audio_band_edges_exhaustive_monotonicity() {
+    use predator_core::audio::SpectrumAnalyzer;
+
+    let fft_sizes = [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384];
+    for &fft_size in &fft_sizes {
+        for band_count in 1..=64 {
+            let analyzer = SpectrumAnalyzer::new(48000, fft_size, band_count);
+            assert!(analyzer.is_some(), "Failed for fft_size: {}, band_count: {}", fft_size, band_count);
+            let mut analyzer = analyzer.unwrap();
+            let bands = analyzer.bands();
+            assert_eq!(bands.len(), band_count);
+        }
+    }
+}
+
+#[test]
+fn test_history_buffer_extreme_capacity_clamp() {
+    use predator_core::history::HistoryBuffer;
+
+    // Huge capacity must be clamped to MAX_CAPACITY without OOM or crash
+    let huge = HistoryBuffer::new(i32::MAX);
+    assert_eq!(huge.capacity(), 100_000);
+
+    // Negative capacity must be clamped to minimum (2)
+    let tiny = HistoryBuffer::new(-50);
+    assert_eq!(tiny.capacity(), 2);
+}
+
+#[test]
+fn test_curve_point_count_excessive_length() {
+    unsafe {
+        let pts = [ControlPoint { temp: 40, speed: 20 }];
+        let handle = predator_curve_create(2);
+        assert!(!handle.is_null());
+
+        // Oversized point count (> 1024) must return safe fallback without executing
+        let fallback = predator_curve_update(handle, 50.0, pts.as_ptr(), 1025, 30);
+        assert_eq!(fallback, 50);
+
+        let interp = predator_curve_interpolate(pts.as_ptr(), 2000, 50);
+        assert_eq!(interp, 50);
+
+        predator_curve_destroy(handle);
+    }
+}

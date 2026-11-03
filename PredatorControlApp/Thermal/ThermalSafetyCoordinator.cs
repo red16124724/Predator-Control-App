@@ -53,7 +53,7 @@ namespace PredatorControlApp
         private const int HysteresisHoldFloorPercent = 15;
 
         private readonly object _sync = new();
-        private readonly IntPtr _thermalHandle;
+        private IntPtr _thermalHandle;
         private bool _native;
         private bool _disposed;
         private ThermalSafetyProfile _profile;
@@ -92,6 +92,7 @@ namespace PredatorControlApp
                 // rather than evaluating against different thresholds.
                 _native = false;
                 PredatorNativeCore.ThermalDestroy(_thermalHandle);
+                _thermalHandle = IntPtr.Zero;
             }
         }
 
@@ -104,7 +105,11 @@ namespace PredatorControlApp
             if (_disposed) return;
             _disposed = true;
             _native = false;
-            if (_thermalHandle != IntPtr.Zero) PredatorNativeCore.ThermalDestroy(_thermalHandle);
+            if (_thermalHandle != IntPtr.Zero)
+            {
+                PredatorNativeCore.ThermalDestroy(_thermalHandle);
+                _thermalHandle = IntPtr.Zero;
+            }
             GC.SuppressFinalize(this);
         }
 
@@ -112,7 +117,11 @@ namespace PredatorControlApp
         {
             try
             {
-                if (_thermalHandle != IntPtr.Zero) PredatorNativeCore.ThermalDestroy(_thermalHandle);
+                if (_thermalHandle != IntPtr.Zero)
+                {
+                    PredatorNativeCore.ThermalDestroy(_thermalHandle);
+                    _thermalHandle = IntPtr.Zero;
+                }
             }
             catch { }
         }

@@ -14,6 +14,7 @@ namespace PredatorControlApp
         private readonly Action<int> _onHotkeyEvent;
         private readonly object _lock = new();
         private bool _isDisposed;
+        private readonly CancellationTokenSource _cts = new();
         private int _isRestarting;
 
         private long _lastModeKeyTick;

@@ -1362,15 +1362,15 @@ namespace PredatorControlApp
             DynamicEffectDirection = Math.Clamp(DynamicEffectDirection, 0, 1);
             KeyboardBrightnessLevel = Math.Clamp(KeyboardBrightnessLevel, 0, 100);
 
-            if (StaticZone1ColorArgb == 0 && StaticZone2ColorArgb == 0 && StaticZone3ColorArgb == 0 && StaticZone4ColorArgb == 0)
+            if (StaticZone1ColorArgb == 0 || StaticZone2ColorArgb == 0 || StaticZone3ColorArgb == 0 || StaticZone4ColorArgb == 0)
             {
                 var parsedColors = KeyboardLightingPalette.Parse(KeyboardZoneColors, 4, Color.FromArgb(0, 160, 255));
                 if (parsedColors.Length == 4)
                 {
-                    StaticZone1ColorArgb = parsedColors[0].ToArgb();
-                    StaticZone2ColorArgb = parsedColors[1].ToArgb();
-                    StaticZone3ColorArgb = parsedColors[2].ToArgb();
-                    StaticZone4ColorArgb = parsedColors[3].ToArgb();
+                    if (StaticZone1ColorArgb == 0) StaticZone1ColorArgb = parsedColors[0].ToArgb();
+                    if (StaticZone2ColorArgb == 0) StaticZone2ColorArgb = parsedColors[1].ToArgb();
+                    if (StaticZone3ColorArgb == 0) StaticZone3ColorArgb = parsedColors[2].ToArgb();
+                    if (StaticZone4ColorArgb == 0) StaticZone4ColorArgb = parsedColors[3].ToArgb();
                 }
             }
 

@@ -9,6 +9,9 @@ namespace PredatorControlApp
             if (disposing)
             {
                 _isClosing = true;
+                try { _shutdownCts?.Cancel(); } catch { }
+                try { _shutdownCts?.Dispose(); } catch { }
+                try { _fanCommandQueue?.ClearAndStop(); } catch { }
                 try { Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerModeChanged; } catch { }
                 try { Microsoft.Win32.SystemEvents.SessionEnding -= OnSessionEnding; } catch { }
                 if (_formThemeHandler != null)

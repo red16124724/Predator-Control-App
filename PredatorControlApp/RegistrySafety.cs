@@ -139,6 +139,76 @@ namespace PredatorControlApp
             catch { return null; }
         }
 
+                public static bool TryGetRegistryInt(RegistryKey? primary, string name, out int val)
+        {
+            val = 0;
+            if (primary == null) return false;
+            try
+            {
+                var raw = primary.GetValue(name);
+                if (raw == null) return false;
+                if (raw is int i) { val = i; return true; }
+                if (raw is string s && int.TryParse(s, out var ps)) { val = ps; return true; }
+                val = Convert.ToInt32(raw);
+                return true;
+            }
+            catch { return false; }
+        }
+
+        public static bool TryGetRegistryInt(RegistryKey? primary, RegistryKey? fallback, string name, out int val)
+        {
+            return TryGetRegistryInt(primary, name, out val) || TryGetRegistryInt(fallback, name, out val);
+        }
+
+        public static bool TryGetRegistryLong(RegistryKey? primary, RegistryKey? fallback, string name, out long val)
+        {
+            val = 0;
+            if (primary != null)
+            {
+                try
+                {
+                    var raw = primary.GetValue(name);
+                    if (raw != null)
+                    {
+                        if (raw is long l) { val = l; return true; }
+                        if (raw is int i) { val = i; return true; }
+                        if (raw is string s && long.TryParse(s, out var pl)) { val = pl; return true; }
+                        val = Convert.ToInt64(raw);
+                        return true;
+                    }
+                }
+                catch { }
+            }
+            if (fallback != null)
+            {
+                try
+                {
+                    var raw = fallback.GetValue(name);
+                    if (raw != null)
+                    {
+                        if (raw is long l) { val = l; return true; }
+                        if (raw is int i) { val = i; return true; }
+                        if (raw is string s && long.TryParse(s, out var pl)) { val = pl; return true; }
+                        val = Convert.ToInt64(raw);
+                        return true;
+                    }
+                }
+                catch { }
+            }
+            return false;
+        }
+
+        public static bool TryGetRegistryBool(RegistryKey? primary, RegistryKey? fallback, string name, out bool val)
+        {
+            val = false;
+            if (TryGetRegistryInt(primary, fallback, name, out int iVal))
+            {
+                val = iVal == 1;
+                return true;
+            }
+            return false;
+        }
+
         public static void SaveModeKeyAction(int action)
         {
             lock (_regLock)

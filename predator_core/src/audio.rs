@@ -111,21 +111,24 @@ impl SpectrumAnalyzer {
         let hi = 16_000.0_f32.min(nyquist * 0.95).max(lo * 2.0);
         let bin_hz = sample_rate as f32 / fft_size as f32;
 
+        let max_bin = bins.saturating_sub(1);
         let mut edges = Vec::with_capacity(band_count + 1);
         for i in 0..=band_count {
             let t = i as f32 / band_count as f32;
             let hz = lo * (hi / lo).powf(t);
-            let bin = ((hz / bin_hz).round() as usize).clamp(1, bins - 1);
+            let bin = ((hz / bin_hz).round() as usize).clamp(1, max_bin);
             edges.push(bin);
         }
-        // Guarantee monotonic, non-degenerate bands.
+        // Guarantee monotonic, non-degenerate bands where possible within max_bin.
         for i in 1..edges.len() {
             if edges[i] <= edges[i - 1] {
-                edges[i] = edges[i - 1] + 1;
+                edges[i] = (edges[i - 1] + 1).min(max_bin);
             }
         }
-        if let Some(last) = edges.last_mut() {
-            *last = (*last).min(bins - 1);
+        for i in (0..edges.len().saturating_sub(1)).rev() {
+            if edges[i] > edges[i + 1] {
+                edges[i] = edges[i + 1];
+            }
         }
         edges
     }

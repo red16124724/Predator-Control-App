@@ -283,6 +283,14 @@ namespace PredatorControlApp
             btnRecord.Click += (s, e) => ToggleRecording(row);
             btnClear.Click += (s, e) => ClearShortcut(row);
 
+            txtShortcut.PreviewKeyDown += (s, e) =>
+            {
+                if (row.IsRecording)
+                {
+                    e.IsInputKey = true;
+                }
+            };
+
             txtShortcut.KeyDown += (s, e) =>
             {
                 if (row.IsRecording)

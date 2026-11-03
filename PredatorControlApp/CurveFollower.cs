@@ -73,6 +73,8 @@ namespace PredatorControlApp
             get { lock (_syncLock) return _disposed; }
         }
 
+        ~CurveFollower() => Dispose();
+
         public void Dispose()
         {
             lock (_syncLock)
@@ -87,6 +89,7 @@ namespace PredatorControlApp
                     _nativeHandle = IntPtr.Zero;
                 }
             }
+            GC.SuppressFinalize(this);
         }
 
         public void Reset()

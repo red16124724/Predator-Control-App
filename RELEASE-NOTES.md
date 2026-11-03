@@ -17,6 +17,15 @@ Version 1.5.5 brings a comprehensive codebase audit, bug fix, and stabilization 
 - **Cooling Tables**: Integrated Nitro series into `UsesFanTable` for direct hardware fan curve control.
 - **2,082 Managed Tests Passed**: Full solution test suite verified 100% clean across all 2,082 managed tests and 185 native Rust core tests.
 
+### Full-Stack Stress Hardening & Defect Elimination (Update 2026-11-03)
+- **Ring-0 Safety & Driver Leaks**: Disposed existing handles prior to re-creation in MCHBAR initialization; fixed directional split-write rollback when PL1/PL2 bounds checking fails.
+- **Hardware Concurrency**: Guarded fan table WMI query to prevent invalidating cache on unsupported hardware models.
+- **Rust Core SEH Hardening**: Protected all FFI entry points with pointer bounds checks (< 0x10000) to prevent uncatchable 0xC0000005 crashes.
+- **FFI Handle Finalizers**: Added finalizers and GC.SuppressFinalize in AudioMeter, CurveFollower, and ThermalSafetyCoordinator to prevent native handle leaks.
+- **UI & WinForms Reliability**: Added input-key overrides for shortcut navigation keys in CustomShortcutsForm and eliminated WinForms disposal/nullability warnings in Form1.
+- **Settings & Background Resilience**: Added typed registry conversion fallbacks, non-blocking TCP reconnect cooldown in background service client, and cancellation token propagation.
+- **100% Full Test Pass Rate**: Full suite passes all 2,092 managed tests and 189 native Rust unit and FFI fuzz tests (0 failed, 0 skipped).
+
 ### Key Highlights
 1. **Per-Zone RGB Persistence & Boot Decoupling**: Static 4-zone keyboard RGB colors are now strictly isolated from Dynamic RGB animation frames. Booting or launching the app will never clobber individual zone colors with dynamic effect presets.
 2. **Dynamic RGB Streamlining**: The legacy "Twinkling" effect has been completely removed across the entire stack. An explicit "Off (Static)" mode has been added as the primary option to instantly halt animation timers and restore user-defined per-zone static colors.

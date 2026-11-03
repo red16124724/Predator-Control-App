@@ -26,6 +26,7 @@ pub struct ThermalDecision {
 
 /// Backwards compatibility alias for `ThermalDecision`.
 pub type NativeThermalDecision = ThermalDecision;
+pub type CoordinatorHandle = ThermalCoordinator;
 
 impl Default for ThermalDecision {
     fn default() -> Self {

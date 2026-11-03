@@ -4007,6 +4007,9 @@ namespace PredatorControlApp
         public FanTable? GetFanTable()
 
         {
+            string model = HardwareIdentity.ReadModel();
+            if (!AcerProtocol.UsesFanTable(model))
+                return null;
 
             lock (_lock)
 
@@ -4052,6 +4055,12 @@ namespace PredatorControlApp
 
                 }
 
+                catch (ManagementException mex) when (mex.ErrorCode == ManagementStatus.NotFound ||
+                                                     mex.ErrorCode == ManagementStatus.MethodNotImplemented ||
+                                                     mex.ErrorCode == ManagementStatus.InvalidMethod)
+                {
+                    return null;
+                }
                 catch (Exception ex)
 
                 {

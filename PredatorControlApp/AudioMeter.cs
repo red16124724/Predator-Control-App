@@ -172,6 +172,8 @@ namespace PredatorControlApp
             _capture.Stop();
         }
 
+        ~AudioMeter() => Dispose();
+
         public void Dispose()
         {
             if (_disposed) return;
@@ -185,6 +187,7 @@ namespace PredatorControlApp
                 _nativeHandle = IntPtr.Zero;
             }
             if (handle != IntPtr.Zero) PredatorNativeCore.AudioDestroy(handle);
+            GC.SuppressFinalize(this);
         }
 
         public static AudioMeter? TryCreate()

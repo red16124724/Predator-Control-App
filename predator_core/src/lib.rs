@@ -38,6 +38,7 @@ static GLOBAL_ECHID: Mutex<Option<EcHid>> = Mutex::new(None);
 static LIFECYCLE: Mutex<()> = Mutex::new(());
 
 /// Ensures no panic unwinds across the C-ABI FFI boundary, preventing undefined behavior.
+/// Ensures no panic unwinds across the C-ABI FFI boundary, preventing undefined behavior.
 #[inline]
 fn safe_ffi<F, R>(default: R, f: F) -> R
 where
@@ -47,6 +48,37 @@ where
         Ok(ret) => ret,
         Err(_) => default,
     }
+}
+
+/// Returns true when `ptr` is outside the Windows 64-bit NULL-pointer partition (>= 64 KiB)
+/// and satisfies natural alignment for `T`.
+#[inline]
+#[allow(dead_code)]
+pub(crate) fn is_valid_ptr<T>(ptr: *const T) -> bool {
+    let addr = ptr as usize;
+    addr >= 0x10000 && (addr % std::mem::align_of::<T>() == 0)
+}
+
+/// Returns true when `ptr` is outside the Windows 64-bit NULL-pointer partition (>= 64 KiB)
+/// and satisfies natural alignment for `T`.
+#[inline]
+pub(crate) fn is_valid_mut_ptr<T>(ptr: *mut T) -> bool {
+    let addr = ptr as usize;
+    addr >= 0x10000 && (addr % std::mem::align_of::<T>() == 0)
+}
+
+/// Returns true when `ptr` is outside the Windows 64-bit NULL-pointer partition (>= 64 KiB).
+/// Used for byte buffers or foreign buffers read via unaligned loads.
+#[inline]
+pub(crate) fn is_valid_buffer<T>(ptr: *const T) -> bool {
+    (ptr as usize) >= 0x10000
+}
+
+/// Returns true when `ptr` is outside the Windows 64-bit NULL-pointer partition (>= 64 KiB).
+/// Used for byte buffers or foreign buffers written via unaligned stores.
+#[inline]
+pub(crate) fn is_valid_mut_buffer<T>(ptr: *mut T) -> bool {
+    (ptr as usize) >= 0x10000
 }
 
 /// Helper executing an operation on the global PawnIoDriver with poison recovery.
@@ -121,7 +153,7 @@ pub unsafe extern "C" fn predator_pawnio_is_available() -> i32 {
 #[no_mangle]
 pub unsafe extern "C" fn predator_pawnio_read_msr(msr: u32, out_val: *mut u64) -> i32 {
     safe_ffi(-1, || {
-        if out_val.is_null() {
+        if !is_valid_mut_buffer(out_val) {
             return -1;
         }
         with_pawnio(-7, |driver| match driver.read_msr(msr) {
@@ -147,7 +179,7 @@ pub unsafe extern "C" fn predator_pawnio_write_msr(msr: u32, val: u64) -> i32 {
 #[no_mangle]
 pub unsafe extern "C" fn predator_pawnio_read_mmio32(addr: u64, out_val: *mut u32) -> i32 {
     safe_ffi(-1, || {
-        if out_val.is_null() {
+        if !is_valid_mut_buffer(out_val) {
             return -1;
         }
         with_pawnio(-7, |driver| match driver.read_mmio32(addr) {
@@ -178,7 +210,7 @@ pub unsafe extern "C" fn predator_pawnio_plan_msr_write(
     out_value: *mut u64,
 ) -> i32 {
     safe_ffi(-1, || {
-        if out_value.is_null() {
+        if !is_valid_mut_buffer(out_value) {
             return -1;
         }
         match pawnio::PawnIoController::plan_msr_power_limit(current_msr_limit, raw_pl1, raw_pl2) {
@@ -204,7 +236,7 @@ pub unsafe extern "C" fn predator_pawnio_plan_mchbar_write(
     out_plan: *mut MchbarWritePlan,
 ) -> i32 {
     safe_ffi(-1, || {
-        if out_plan.is_null() {
+        if !is_valid_mut_buffer(out_plan) {
             return -1;
         }
         let plan = pawnio::plan_mchbar_power_write(
@@ -232,7 +264,7 @@ pub unsafe extern "C" fn predator_pawnio_apply_power_limits(
         with_pawnio(-7, |driver| {
             match driver.write_rapl_limits_directional(target_pl1, target_pl2) {
                 Ok(mirrored) => {
-                    if !out_mmio_mirrored.is_null() {
+                    if is_valid_mut_buffer(out_mmio_mirrored) {
                         std::ptr::write_unaligned(out_mmio_mirrored, if mirrored { 1 } else { 0 });
                     }
                     0
@@ -246,7 +278,7 @@ pub unsafe extern "C" fn predator_pawnio_apply_power_limits(
 #[no_mangle]
 pub unsafe extern "C" fn predator_telemetry_get_snapshot(out_snapshot: *mut NativeTelemetrySnapshot) -> i32 {
     safe_ffi(-1, || {
-        if out_snapshot.is_null() {
+        if !is_valid_mut_buffer(out_snapshot) {
             return -1;
         }
         let guard = GLOBAL_TELEMETRY.lock().unwrap_or_else(|e| e.into_inner());
@@ -291,13 +323,7 @@ pub unsafe extern "C" fn predator_curve_update(
 ) -> i32 {
     safe_ffi(safety_floor.clamp(0, 100).max(50), || {
         let fallback = safety_floor.clamp(0, 100).max(50);
-        if handle.is_null() || points_ptr.is_null() || point_count == 0 {
-            return fallback;
-        }
-        if (handle as usize) % std::mem::align_of::<FanCurveFollower>() != 0 {
-            return fallback;
-        }
-        if point_count > (isize::MAX as usize) / std::mem::size_of::<ControlPoint>() {
+        if !is_valid_mut_ptr(handle) || !is_valid_buffer(points_ptr) || point_count == 0 || point_count > 1024 {
             return fallback;
         }
 
@@ -332,10 +358,7 @@ pub unsafe extern "C" fn predator_curve_interpolate(
     temp: i32,
 ) -> i32 {
     safe_ffi(50, || {
-        if points_ptr.is_null() || point_count == 0 {
-            return 50;
-        }
-        if point_count > (isize::MAX as usize) / std::mem::size_of::<ControlPoint>() {
+        if !is_valid_buffer(points_ptr) || point_count == 0 || point_count > 1024 {
             return 50;
         }
 
@@ -363,7 +386,7 @@ pub unsafe extern "C" fn predator_curve_interpolate(
 #[no_mangle]
 pub unsafe extern "C" fn predator_curve_reset(handle: *mut FanCurveFollower) {
     safe_ffi((), || {
-        if !handle.is_null() && (handle as usize) % std::mem::align_of::<FanCurveFollower>() == 0 {
+        if is_valid_mut_ptr(handle) {
             let follower = &mut *handle;
             follower.reset();
         }
@@ -373,7 +396,7 @@ pub unsafe extern "C" fn predator_curve_reset(handle: *mut FanCurveFollower) {
 #[no_mangle]
 pub unsafe extern "C" fn predator_curve_destroy(handle: *mut FanCurveFollower) {
     safe_ffi((), || {
-        if !handle.is_null() && (handle as usize) % std::mem::align_of::<FanCurveFollower>() == 0 {
+        if is_valid_mut_ptr(handle) {
             let _ = Box::from_raw(handle);
         }
     });
@@ -400,7 +423,7 @@ pub unsafe extern "C" fn predator_thermal_create() -> *mut ThermalCoordinator {
 #[no_mangle]
 pub unsafe extern "C" fn predator_thermal_destroy(handle: *mut ThermalCoordinator) {
     safe_ffi((), || {
-        if !handle.is_null() && (handle as usize) % std::mem::align_of::<ThermalCoordinator>() == 0 {
+        if is_valid_mut_ptr(handle) {
             let _ = Box::from_raw(handle);
         }
     });
@@ -413,7 +436,7 @@ unsafe fn with_thermal<F, R>(handle: *mut ThermalCoordinator, default: R, f: F) 
 where
     F: FnOnce(&mut ThermalCoordinator) -> R,
 {
-    if handle.is_null() || (handle as usize) % std::mem::align_of::<ThermalCoordinator>() != 0 {
+    if !is_valid_mut_ptr(handle) {
         return default;
     }
     safe_ffi(default, || f(&mut *handle))
@@ -479,7 +502,7 @@ pub unsafe extern "C" fn predator_thermal_evaluate(
     out_decision: *mut NativeThermalDecision,
 ) -> i32 {
     safe_ffi(-1, || {
-        if out_decision.is_null() {
+        if !is_valid_mut_buffer(out_decision) {
             return -1;
         }
         with_thermal(handle, -1, |coordinator| {
@@ -526,7 +549,7 @@ pub unsafe extern "C" fn predator_rgb_next_frame(
     zones: usize,
 ) -> i32 {
     safe_ffi(-1, || {
-        if handle.is_null() || (handle as usize) % std::mem::align_of::<RgbAnimator>() != 0 || out.is_null() || zones == 0 {
+        if !is_valid_mut_ptr(handle) || !is_valid_mut_buffer(out) || zones == 0 {
             return -1;
         }
         let anim = &mut *handle;
@@ -549,7 +572,7 @@ pub unsafe extern "C" fn predator_rgb_render_frame(
     zones: usize,
 ) -> i32 {
     safe_ffi(-1, || {
-        if out.is_null() || zones == 0 {
+        if !is_valid_mut_buffer(out) || zones == 0 {
             return -1;
         }
         let slice = std::slice::from_raw_parts_mut(out as *mut Rgb8, zones.min(rgb::MAX_ZONES));
@@ -565,7 +588,7 @@ pub unsafe extern "C" fn predator_rgb_frame_delay_ms(speed: u8) -> u32 {
 #[no_mangle]
 pub unsafe extern "C" fn predator_rgb_delay_ms(handle: *mut RgbAnimator) -> u32 {
     safe_ffi(0, || {
-        if handle.is_null() || (handle as usize) % std::mem::align_of::<RgbAnimator>() != 0 {
+        if !is_valid_mut_ptr(handle) {
             return 0;
         }
         (*handle).delay_ms()
@@ -575,7 +598,7 @@ pub unsafe extern "C" fn predator_rgb_delay_ms(handle: *mut RgbAnimator) -> u32 
 #[no_mangle]
 pub unsafe extern "C" fn predator_rgb_set_brightness(handle: *mut RgbAnimator, brightness: u8) {
     safe_ffi((), || {
-        if !handle.is_null() && (handle as usize) % std::mem::align_of::<RgbAnimator>() == 0 {
+        if is_valid_mut_ptr(handle) {
             (*handle).set_brightness(brightness);
         }
     });
@@ -584,7 +607,7 @@ pub unsafe extern "C" fn predator_rgb_set_brightness(handle: *mut RgbAnimator, b
 #[no_mangle]
 pub unsafe extern "C" fn predator_rgb_reset(handle: *mut RgbAnimator) {
     safe_ffi((), || {
-        if !handle.is_null() && (handle as usize) % std::mem::align_of::<RgbAnimator>() == 0 {
+        if is_valid_mut_ptr(handle) {
             (*handle).reset();
         }
     });
@@ -593,7 +616,7 @@ pub unsafe extern "C" fn predator_rgb_reset(handle: *mut RgbAnimator) {
 #[no_mangle]
 pub unsafe extern "C" fn predator_rgb_destroy(handle: *mut RgbAnimator) {
     safe_ffi((), || {
-        if !handle.is_null() && (handle as usize) % std::mem::align_of::<RgbAnimator>() == 0 {
+        if is_valid_mut_ptr(handle) {
             let _ = Box::from_raw(handle);
         }
     });
@@ -602,7 +625,7 @@ pub unsafe extern "C" fn predator_rgb_destroy(handle: *mut RgbAnimator) {
 #[no_mangle]
 pub unsafe extern "C" fn predator_rgb_hsv_to_rgb(hue: f64, saturation: f64, value: f64, out: *mut u8) -> i32 {
     safe_ffi(-1, || {
-        if out.is_null() {
+        if !is_valid_mut_buffer(out) {
             return -1;
         }
         let c = rgb::hsv_to_rgb(hue, saturation, value);
@@ -622,7 +645,7 @@ pub unsafe extern "C" fn predator_rgb_blend(
     t: f32,
 ) -> i32 {
     safe_ffi(-1, || {
-        if current.is_null() || target.is_null() || zones == 0 {
+        if !is_valid_mut_buffer(current) || !is_valid_buffer(target) || zones == 0 {
             return -1;
         }
         let cur = std::slice::from_raw_parts_mut(current as *mut Rgb8, zones.min(rgb::MAX_ZONES));
@@ -635,7 +658,7 @@ pub unsafe extern "C" fn predator_rgb_blend(
 #[no_mangle]
 pub unsafe extern "C" fn predator_rgb_apply_brightness(zones: *mut u8, count: usize, brightness: u8) -> i32 {
     safe_ffi(-1, || {
-        if zones.is_null() || count == 0 {
+        if !is_valid_mut_buffer(zones) || count == 0 {
             return -1;
         }
         let slice = std::slice::from_raw_parts_mut(zones as *mut Rgb8, count.min(rgb::MAX_ZONES));
@@ -663,7 +686,7 @@ pub unsafe extern "C" fn predator_audio_create(
 #[no_mangle]
 pub unsafe extern "C" fn predator_audio_destroy(handle: *mut SpectrumAnalyzer) {
     safe_ffi((), || {
-        if !handle.is_null() && (handle as usize) % std::mem::align_of::<SpectrumAnalyzer>() == 0 {
+        if is_valid_mut_ptr(handle) {
             let _ = Box::from_raw(handle);
         }
     });
@@ -678,7 +701,7 @@ pub unsafe extern "C" fn predator_audio_push(
     channels: usize,
 ) -> i32 {
     safe_ffi(-1, || {
-        if handle.is_null() || (handle as usize) % std::mem::align_of::<SpectrumAnalyzer>() != 0 || samples.is_null() || count == 0 {
+        if !is_valid_mut_ptr(handle) || !is_valid_buffer(samples) || count == 0 {
             return -1;
         }
         let max_samples = count.min(audio::MAX_PUSH_FRAMES * 8);
@@ -704,7 +727,7 @@ pub unsafe extern "C" fn predator_audio_get_bands(
     cap: usize,
 ) -> i32 {
     safe_ffi(-1, || {
-        if handle.is_null() || (handle as usize) % std::mem::align_of::<SpectrumAnalyzer>() != 0 || out.is_null() || cap == 0 {
+        if !is_valid_mut_ptr(handle) || !is_valid_mut_buffer(out) || cap == 0 {
             return -1;
         }
         let analyzer = &mut *handle;
@@ -720,7 +743,7 @@ pub unsafe extern "C" fn predator_audio_get_bands(
 #[no_mangle]
 pub unsafe extern "C" fn predator_audio_get_level(handle: *mut SpectrumAnalyzer) -> f32 {
     safe_ffi(0.0, || {
-        if handle.is_null() || (handle as usize) % std::mem::align_of::<SpectrumAnalyzer>() != 0 {
+        if !is_valid_mut_ptr(handle) {
             return 0.0;
         }
         (*handle).level()
@@ -730,7 +753,7 @@ pub unsafe extern "C" fn predator_audio_get_level(handle: *mut SpectrumAnalyzer)
 #[no_mangle]
 pub unsafe extern "C" fn predator_audio_is_beat(handle: *mut SpectrumAnalyzer) -> i32 {
     safe_ffi(0, || {
-        if handle.is_null() || (handle as usize) % std::mem::align_of::<SpectrumAnalyzer>() != 0 {
+        if !is_valid_mut_ptr(handle) {
             return 0;
         }
         if (*handle).is_beat() { 1 } else { 0 }
@@ -740,7 +763,7 @@ pub unsafe extern "C" fn predator_audio_is_beat(handle: *mut SpectrumAnalyzer) -
 #[no_mangle]
 pub unsafe extern "C" fn predator_audio_beat_strength(handle: *mut SpectrumAnalyzer) -> f32 {
     safe_ffi(0.0, || {
-        if handle.is_null() || (handle as usize) % std::mem::align_of::<SpectrumAnalyzer>() != 0 {
+        if !is_valid_mut_ptr(handle) {
             return 0.0;
         }
         (*handle).beat_strength()
@@ -759,7 +782,7 @@ pub unsafe extern "C" fn predator_audio_render_zones(
     zones: usize,
 ) -> i32 {
     safe_ffi(-1, || {
-        if handle.is_null() || (handle as usize) % std::mem::align_of::<SpectrumAnalyzer>() != 0 || out.is_null() || zones == 0 {
+        if !is_valid_mut_ptr(handle) || !is_valid_mut_buffer(out) || zones == 0 {
             return -1;
         }
         let slice = std::slice::from_raw_parts_mut(out, zones.min(rgb::MAX_ZONES) * 3);
@@ -770,7 +793,7 @@ pub unsafe extern "C" fn predator_audio_render_zones(
 #[no_mangle]
 pub unsafe extern "C" fn predator_audio_reset(handle: *mut SpectrumAnalyzer) {
     safe_ffi((), || {
-        if !handle.is_null() && (handle as usize) % std::mem::align_of::<SpectrumAnalyzer>() == 0 {
+        if is_valid_mut_ptr(handle) {
             (*handle).reset();
         }
     });
@@ -788,7 +811,7 @@ pub unsafe extern "C" fn predator_nvapi_is_available() -> i32 {
 #[no_mangle]
 pub unsafe extern "C" fn predator_nvapi_get_gpu_load(out_load: *mut f64) -> i32 {
     safe_ffi(-1, || {
-        if out_load.is_null() {
+        if !is_valid_mut_buffer(out_load) {
             return -1;
         }
         match nvapi::gpu_load() {
@@ -804,7 +827,7 @@ pub unsafe extern "C" fn predator_nvapi_get_gpu_load(out_load: *mut f64) -> i32 
 #[no_mangle]
 pub unsafe extern "C" fn predator_nvapi_get_gpu_temperature(out_temp: *mut f64) -> i32 {
     safe_ffi(-1, || {
-        if out_temp.is_null() {
+        if !is_valid_mut_buffer(out_temp) {
             return -1;
         }
         match nvapi::gpu_temperature() {
@@ -839,12 +862,12 @@ pub unsafe extern "C" fn predator_acpi_ppcc_entries(
     cap: usize,
 ) -> i32 {
     safe_ffi(-1, || {
-        if aml.is_null() || len == 0 {
+        if !is_valid_buffer(aml) || len == 0 {
             return -1;
         }
         let slice = std::slice::from_raw_parts(aml, len);
         let entries = acpi::extract_ppcc_entries(slice);
-        if out.is_null() || cap == 0 {
+        if !is_valid_mut_buffer(out) || cap == 0 {
             return entries.len() as i32;
         }
         let count = entries.len().min(cap);
@@ -863,7 +886,7 @@ pub unsafe extern "C" fn predator_acpi_ppcc_summary(
     out_summary: *mut PpccSummary,
 ) -> i32 {
     safe_ffi(-1, || {
-        if aml.is_null() || len == 0 || out_summary.is_null() {
+        if !is_valid_buffer(aml) || len == 0 || !is_valid_mut_buffer(out_summary) {
             return -1;
         }
         let slice = std::slice::from_raw_parts(aml, len);
@@ -885,7 +908,7 @@ pub unsafe extern "C" fn predator_acpi_scan_tables(
     cap: usize,
 ) -> i32 {
     safe_ffi(-1, || {
-        if blob.is_null() || len == 0 {
+        if !is_valid_buffer(blob) || len == 0 {
             return -1;
         }
         let slice = std::slice::from_raw_parts(blob, len);
@@ -972,7 +995,7 @@ pub unsafe extern "C" fn predator_echid_exchange(
     out_cap: usize,
 ) -> i32 {
     safe_ffi(-1, || {
-        if request.is_null() || request_len == 0 || out.is_null() || out_cap == 0 {
+        if !is_valid_buffer(request) || request_len == 0 || !is_valid_mut_buffer(out) || out_cap == 0 {
             return -1;
         }
         let req = std::slice::from_raw_parts(request, request_len);

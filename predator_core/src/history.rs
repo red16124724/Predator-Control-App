@@ -8,6 +8,8 @@ use std::slice;
 
 /// Minimum usable capacity.
 pub const MIN_CAPACITY: i32 = 2;
+/// Maximum reasonable capacity to prevent allocation denial-of-service / OOM aborts.
+pub const MAX_CAPACITY: i32 = 100_000;
 
 /// A ring buffer of optional samples.
 #[derive(Debug)]
@@ -19,7 +21,7 @@ pub struct HistoryBuffer {
 
 impl HistoryBuffer {
     pub fn new(capacity: i32) -> Self {
-        let cap = capacity.max(MIN_CAPACITY) as usize;
+        let cap = capacity.clamp(MIN_CAPACITY, MAX_CAPACITY) as usize;
         Self {
             values: vec![None; cap],
             next: 0,
@@ -144,7 +146,7 @@ pub fn create(capacity: i32) -> *mut HistoryHandle {
 /// # Safety
 /// `handle` must be a pointer returned by [`create`] and not already freed.
 pub unsafe fn destroy(handle: *mut HistoryHandle) {
-    if !handle.is_null() && (handle as usize) % std::mem::align_of::<HistoryHandle>() == 0 {
+    if !handle.is_null() && (handle as usize) >= 0x10000 && (handle as usize) % std::mem::align_of::<HistoryHandle>() == 0 {
         drop(Box::from_raw(handle));
     }
 }
@@ -152,7 +154,7 @@ pub unsafe fn destroy(handle: *mut HistoryHandle) {
 /// # Safety
 /// `handle` must be a live pointer from [`create`].
 pub unsafe fn as_ref<'a>(handle: *const HistoryHandle) -> Option<&'a HistoryBuffer> {
-    if handle.is_null() || (handle as usize) % std::mem::align_of::<HistoryHandle>() != 0 {
+    if handle.is_null() || (handle as usize) < 0x10000 || (handle as usize) % std::mem::align_of::<HistoryHandle>() != 0 {
         return None;
     }
     handle.as_ref().map(|h| &h.buffer)
@@ -161,7 +163,7 @@ pub unsafe fn as_ref<'a>(handle: *const HistoryHandle) -> Option<&'a HistoryBuff
 /// # Safety
 /// `handle` must be a live pointer from [`create`].
 pub unsafe fn as_mut<'a>(handle: *mut HistoryHandle) -> Option<&'a mut HistoryBuffer> {
-    if handle.is_null() || (handle as usize) % std::mem::align_of::<HistoryHandle>() != 0 {
+    if handle.is_null() || (handle as usize) < 0x10000 || (handle as usize) % std::mem::align_of::<HistoryHandle>() != 0 {
         return None;
     }
     handle.as_mut().map(|h| &mut h.buffer)
@@ -172,19 +174,30 @@ pub unsafe fn as_mut<'a>(handle: *mut HistoryHandle) -> Option<&'a mut HistoryBu
 /// # Safety
 /// `out` must be valid for `out_len` writes.
 pub unsafe fn write_snapshot(buffer: &HistoryBuffer, out: *mut f64, out_len: i32) -> i32 {
-    if out.is_null() || out_len <= 0 {
+    if out.is_null() || (out as usize) < 0x10000 || out_len <= 0 {
         return 0;
     }
+    let target_len = (out_len as usize).min(MAX_CAPACITY as usize);
     if (out as usize) % std::mem::align_of::<f64>() == 0 {
-        let slice = slice::from_raw_parts_mut(out, out_len as usize);
+        let slice = slice::from_raw_parts_mut(out, target_len);
         buffer.snapshot_into(slice) as i32
     } else {
-        let mut temp = vec![f64::NAN; out_len as usize];
-        let written = buffer.snapshot_into(&mut temp);
-        for i in 0..written {
-            std::ptr::write_unaligned(out.add(i), temp[i]);
+        let n = buffer.count.min(target_len);
+        if n <= 64 {
+            let mut temp = [f64::NAN; 64];
+            let written = buffer.snapshot_into(&mut temp[..n]);
+            for i in 0..written {
+                std::ptr::write_unaligned(out.add(i), temp[i]);
+            }
+            written as i32
+        } else {
+            let mut temp = vec![f64::NAN; n];
+            let written = buffer.snapshot_into(&mut temp);
+            for i in 0..written {
+                std::ptr::write_unaligned(out.add(i), temp[i]);
+            }
+            written as i32
         }
-        written as i32
     }
 }
 

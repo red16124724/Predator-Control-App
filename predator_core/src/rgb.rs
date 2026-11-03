@@ -69,7 +69,7 @@ fn truncate_byte(value: f64) -> u8 {
 
 /// Exact port of `LightingEffectsManager.ColorFromHsv`.
 pub fn hsv_to_rgb(hue: f64, saturation: f64, value: f64) -> Rgb8 {
-    let mut hue = hue % 360.0;
+    let mut hue = if hue.is_finite() { hue % 360.0 } else { 0.0 };
     if hue < 0.0 {
         hue += 360.0;
     }
@@ -255,7 +255,7 @@ impl RgbAnimator {
 /// and written in a single straight-line loop so the compiler emits packed
 /// `paddb`-style vector operations.
 pub fn blend_zones(current: &mut [Rgb8], target: &[Rgb8], t: f32) {
-    let t = t.clamp(0.0, 1.0);
+    let t = if t.is_finite() { t.clamp(0.0, 1.0) } else { 0.0 };
     let inv = 1.0 - t;
     let count = current.len().min(target.len());
     for i in 0..count {

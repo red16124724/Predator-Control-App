@@ -2059,7 +2059,7 @@ namespace PredatorControlApp
 
             {
 
-                var info = await Updater.CheckAsync();
+                var info = await Updater.CheckAsync(_shutdownCts.Token);
 
                 if (_isClosing || IsDisposed) return;
 
@@ -2205,7 +2205,7 @@ namespace PredatorControlApp
 
                 _btnCheckUpdates.Text = "Downloading update…";
 
-                await Updater.ApplyAsync(info);
+                await Updater.ApplyAsync(info, _shutdownCts.Token);
 
 
 
@@ -13703,7 +13703,7 @@ namespace PredatorControlApp
 
             {
 
-                if (_appSettings.BatteryCalibrationPhase != 0)
+                if (_appSettings != null && _appSettings.BatteryCalibrationPhase != 0)
 
                 {
 
@@ -15967,7 +15967,7 @@ namespace PredatorControlApp
 
 
 
-            if (_appSettings.BatteryCalibrationPhase != 0)
+            if (_appSettings != null && _appSettings.BatteryCalibrationPhase != 0)
 
             {
 
@@ -17492,12 +17492,13 @@ namespace PredatorControlApp
                     }
 
                     try { _trayIcon.Dispose(); } catch { }
-                    _trayIcon = null;
+#pragma warning disable CS8625
+                    _trayIcon = null!;
 
                 }
 
                 try { _trayMenu?.Dispose(); } catch { }
-                _trayMenu = null;
+                _trayMenu = null!;
 
                 if (_timer != null)
 
@@ -17508,7 +17509,8 @@ namespace PredatorControlApp
                     try { _timer.Stop(); } catch { }
 
                     try { _timer.Dispose(); } catch { }
-                    _timer = null;
+                    _timer = null!;
+#pragma warning restore CS8625
 
                 }
 
@@ -17524,6 +17526,7 @@ namespace PredatorControlApp
 
                 try { _lightingController?.Dispose(); } catch { }
 
+                try { _fanCommandQueue.ClearAndStop(); } catch { }
                 try { _powerModeSwitchGuard?.Dispose(); } catch { }
 
                 try { _wmi.Dispose(); } catch { }

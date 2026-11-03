@@ -67,6 +67,25 @@ Comprehensive multi-agent stress test, chaos engineering, UI rendering validatio
 - **Keyboard Lighting Transport Fallback Hardening (`KeyboardLightingController.cs`)**: Resolved transport reachability check to query capability-probed `LightingServiceReachable` and `CommandInterceptor`, preventing unconfigured socket timeouts when per-key scope is gated off on 4-zone devices.
 - **Exhaustive Unit Test Verification (`AcerLaptopModelCatalogTests.cs`)**: Full test suite of 2,082 managed unit and stress tests passed with 100% success (0 failed, 0 skipped), alongside 185 native Rust unit and FFI stress tests.
 
+### 5. Multi-Agent Codebase Stress Hardening & Full-Stack Defect Elimination (Update 2026-11-03)
+- **UI Navigation Key Loss Prevention (CustomShortcutsForm.cs)**: Handled PreviewKeyDown on 	xtShortcut setting e.IsInputKey = true, preventing Tab/Enter/Arrows from losing focus during shortcut recording.
+- **WinForms Compiler Warnings & Concurrency Guards (Form1.cs, Form1.Designer.cs)**: Resolved all WinForms disposal and nullability compiler warnings (CS8602, CS8625); hardened SafeBeginInvoke against disposal and racing window handle recreations.
+- **WMI Fan Table Query Cache Preservation (WmiController.cs)**: Guarded GetFanTable() with AcerProtocol.UsesFanTable(HardwareIdentity.ReadModel()) check and caught ManagementException (NotFound/MethodNotImplemented/InvalidMethod), preventing WMI cache destruction on non-fan-table models.
+- **MMIO Directional Split-Write Rollback & Handle Leak Elimination (PawnIoController.cs)**: Symmetrically fixed WriteMmio64 rollback by removing && oldVal != 0 check so PL1 is always rolled back if PL2 fails; disposed existing SafeFileHandle before re-creation in TryInitializeMchbarModule to eliminate handle leaks.
+- **Null-Partition Pointer Protection (predator_core lib.rs, migration_exports.rs)**: Added < 0x10000 pointer checks across all FFI entry points, preventing unrecoverable Windows SEH 0xC0000005 crashes that bypass Rust catch_unwind.
+- **Audio FFT Monotonic Slicing (predator_core/src/audio.rs)**: Fixed inverted band edges and off-by-one slicing panic with reverse monotonic clamping.
+- **Multimedia Timer Resolution RAII (predator_core/src/telemetry.rs)**: Implemented TimePeriodGuard to reliably restore 1ms timer resolution on thread exit.
+- **History Buffer Memory Exhaustion Guard (predator_core/src/history.rs)**: Clamped capacity to 100,000 samples to prevent unbounded heap growth.
+- **Native Handle Finalization (AudioMeter.cs, CurveFollower.cs, ThermalSafetyCoordinator.cs)**: Added finalizers and GC.SuppressFinalize(this) to prevent native resource leaks on GC collections. Fixed 
+eadonly IntPtr _thermalHandle in ThermalSafetyCoordinator.cs.
+- **Resilient Registry Recovery (RegistrySafety.cs)**: Added typed fallbacks handling REG_DWORD, REG_QWORD, and string representation to recover smoothly from corrupted registry entries.
+- **Independent Zone Persistence (AppSettings.cs)**: Fixed restoration so missing or zero-color zones restore independently without overwriting neighbor zones.
+- **Loopback Connect Cooldown (AcerServiceClient.cs)**: Enforced connection cooldown before retrying loopback TCP connection, eliminating UI stalls when the background service is stopped.
+- **Cooperative Cancellation & Queue Shutdown (WmiHotkeyWatcher.cs, PowerModeSwitchGuard.cs, FanCommandQueue.cs)**: Wired CancellationToken into delayed tasks and added ClearAndStop() to cancel pending fan commands on application exit.
+- **10 Comprehensive Lifecycle & Persistence Stress Tests (LifecyclePersistenceAndBackgroundServiceStressTests.cs)**: Validated registry recovery, zone isolation, TCP cooldown, and queue shutdown under high-concurrency churn.
+
+---
+
 ---
 
 ## Artifact Verification

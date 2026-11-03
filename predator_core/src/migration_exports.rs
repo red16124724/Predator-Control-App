@@ -5,7 +5,7 @@
 //! Out-parameters are written with `write_unaligned` because managed callers
 //! may hand over buffers that are not naturally aligned.
 
-use crate::{battery, graphproj, history, hook, pipeguard, procsync, shortcuts};
+use crate::{battery, graphproj, history, hook, pipeguard, procsync, shortcuts, is_valid_buffer, is_valid_mut_buffer};
 
 // ============================================================================
 // Shortcut validation (ModeShortcutValidator)
@@ -96,7 +96,7 @@ pub unsafe extern "C" fn predator_battery_eta_set_alpha(alpha: f64) -> f64 {
 #[no_mangle]
 pub unsafe extern "C" fn predator_battery_eta_smoothed_rate(out_rate: *mut f64) -> i32 {
     crate::safe_ffi(0, || {
-        if out_rate.is_null() {
+        if !is_valid_mut_buffer(out_rate) {
             return 0;
         }
         battery::with_eta(0, |calc| match calc.smoothed_rate() {
@@ -113,7 +113,7 @@ pub unsafe extern "C" fn predator_battery_eta_smoothed_rate(out_rate: *mut f64) 
 #[no_mangle]
 pub unsafe extern "C" fn predator_battery_eta_smoothed_percent_rate(out_rate: *mut f64) -> i32 {
     crate::safe_ffi(0, || {
-        if out_rate.is_null() {
+        if !is_valid_mut_buffer(out_rate) {
             return 0;
         }
         battery::with_eta(0, |calc| match calc.smoothed_percent_per_minute() {
@@ -174,7 +174,7 @@ pub unsafe extern "C" fn predator_battery_eta_calculate(
                 allow_warmup != 0,
                 percent,
             );
-            if !out_seconds.is_null() && code != battery::RESULT_NONE {
+            if is_valid_mut_buffer(out_seconds) && code != battery::RESULT_NONE {
                 std::ptr::write_unaligned(out_seconds, seconds);
             }
             code
@@ -191,7 +191,7 @@ pub unsafe extern "C" fn predator_battery_eta_warmup(
 ) -> i32 {
     crate::safe_ffi(0, || {
         let (some, seconds) = battery::EtaCalculator::warmup_estimate(phase, battery_percent);
-        if some && !out_seconds.is_null() {
+        if some && is_valid_mut_buffer(out_seconds) {
             std::ptr::write_unaligned(out_seconds, seconds);
             1
         } else {
@@ -252,7 +252,7 @@ pub unsafe extern "C" fn predator_history_get(
             return 0;
         };
         match buf.get(index) {
-            Some(v) if !out_value.is_null() => {
+            Some(v) if is_valid_mut_buffer(out_value) => {
                 std::ptr::write_unaligned(out_value, v);
                 1
             }
@@ -271,7 +271,7 @@ pub unsafe extern "C" fn predator_history_min(
             return 0;
         };
         match buf.range() {
-            Some((min, _)) if !out_value.is_null() => {
+            Some((min, _)) if is_valid_mut_buffer(out_value) => {
                 std::ptr::write_unaligned(out_value, min);
                 1
             }
@@ -290,7 +290,7 @@ pub unsafe extern "C" fn predator_history_max(
             return 0;
         };
         match buf.range() {
-            Some((_, max)) if !out_value.is_null() => {
+            Some((_, max)) if is_valid_mut_buffer(out_value) => {
                 std::ptr::write_unaligned(out_value, max);
                 1
             }
@@ -309,7 +309,7 @@ pub unsafe extern "C" fn predator_history_average(
             return 0;
         };
         match buf.average() {
-            Some(avg) if !out_value.is_null() => {
+            Some(avg) if is_valid_mut_buffer(out_value) => {
                 std::ptr::write_unaligned(out_value, avg);
                 1
             }
@@ -328,7 +328,7 @@ pub unsafe extern "C" fn predator_history_latest(
             return 0;
         };
         match buf.latest() {
-            Some(v) if !out_value.is_null() => {
+            Some(v) if is_valid_mut_buffer(out_value) => {
                 std::ptr::write_unaligned(out_value, v);
                 1
             }
@@ -435,7 +435,7 @@ pub unsafe extern "C" fn predator_hook_process(
     crate::safe_ffi(hook::ACTION_PASS, || {
         hook::with_hook(hook::ACTION_PASS, |state| {
             let (action, value) = state.process(vk, scan, flags, is_down != 0, now_ms);
-            if !out_value.is_null() {
+            if is_valid_mut_buffer(out_value) {
                 std::ptr::write_unaligned(out_value, value);
             }
             action
@@ -540,7 +540,7 @@ pub unsafe extern "C" fn predator_procsync_sanitize_profile(
     out: *mut procsync::ProfileValues,
 ) -> i32 {
     crate::safe_ffi(-1, || {
-        if input.is_null() || out.is_null() {
+        if !is_valid_buffer(input) || !is_valid_mut_buffer(out) {
             return -1;
         }
         let src = std::ptr::read_unaligned(input);

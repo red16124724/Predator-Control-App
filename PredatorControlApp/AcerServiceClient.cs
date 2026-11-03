@@ -61,6 +61,14 @@ namespace PredatorControlApp
 
             if (colors == null || colors.Count == 0) return false;
 
+            lock (_stateLock)
+            {
+                if (!_openRgbAvailable && (DateTime.UtcNow - _lastOpenRgbAttempt < OpenRgbCooldown))
+                {
+                    return false;
+                }
+            }
+
             try
 
             {
@@ -70,14 +78,6 @@ namespace PredatorControlApp
                 var connectTask = client.ConnectAsync("127.0.0.1", OpenRgbPort);
 
                 connectTask.ContinueWith(t => { _ = t.Exception; }, TaskContinuationOptions.OnlyOnFaulted);
-
-                lock (_stateLock)
-                {
-                    if (!_openRgbAvailable && (DateTime.UtcNow - _lastOpenRgbAttempt < OpenRgbCooldown))
-                    {
-                        return false;
-                    }
-                }
 
                 if (!connectTask.Wait(100) || !client.Connected)
                 {
@@ -433,6 +433,14 @@ namespace PredatorControlApp
             return Task.Run(async () =>
 
             {
+
+                lock (_stateLock)
+                {
+                    if (!_serviceAvailable && (DateTime.UtcNow - _lastFailedAttempt) < RetryCooldown)
+                    {
+                        return false;
+                    }
+                }
 
                 try
 
@@ -919,6 +927,14 @@ namespace PredatorControlApp
             if (jsonPayload != null) { try { CommandInterceptor?.Invoke(packetId, jsonPayload); } catch { } }
 
             if (CommandInterceptor != null) return "{\"Status\":0}";
+
+            lock (_stateLock)
+            {
+                if (!_serviceAvailable && (DateTime.UtcNow - _lastFailedAttempt) < RetryCooldown)
+                {
+                    return null;
+                }
+            }
 
             if (!_socketLock.Wait(500)) return null;
 

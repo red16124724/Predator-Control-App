@@ -14,6 +14,7 @@ pub struct Point {
 
 /// Backwards compatibility alias for `Point`.
 pub type ControlPoint = Point;
+pub type CurveHandle = FanCurveFollower;
 
 // Hysteresis configuration boundaries matching Predator Control specification
 pub const MIN_HYSTERESIS: i32 = 0;

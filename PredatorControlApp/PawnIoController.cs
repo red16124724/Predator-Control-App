@@ -842,6 +842,13 @@ namespace PredatorControlApp
         {
             try
             {
+                if (_mchbarDeviceHandle != null && !_mchbarDeviceHandle.IsClosed)
+                {
+                    try { _mchbarDeviceHandle.Dispose(); } catch { }
+                    _mchbarDeviceHandle = null;
+                    _isMchbarLoaded = false;
+                }
+
                 byte[]? mchbarBytes = LoadModuleBytes("IntelMCHBAR.bin");
                 if (mchbarBytes == null || mchbarBytes.Length == 0)
                     return;
@@ -1444,7 +1451,7 @@ namespace PredatorControlApp
                     // Normal ordering: Write lower 32-bit (PL1) first, then upper 32-bit (PL2) second.
                     bool pl1Ok = WriteMmio32(physicalAddress, low);
                     bool pl2Ok = WriteMmio32(physicalAddress + 4, high);
-                    if (pl1Ok && !pl2Ok && oldVal != 0)
+                    if (pl1Ok && !pl2Ok)
                     {
                         // Rollback PL1 to avoid leaving hardware in inconsistent split state
                         WriteMmio32(physicalAddress, (uint)(oldVal & 0xFFFFFFFF));

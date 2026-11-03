@@ -263,6 +263,13 @@ impl TelemetryWorker {
 
         self.worker_thread = Some(thread::spawn(move || {
             unsafe { timeBeginPeriod(1) };
+            struct TimePeriodGuard(u32);
+            impl Drop for TimePeriodGuard {
+                fn drop(&mut self) {
+                    unsafe { timeEndPeriod(self.0) };
+                }
+            }
+            let _period_guard = TimePeriodGuard(1);
 
             let mut cpu_sampler = CpuUsageSampler::new();
             let nvapi = NvApiState::try_init();
@@ -294,9 +301,11 @@ impl TelemetryWorker {
                     }
                     thread::sleep(Duration::from_millis(step));
                 }
+                let rem = interval % step;
+                if rem > 0 && is_running.load(Ordering::Acquire) {
+                    thread::sleep(Duration::from_millis(rem));
+                }
             }
-
-            unsafe { timeEndPeriod(1) };
         }));
     }
 
@@ -309,10 +318,9 @@ impl TelemetryWorker {
     }
 
     pub fn stop(&mut self) {
-        if self.is_running.swap(false, Ordering::SeqCst) {
-            if let Some(handle) = self.worker_thread.take() {
-                let _ = handle.join();
-            }
+        self.is_running.store(false, Ordering::SeqCst);
+        if let Some(handle) = self.worker_thread.take() {
+            let _ = handle.join();
         }
     }
 }

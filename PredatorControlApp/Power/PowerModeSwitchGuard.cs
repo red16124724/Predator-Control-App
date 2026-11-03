@@ -28,6 +28,7 @@ namespace PredatorControlApp
         private int _pendingMode = -1;
         private bool _workerRunning;
         private bool _disposed;
+        private readonly CancellationTokenSource _cts = new();
         private DateTime _lastSwitchUtc = DateTime.MinValue;
         private long _completed;
         private long _coalesced;
@@ -128,7 +129,7 @@ namespace PredatorControlApp
 
                     if (waitMs > 0)
                     {
-                        try { await Task.Delay(waitMs).ConfigureAwait(false); } catch { }
+                        try { await Task.Delay(waitMs, _cts.Token).ConfigureAwait(false); } catch { }
                     }
 
                     lock (_sync)
@@ -158,7 +159,7 @@ namespace PredatorControlApp
                             try { _onApplied?.Invoke((byte)mode); } catch { }
                             if (_settleMs > 0)
                             {
-                                try { await Task.Delay(_settleMs).ConfigureAwait(false); } catch { }
+                                try { await Task.Delay(_settleMs, _cts.Token).ConfigureAwait(false); } catch { }
                             }
                         }
                     }

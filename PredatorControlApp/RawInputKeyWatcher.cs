@@ -242,9 +242,9 @@ namespace PredatorControlApp
                 Application.ApplicationExit -= OnApplicationExit;
             }
             catch { }
+            try { UnregisterDevices(); } catch { }
             if (disposing)
             {
-                try { UnregisterDevices(); } catch { }
                 try { DestroyHandle(); } catch { }
             }
         }
