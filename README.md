@@ -1,39 +1,5 @@
 # 🦅 Predator Control App
 
-The sidebar version label displays “Made by RED4724”. This local build is unsigned; trusted signing requires a suitable code-signing certificate and signing tool.
-
-The clean ZIP contains the executable and source, but excludes build output and standalone test projects. To rebuild it, run `cargo build --release` in `Source/predator_core`, copy `target/release/predator_core.dll` to `Source/PredatorControlApp/predator_core.dll`, then publish `Source/PredatorControlApp/PredatorControlApp.csproj` for `win-x64`. The full release folder retains tests and build files.
-
-The local 1.5.5 improvements add a privacy-reviewed compatibility report in Settings, retain the detailed report behind an identifier warning, check for updates once on startup and on request, require asset-specific checksums, and preserve a previous executable on update. Native loading verifies the embedded DLL; telemetry and PawnIO start on demand. The executable is unsigned and physical hardware validation is pending.
-
-<div align="center">
-
-![Predator Control App](https://img.shields.io/badge/Predator_Control-v1.5.5-red?style=for-the-badge&logo=acer&logoColor=white)
-[![Upstream Releases](https://img.shields.io/badge/GitHub-Upstream_Releases-brightgreen?style=for-the-badge&logo=github)](https://github.com/red16124724/Predator-Control-App/releases)
-[![Platform](https://img.shields.io/badge/Windows-10%20%7C%2011%20(64--bit)-blue?style=for-the-badge&logo=windows)](https://github.com/red16124724/Predator-Control-App/releases)
-[![License](https://img.shields.io/badge/License-MIT-orange?style=for-the-badge)](LICENSE)
-[![No Install Needed](https://img.shields.io/badge/Portable-Zero_Install_Required-purple?style=for-the-badge)](#-quick-start--easy-installation-for-beginners)
-[![Update Behavior](https://img.shields.io/badge/Network-GitHub_Update_Checks-blue?style=for-the-badge)](#network-and-update-behavior)
-
-**A lightning-fast, ultra-lightweight, and feature-packed control center for Acer Predator gaming laptops.**  
-*Get 100% direct control over your fans, power modes, screen refresh rate, keyboard lighting, battery health, and GPU MUX switch — without the bloat, battery drain, or lag of PredatorSense.*
-
-</div>
-
-## Rust parsing and rule migration, local version 1.5.5
-
-This update moves Acer SMBIOS type 170 hotkey and type 172 gaming-record parsing, selected Acer hardware-protocol encoding/decoding, and selected lighting rules into the native Rust core. The existing ACPI PPCC parser was already native-first. Windows discovery, WMI calls, user-interface logic, and managed fallbacks remain in C#. Existing hardware transport and write paths are unchanged; the EC-HID transport already includes Rust. See `RUST-MIGRATION.md` for exact scope and verification. Physical laptop testing has not been performed for this migration.
-
-## Local brightness fix, version 1.5.5
-
-This is a locally rebuilt update, not an official upstream release. It addresses keyboard lighting that stayed dim after the brightness slider was raised, and brightness being applied twice on some lighting paths.
-
-Acknowledged firmware brightness commands now own dimming while RGB packets retain their original color values. If firmware brightness is unavailable, supported fallback paths scale colors in software instead. Static, managed/native animation, and audio-reactive paths apply slider brightness once; transparent color alpha is applied once. Keyboard service requests are serialized. Before a WMI write, the app drains an active service request and skips older queued requests; successful WMI writes do not trigger a second keyboard service write. The controller prefers WMI and uses the service as a fallback. Two-color zone input now reaches all four physical zones.
-
-At 100%, the app requests full supported brightness without extra software dimming. Actual light output still depends on keyboard firmware, the selected color/effect, and the laptop's power state. Physical brightness on each laptop model has not been measured during this update.
-
----
-
 ## 📖 Table of Contents
 
 - [⚡ Quick Start — Easy Installation for Beginners](#-quick-start--easy-installation-for-beginners)
@@ -182,7 +148,7 @@ High-performance native Rust core compiled to `predator_core.dll` and embedded d
 - **Display Refresh Rate Switcher**: Instantly toggle display panels between 60 Hz (for battery preservation) and maximum factory refresh rates (144 Hz, 165 Hz, or 240 Hz).
 
 ### 🌈 Dynamic RGB Engine & Lighting Control
-- **33 Dynamic Effects + Off / Static**: Upgraded lighting engine offering 33 fluid, hardware-matched dynamic lighting effects (*Breathing, Neon, Wave, Shifting, Zoom, Meteor, Rainbow, Spiral, Fire, Waterfall, Audio Reactive, and 22 more*), with complete removal of the unstable legacy "Twinkling" mode.
+- **33 Dynamic Effects + Off / Static**: Upgraded lighting engine offering 33 fluid, hardware-matched dynamic lighting effects (*Breathing, Neon, Wave, Shifting, Zoom, Meteor, Rainbow, Spiral, Fire, Waterfall, Audio Reactive, and 22 more*).
 - **Explicit "Off" Mode**: Added clean, dedicated "Off" presets for both Static Per-Zone and dynamic modes to disable keyboard lighting entirely.
 - **Strict Color State Separation**: Persisted per-zone static colors are strictly decoupled from transient dynamic animation colors. Booting into dynamic lighting or previewing effects never clobbers your custom saved per-zone static palette.
 - **Independent Zone & Key Editing**: Granular 4-zone palette editor and experimental per-key matrix mapping with verified hardware capability detection.
@@ -218,14 +184,6 @@ High-performance native Rust core compiled to `predator_core.dll` and embedded d
 Hardware controls do not require internet access. The app checks GitHub once at startup, including when launched hidden, and when requested through Settings. It does not perform periodic update polling or analytics.
 
 The updater restricts download URLs to HTTPS and permitted GitHub hosts. It requires and verifies an asset-specific SHA-256 before installing an executable. A checksum is an integrity comparison, not a publisher signature. The local build remains unsigned.
-
----
-
-## 🧪 Automated Testing & Code Quality
-
-The previous brightness update passed 243 selected .NET and 126 pure Rust tests; those are historical results. Earlier migration verification: 262 selected .NET tests passed; Release build had zero warnings and errors; 137 Rust tests passed across 15 filtered module runs. The complete inherited hardware/integration suite, UI launch, and physical keyboard brightness require separate verification.
-
-Brightness regressions use hardware-disabled controllers or audited pure functions. The complete inherited .NET suite includes tests that can access live hardware and was not run indiscriminately. Automated packet checks do not measure keyboard light output; compare the new build on the target laptop at 0%, intermediate values, and 100%, including rapid changes, static colors, dynamic effects, and audio-reactive lighting.
 
 ---
 
@@ -308,7 +266,3 @@ This is an independent open-source utility and is not affiliated with, endorsed 
 ## 📄 License
 
 This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
-
-Migration test scope: targeted tests do not intentionally issue hardware writes. In the earlier migration, loading PredatorNativeCore could open PawnIO and start telemetry/NVAPI polling. The current build initializes those facilities on demand; tests that request hardware operations still require care. Physical hardware effects were not measured.
-
-Local audit update: see AUDIT.md at the source root for fixes, exact verification scope, and unresolved hardware-policy findings.
