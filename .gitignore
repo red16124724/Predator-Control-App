@@ -8,6 +8,8 @@ obj/
 
 # .NET
 *.dll
+!predator_core.dll
+!**/predator_core.dll
 *.exe
 *.pdb
 *.nupkg
