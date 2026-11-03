@@ -211,6 +211,40 @@ namespace PredatorControlApp
             }
         }
 
+                public void ApplyPerZoneStaticColors(Color zone1, Color zone2, Color zone3, Color zone4, int brightness = 100)
+        {
+            lock (_sync)
+            {
+                _zoneColors[0] = zone1;
+                _zoneColors[1] = zone2;
+                _zoneColors[2] = zone3;
+                _zoneColors[3] = zone4;
+                _brightness = Math.Clamp(brightness, 0, 100);
+                _effect = "STATIC";
+            }
+            StopDynamicEffect();
+            _ = ApplyAsync(KeyboardLightingScope.Zones);
+        }
+
+        public void StopDynamicEffect()
+        {
+            LightingEffectsManager.StopSoftwareAnimation();
+        }
+
+        public void StartDynamicEffect(string effectName, Color primaryColor, int speed, int brightness)
+        {
+            if (_wmi != null)
+            {
+                int effectIdx = LightingEffectsManager.GetEffectIndex(effectName);
+                LightingEffectsManager.ApplyEffect(
+                    effectIdx,
+                    _wmi,
+                    primaryColor,
+                    (byte)Math.Clamp(brightness, 0, 100),
+                    (byte)Math.Clamp(speed, 1, 100));
+            }
+        }
+
         public void LoadState(IReadOnlyList<Color>? zones, IReadOnlyList<Color>? keys)
         {
             lock (_sync)
@@ -330,8 +364,7 @@ namespace PredatorControlApp
                         "Per-key write was not acknowledged. Falling back to 4-zone.", DateTime.UtcNow));
                 }
 
-                bool hasService = caps.LightingServiceReachable || AcerServiceClient.CommandInterceptor != null;
-                if ((_wmi == null && !hasService && _zoneWriter == null) || caps.Tier == KeyboardLightingTier.Unavailable)
+                if ((_wmi == null && !AcerServiceClient.IsServiceReachable && _zoneWriter == null) || caps.Tier == KeyboardLightingTier.Unavailable)
                 {
                     var status = new KeyboardLightingStatus(
                         false, true, KeyboardLightingTier.Unavailable,
@@ -359,7 +392,7 @@ namespace PredatorControlApp
                 }
 
                 bool serviceZoneOk = false;
-                if (!zoneOk && (hasService || _zoneWriter != null))
+                if (!zoneOk && (AcerServiceClient.IsServiceReachable || _zoneWriter != null))
                 {
                     try
                     {

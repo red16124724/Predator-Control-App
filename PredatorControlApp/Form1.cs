@@ -793,10 +793,10 @@ namespace PredatorControlApp
 
 
         private bool _isInitializing = true;
-        private bool _isInitializingLightingUi;
+        private bool _isInitializingLightingUi = false;
         private UpdateInfo? _pendingUpdateInfo;
         private int _startupUpdateCheckTriggered;
-
+        
         private PredatorButton? _btnDisp60, _btnDispMax;
 
         private PredatorSwitch? _swOdSys;
@@ -1717,6 +1717,8 @@ namespace PredatorControlApp
 
             SystemEvents.PowerModeChanged += OnPowerModeChanged;
 
+            SystemEvents.SessionSwitch += OnSessionSwitch;
+
             SystemEvents.SessionEnding += OnSessionEnding;
 
             this.FormClosed += (s, e) =>
@@ -1724,6 +1726,8 @@ namespace PredatorControlApp
             {
 
                 SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+
+                try { SystemEvents.SessionSwitch -= OnSessionSwitch; } catch { }
 
                 try { SystemEvents.SessionEnding -= OnSessionEnding; } catch { }
 
@@ -1908,21 +1912,23 @@ namespace PredatorControlApp
             {
 
                 _wmiHotkeyWatcher = new WmiHotkeyWatcher((detail) =>
+
                 {
-                    if (detail == 5 || detail == 0x81 || detail == 0xFF)
-                    {
-                        SafeBeginInvoke(ToggleWindowVisibility);
-                    }
+
+                    // Standard Fn combinations (such as Fn+F5 for display switch or Fn+F7 for touchpad)
+
+                    // are never hijacked for window toggling. Window visibility is toggled exclusively
+
+                    // via dedicated PredatorSense / NitroSense key events.
+
                 });
 
                 _wmiHotkeyWatcher.ModeKeyPressed += () =>
-                {
-                    SafeBeginInvoke(HandleModeKeyPress);
-                };
 
-                _wmiHotkeyWatcher.SenseKeyPressed += () =>
                 {
-                    SafeBeginInvoke(ToggleWindowVisibility);
+
+                    SafeBeginInvoke(HandleModeKeyPress);
+
                 };
 
             }
@@ -1939,24 +1945,6 @@ namespace PredatorControlApp
 
         }
 
-    }
-
-    protected override void OnLoad(EventArgs e)
-    {
-        base.OnLoad(e);
-        ApplySavedKeyboardLightingFromSettings();
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await Task.Delay(2500, _shutdownCts.Token).ConfigureAwait(false);
-                if (_shutdownCts.IsCancellationRequested || _isClosing || IsDisposed) return;
-                SafeBeginInvoke(ApplySavedKeyboardLightingFromSettings);
-            }
-            catch { }
-        }, _shutdownCts.Token);
-
-        TriggerStartupUpdateCheckAsync();
     }
 
     private void TriggerStartupUpdateCheckAsync()
@@ -2059,7 +2047,7 @@ namespace PredatorControlApp
 
             {
 
-                var info = await Updater.CheckAsync(_shutdownCts.Token);
+                var info = await Updater.CheckAsync();
 
                 if (_isClosing || IsDisposed) return;
 
@@ -2205,7 +2193,7 @@ namespace PredatorControlApp
 
                 _btnCheckUpdates.Text = "Downloading update…";
 
-                await Updater.ApplyAsync(info, _shutdownCts.Token);
+                await Updater.ApplyAsync(info);
 
 
 
@@ -7508,6 +7496,7 @@ namespace PredatorControlApp
                 };
                 tBtn.Click += (s, e) =>
                 {
+                    if (_isInitializingLightingUi) return;
                     _colorPicker.Color = tintColor;
                     _appSettings.DynamicEffectPrimaryColorArgb = tintColor.ToArgb();
                     _appSettings.Save();
@@ -7543,6 +7532,7 @@ namespace PredatorControlApp
             };
             _btnColorPick.Click += (s, e) =>
             {
+                if (_isInitializingLightingUi) return;
                 ShowColorDialog(_colorPicker.Color, c =>
                 {
                     _colorPicker.Color = c;
@@ -7578,6 +7568,7 @@ namespace PredatorControlApp
             _brightnessSlider.ValueChanged += (s, e) =>
 
             {
+                if (_isInitializingLightingUi) return;
 
                 if (IsOnBattery() && _brightnessSlider.Value == 0 && !_manualBacklightOnBattery)
 
@@ -7591,6 +7582,7 @@ namespace PredatorControlApp
 
             _brightnessSlider.ValueCommitted += (s, e) =>
             {
+                if (_isInitializingLightingUi) return;
                 bool onBat = IsOnBattery();
                 if (onBat)
                 {
@@ -7668,11 +7660,16 @@ namespace PredatorControlApp
 
             _speedSlider = new PredatorSlider { Location = new Point(cPad, S(124)), Size = new Size(cInnerW, S(28)), Minimum = 1, Maximum = 100, Value = 50 };
 
-            _speedSlider.ValueChanged += (s, e) => { _lblSpeedHdr.Text = $"EFFECT SPEED: {_speedSlider.Value}%"; };
+            _speedSlider.ValueChanged += (s, e) =>
+            {
+                if (_isInitializingLightingUi) return;
+                _lblSpeedHdr.Text = $"EFFECT SPEED: {_speedSlider.Value}%";
+            };
 
             _speedSlider.ValueCommitted += (s, e) =>
 
             {
+                if (_isInitializingLightingUi) return;
 
                 byte spd = GetMappedSpeed();
 
@@ -7786,7 +7783,7 @@ namespace PredatorControlApp
 
                 };
 
-                pillBtn.Click += (s, e) => SetZoneLayout(targetMode, userInitiated: true);
+                pillBtn.Click += (s, e) => { if (_isInitializingLightingUi) return; SetZoneLayout(targetMode, userInitiated: true); };
 
                 cardZones.Controls.Add(pillBtn);
 
@@ -7865,6 +7862,7 @@ namespace PredatorControlApp
                 btn.Click += (s, e) =>
 
                 {
+                    if (_isInitializingLightingUi) return;
 
                     _selectedZoneIndex = zi;
 
@@ -7872,11 +7870,12 @@ namespace PredatorControlApp
 
                 };
 
-                btn.DoubleClick += (s, e) => PickZoneColor(zi);
+                btn.DoubleClick += (s, e) => { if (_isInitializingLightingUi) return; PickZoneColor(zi); };
 
                 btn.MouseDown += (s, e) =>
 
                 {
+                    if (_isInitializingLightingUi) return;
 
                     if (e.Button == MouseButtons.Right)
 
@@ -7970,6 +7969,7 @@ namespace PredatorControlApp
 
                 sBtn.Click += (s, e) =>
                 {
+                    if (_isInitializingLightingUi) return;
                     _appSettings.IsZoneLightingActive = true;
                     _appSettings.ActiveLightingPreset = "Custom";
                     _appSettings.Save();
@@ -7989,6 +7989,7 @@ namespace PredatorControlApp
             _btnSyncAll.Click += (s, e) =>
 
             {
+                if (_isInitializingLightingUi) return;
 
                 _syncAllZones = !_syncAllZones;
 
@@ -8022,7 +8023,7 @@ namespace PredatorControlApp
 
             _btnPresetCyberpunk = MakeButton(cardZones, "Cyberpunk", cPad, actY, actBtnW, actH);
 
-            _btnPresetCyberpunk.Click += (s, e) => ApplyZonePreset(new[]
+            _btnPresetCyberpunk.Click += (s, e) => { if (_isInitializingLightingUi) return; ApplyZonePreset(new[]
 
             {
 
@@ -8034,13 +8035,13 @@ namespace PredatorControlApp
 
                 Color.FromArgb(0x29, 0x79, 0xFF)  // Blue
 
-            }, "Cyberpunk");
+            }, "Cyberpunk"); };
 
 
 
             _btnPresetFirestorm = MakeButton(cardZones, "Firestorm", cPad + (actBtnW + actGap), actY, actBtnW, actH);
 
-            _btnPresetFirestorm.Click += (s, e) => ApplyZonePreset(new[]
+            _btnPresetFirestorm.Click += (s, e) => { if (_isInitializingLightingUi) return; ApplyZonePreset(new[]
 
             {
 
@@ -8052,13 +8053,13 @@ namespace PredatorControlApp
 
                 Color.FromArgb(0xD5, 0x00, 0x00)  // Crimson
 
-            }, "Firestorm");
+            }, "Firestorm"); };
 
 
 
             _btnPresetIce = MakeButton(cardZones, "Predator Ice", cPad + (actBtnW + actGap) * 2, actY, actBtnW, actH);
 
-            _btnPresetIce.Click += (s, e) => ApplyZonePreset(new[]
+            _btnPresetIce.Click += (s, e) => { if (_isInitializingLightingUi) return; ApplyZonePreset(new[]
 
             {
 
@@ -8070,7 +8071,7 @@ namespace PredatorControlApp
 
                 Color.FromArgb(0x00, 0xE5, 0xFF)  // Cyan
 
-            }, "Predator Ice");
+            }, "Predator Ice"); };
 
 
 
@@ -8080,6 +8081,7 @@ namespace PredatorControlApp
             _btnPresetOff.Click += (s, e) =>
 
             {
+                if (_isInitializingLightingUi) return;
 
                 _appSettings.IsZoneLightingActive = true;
                 _appSettings.ActiveLightingPreset = "Off";
@@ -8122,6 +8124,7 @@ namespace PredatorControlApp
 
             _btnPresetCustom.Click += (s, e) =>
             {
+                if (_isInitializingLightingUi) return;
                 _appSettings.IsZoneLightingActive = true;
                 _appSettings.ActiveLightingPreset = "Custom";
                 _appSettings.KeyboardZoneLayoutMode = _zoneLayoutMode;
@@ -8810,6 +8813,7 @@ namespace PredatorControlApp
         private void ApplyZoneQuickColor(Color color)
 
         {
+            if (_isInitializingLightingUi) return;
 
             if (_lightingController == null) return;
             LightingEffectsManager.StopSoftwareAnimation();
@@ -8902,6 +8906,7 @@ namespace PredatorControlApp
         private void ApplyZonePreset(Color[] colors, string presetName = "Custom")
 
         {
+            if (_isInitializingLightingUi) return;
 
             if (_lightingController == null) return;
             LightingEffectsManager.StopSoftwareAnimation();
@@ -9015,6 +9020,80 @@ namespace PredatorControlApp
             }
 
         }
+        private void UpdateZoneSwatchUiOnly(int zone, Color color)
+        {
+            if (_lightingController != null)
+            {
+                _lightingController.SetZoneColor(zone, color);
+            }
+            if (zone >= 0 && zone < _zoneButtons.Length)
+            {
+                var btn = _zoneButtons[zone];
+                if (btn != null && !btn.IsDisposed)
+                {
+                    btn.Invalidate();
+                }
+            }
+        }
+
+        private void UpdateDynamicEffectDropdownUiOnly(string effectName)
+        {
+            int targetIdx = 0;
+            if (!string.IsNullOrWhiteSpace(effectName) && !string.Equals(effectName, "Off", StringComparison.OrdinalIgnoreCase) && _rgbDropDown != null)
+            {
+                for (int i = 1; i < _rgbDropDown.Items.Count; i++)
+                {
+                    if (string.Equals(_rgbDropDown.Items[i]?.ToString(), effectName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        targetIdx = i;
+                        break;
+                    }
+                }
+            }
+
+            if (_rgbDropDown != null && targetIdx >= 0 && targetIdx < _rgbDropDown.Items.Count)
+            {
+                if (_rgbDropDown.SelectedIndex != targetIdx)
+                {
+                    _rgbDropDown.SelectedIndex = targetIdx;
+                }
+            }
+
+            UpdateRgbControls(targetIdx);
+            CheckRgbTrayFromMode(targetIdx);
+        }
+
+        private void UpdateDynamicColorSwatchUiOnly(Color color)
+        {
+            if (_colorPicker != null)
+            {
+                _colorPicker.Color = color;
+            }
+            foreach (var b in _dynamicTintButtons)
+            {
+                if (b != null && !b.IsDisposed) b.Invalidate();
+            }
+            if (_btnColorPick != null && !_btnColorPick.IsDisposed)
+            {
+                _btnColorPick.Invalidate();
+            }
+        }
+
+        private void UpdateBrightnessUiOnly(int brightness)
+        {
+            int clamped = Math.Clamp(brightness, 0, 100);
+            if (_brightnessSlider != null)
+            {
+                _brightnessSlider.Value = clamped;
+            }
+            if (_lblBrightHdr != null)
+            {
+                _lblBrightHdr.Text = (IsOnBattery() && clamped == 0 && !_manualBacklightOnBattery)
+                    ? "BRIGHTNESS: Off (Battery Saver)"
+                    : $"BRIGHTNESS: {clamped}%";
+            }
+        }
+
 
 
 
@@ -9332,6 +9411,10 @@ namespace PredatorControlApp
 
                 DateTime.UtcNow));
 
+            // Cold-start capability discovery can replace a provisional single-zone layout.
+            // Replay the current saved intent through the final detected transport/layout.
+            ApplySavedKeyboardLightingFromSettings();
+
         }
 
 
@@ -9469,6 +9552,7 @@ namespace PredatorControlApp
         private void PickZoneColor(int zone)
 
         {
+            if (_isInitializingLightingUi) return;
 
             var controller = _lightingController;
 
@@ -9622,10 +9706,14 @@ namespace PredatorControlApp
 
 
 
+        internal static bool ShouldRestoreStaticLighting(AppSettings settings, int selectedRgb) =>
+            settings.IsZoneLightingActive ||
+            string.Equals(settings.DynamicLightingEffectName, "Off", StringComparison.OrdinalIgnoreCase) || selectedRgb <= 0;
+
         private async Task ApplyCurrentLightingStateAsync(int selectedRgb, int targetBright)
         {
             _wmi.SetBrightness((byte)targetBright, applyMode: false);
-            if (string.Equals(_appSettings.DynamicLightingEffectName, "Off", StringComparison.OrdinalIgnoreCase) || selectedRgb <= 0)
+            if (ShouldRestoreStaticLighting(_appSettings, selectedRgb))
             {
                 var scope = (_zoneLayoutMode == 0 && _lightingCapabilities?.PerKeySupported == true)
                     ? KeyboardLightingScope.PerKey
@@ -13688,6 +13776,15 @@ namespace PredatorControlApp
 
 
 
+                private void OnSessionSwitch(object? sender, SessionSwitchEventArgs e)
+        {
+            if (_isClosing || IsDisposed) return;
+            if (e.Reason == SessionSwitchReason.SessionUnlock || e.Reason == SessionSwitchReason.SessionLogon)
+            {
+                _ = RestoreSavedKeyboardLightingWithBootRetryAsync(_shutdownCts.Token);
+            }
+        }
+
         private void OnSessionEnding(object? sender, SessionEndingEventArgs e)
 
         {
@@ -15057,66 +15154,44 @@ namespace PredatorControlApp
 
 
 
+                _appSettings.StaticZone1ColorArgb = settings.StaticZone1ColorArgb;
+                _appSettings.StaticZone2ColorArgb = settings.StaticZone2ColorArgb;
+                _appSettings.StaticZone3ColorArgb = settings.StaticZone3ColorArgb;
+                _appSettings.StaticZone4ColorArgb = settings.StaticZone4ColorArgb;
+                _appSettings.DynamicLightingEffectName = settings.DynamicLightingEffectName;
+                _appSettings.DynamicEffectPrimaryColorArgb = settings.DynamicEffectPrimaryColorArgb;
+                _appSettings.KeyboardBrightnessLevel = settings.KeyboardBrightnessLevel;
+                _appSettings.IsZoneLightingActive = settings.IsZoneLightingActive;
+                _appSettings.KeyboardZoneColors = settings.KeyboardZoneColors;
+
+                string dynamicEffect = settings.DynamicLightingEffectName;
+                if (string.IsNullOrWhiteSpace(dynamicEffect) || string.Equals(dynamicEffect, "Twinkling", StringComparison.OrdinalIgnoreCase))
+                {
+                    dynamicEffect = "Off";
+                    settings.DynamicLightingEffectName = "Off";
+                    _appSettings.DynamicLightingEffectName = "Off";
+                }
+
                 _suppressUiEvents = true;
                 _isInitializingLightingUi = true;
-                int targetInitIdx = 0;
                 try
                 {
-                    _appSettings.StaticZone1ColorArgb = settings.StaticZone1ColorArgb;
-                    _appSettings.StaticZone2ColorArgb = settings.StaticZone2ColorArgb;
-                    _appSettings.StaticZone3ColorArgb = settings.StaticZone3ColorArgb;
-                    _appSettings.StaticZone4ColorArgb = settings.StaticZone4ColorArgb;
-                    _appSettings.DynamicLightingEffectName = settings.DynamicLightingEffectName;
-                    _appSettings.IsZoneLightingActive = settings.IsZoneLightingActive;
-                    _appSettings.KeyboardZoneColors = settings.KeyboardZoneColors;
+                    UpdateZoneSwatchUiOnly(0, Color.FromArgb(_appSettings.StaticZone1ColorArgb));
+                    UpdateZoneSwatchUiOnly(1, Color.FromArgb(_appSettings.StaticZone2ColorArgb));
+                    UpdateZoneSwatchUiOnly(2, Color.FromArgb(_appSettings.StaticZone3ColorArgb));
+                    UpdateZoneSwatchUiOnly(3, Color.FromArgb(_appSettings.StaticZone4ColorArgb));
 
-                    string dynamicEffect = settings.DynamicLightingEffectName;
-                    if (string.IsNullOrWhiteSpace(dynamicEffect) || string.Equals(dynamicEffect, "Twinkling", StringComparison.OrdinalIgnoreCase))
-                    {
-                        dynamicEffect = "Off";
-                        settings.DynamicLightingEffectName = "Off";
-                        _appSettings.DynamicLightingEffectName = "Off";
-                    }
-
-                    Color z1 = Color.FromArgb(settings.StaticZone1ColorArgb);
-                    Color z2 = Color.FromArgb(settings.StaticZone2ColorArgb);
-                    Color z3 = Color.FromArgb(settings.StaticZone3ColorArgb);
-                    Color z4 = Color.FromArgb(settings.StaticZone4ColorArgb);
-
-                    if (_lightingController != null)
-                    {
-                        _lightingController.SetZoneColor(0, z1);
-                        _lightingController.SetZoneColor(1, z2);
-                        _lightingController.SetZoneColor(2, z3);
-                        _lightingController.SetZoneColor(3, z4);
-                    }
-                    RefreshZoneButtons();
-
-                    if (!string.Equals(dynamicEffect, "Off", StringComparison.OrdinalIgnoreCase) && _rgbDropDown != null)
-                    {
-                        for (int i = 1; i < _rgbDropDown.Items.Count; i++)
-                        {
-                            if (string.Equals(_rgbDropDown.Items[i]?.ToString(), dynamicEffect, StringComparison.OrdinalIgnoreCase))
-                            {
-                                targetInitIdx = i;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (_rgbDropDown != null && targetInitIdx >= 0 && targetInitIdx < _rgbDropDown.Items.Count)
-                    {
-                        _rgbDropDown.SelectedIndex = targetInitIdx;
-                    }
-
-                    UpdateRgbControls(targetInitIdx);
-                    CheckRgbTrayFromMode(targetInitIdx);
+                    UpdateDynamicEffectDropdownUiOnly(_appSettings.DynamicLightingEffectName);
+                    UpdateDynamicColorSwatchUiOnly(Color.FromArgb(_appSettings.DynamicEffectPrimaryColorArgb));
+                    UpdateBrightnessUiOnly(_appSettings.KeyboardBrightnessLevel);
                 }
                 finally
                 {
-                    _suppressUiEvents = false;
                     _isInitializingLightingUi = false;
+                    _suppressUiEvents = false;
                 }
+
+                int targetInitIdx = (_rgbDropDown != null && _rgbDropDown.SelectedIndex >= 0) ? _rgbDropDown.SelectedIndex : 0;
 
                 if (onBatteryStartup)
                 {
@@ -15367,6 +15442,10 @@ namespace PredatorControlApp
 
                     EnforceBacklightOffOnBattery();
 
+                }
+                else
+                {
+                    _ = RestoreSavedKeyboardLightingWithBootRetryAsync(_shutdownCts.Token);
                 }
 
 
@@ -15967,7 +16046,7 @@ namespace PredatorControlApp
 
 
 
-            if (_appSettings != null && _appSettings.BatteryCalibrationPhase != 0)
+            if (_appSettings.BatteryCalibrationPhase != 0)
 
             {
 
@@ -17492,7 +17571,6 @@ namespace PredatorControlApp
                     }
 
                     try { _trayIcon.Dispose(); } catch { }
-#pragma warning disable CS8625
                     _trayIcon = null!;
 
                 }
@@ -17510,7 +17588,6 @@ namespace PredatorControlApp
 
                     try { _timer.Dispose(); } catch { }
                     _timer = null!;
-#pragma warning restore CS8625
 
                 }
 
@@ -17526,7 +17603,6 @@ namespace PredatorControlApp
 
                 try { _lightingController?.Dispose(); } catch { }
 
-                try { _fanCommandQueue.ClearAndStop(); } catch { }
                 try { _powerModeSwitchGuard?.Dispose(); } catch { }
 
                 try { _wmi.Dispose(); } catch { }
@@ -18020,10 +18096,117 @@ namespace PredatorControlApp
 
         }
 
-
-
         #endregion
 
+        protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+        _ = RestoreSavedKeyboardLightingWithBootRetryAsync(_shutdownCts.Token);
+        TriggerStartupUpdateCheckAsync();
     }
 
+    
+
+    public async Task RestoreSavedKeyboardLightingWithBootRetryAsync(CancellationToken ct)
+    {
+        // Pass 1: Immediate application on startup
+        SafeBeginInvoke(ApplySavedLightingStateToHardware);
+
+        // Pass 2 & Pass 3: Re-apply at +1500ms and +4000ms after boot to override late Acer EC/WMI resets
+        int[] retryDelaysMs = { 1500, 4000 };
+        foreach (int delayMs in retryDelaysMs)
+        {
+            try
+            {
+                await Task.Delay(delayMs, ct).ConfigureAwait(false);
+                if (ct.IsCancellationRequested || _isClosing || IsDisposed) return;
+                SafeBeginInvoke(ApplySavedLightingStateToHardware);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch { }
+        }
+    }
+
+    public void ApplySavedLightingStateToHardware()
+    {
+        if (_isClosing || IsDisposed) return;
+        var settings = _appSettings;
+        if (settings == null) return;
+
+        bool onBattery = false;
+        try
+        {
+            var power = SystemInformation.PowerStatus;
+            onBattery = _backlightMgr.IsOnBattery(power.PowerLineStatus, power.BatteryChargeStatus) && !_manualBacklightOnBattery;
+        }
+        catch { }
+
+        if (onBattery)
+        {
+            EnforceBacklightOffOnBattery();
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(settings.DynamicLightingEffectName) ||
+            settings.DynamicLightingEffectName.Equals("Off", StringComparison.OrdinalIgnoreCase) ||
+            settings.DynamicLightingEffectName.Equals("Static", StringComparison.OrdinalIgnoreCase) ||
+            settings.IsZoneLightingActive)
+        {
+            if (_lightingController != null)
+            {
+                _lightingController.StopDynamicEffect();
+                _lightingController.ApplyPerZoneStaticColors(
+                    Color.FromArgb(settings.StaticZone1ColorArgb),
+                    Color.FromArgb(settings.StaticZone2ColorArgb),
+                    Color.FromArgb(settings.StaticZone3ColorArgb),
+                    Color.FromArgb(settings.StaticZone4ColorArgb),
+                    settings.KeyboardBrightnessLevel);
+            }
+            else if (_wmi != null)
+            {
+                Color[] staticColors = new[]
+                {
+                    Color.FromArgb(settings.StaticZone1ColorArgb),
+                    Color.FromArgb(settings.StaticZone2ColorArgb),
+                    Color.FromArgb(settings.StaticZone3ColorArgb),
+                    Color.FromArgb(settings.StaticZone4ColorArgb)
+                };
+                int bright = settings.KeyboardBrightnessLevel;
+                Task.Run(() => _wmi.SetZoneColors(staticColors, bright));
+            }
+            RefreshZoneButtons();
+        }
+        else
+        {
+            if (_lightingController != null)
+            {
+                _lightingController.StartDynamicEffect(
+                    settings.DynamicLightingEffectName,
+                    Color.FromArgb(settings.DynamicEffectPrimaryColorArgb),
+                    settings.DynamicEffectSpeed,
+                    settings.KeyboardBrightnessLevel);
+            }
+            else
+            {
+                int mode = 0;
+                for (int i = 1; i < RgbModeNames.Length; i++)
+                {
+                    if (string.Equals(RgbModeNames[i], settings.DynamicLightingEffectName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        mode = i;
+                        break;
+                    }
+                }
+                if (mode > 0)
+                {
+                    ApplyRgbModeFromDropdown(mode);
+                }
+            }
+        }
+    }
+
+    }
 }

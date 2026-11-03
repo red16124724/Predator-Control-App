@@ -444,19 +444,52 @@ namespace PredatorControlApp
         public string KeyboardCapabilityNotes { get; set; } = string.Empty;
 
         // Dedicated Per-Zone Static Colors (never mutated by dynamic effects)
-        public int StaticZone1ColorArgb { get; set; } = unchecked((int)0xFF00A0FF);
-        public int StaticZone2ColorArgb { get; set; } = unchecked((int)0xFF00A0FF);
-        public int StaticZone3ColorArgb { get; set; } = unchecked((int)0xFF00A0FF);
-        public int StaticZone4ColorArgb { get; set; } = unchecked((int)0xFF00A0FF);
+        public int StaticZone1ColorArgb { get; set; } = unchecked((int)0xFF00F0FF);
+        public int StaticZone2ColorArgb { get; set; } = unchecked((int)0xFF00F0FF);
+        public int StaticZone3ColorArgb { get; set; } = unchecked((int)0xFF00F0FF);
+        public int StaticZone4ColorArgb { get; set; } = unchecked((int)0xFF00F0FF);
         public string StaticZoneColorMapJson { get; set; } = string.Empty;
 
         // Dedicated Dynamic RGB Effect Settings
         public string DynamicLightingEffectName { get; set; } = "Off";
-        public int DynamicEffectPrimaryColorArgb { get; set; } = unchecked((int)0xFF0096FF);
-        public int DynamicEffectSecondaryColorArgb { get; set; } = unchecked((int)0xFF00DCFF);
-        public int DynamicEffectSpeed { get; set; } = 50;
+        public int DynamicEffectPrimaryColorArgb { get; set; } = unchecked((int)0xFF00F0FF);
+        public int DynamicEffectSecondaryColorArgb { get; set; } = unchecked((int)0xFFFF0080);
+        public int DynamicEffectSpeed { get; set; } = 5;
         public int DynamicEffectDirection { get; set; } = 0;
         public int KeyboardBrightnessLevel { get; set; } = 100;
+
+        public void SetStaticZoneColor(int zoneIndex, Color color)
+        {
+            switch (zoneIndex)
+            {
+                case 0:
+                    StaticZone1ColorArgb = color.ToArgb();
+                    break;
+                case 1:
+                    StaticZone2ColorArgb = color.ToArgb();
+                    break;
+                case 2:
+                    StaticZone3ColorArgb = color.ToArgb();
+                    break;
+                case 3:
+                    StaticZone4ColorArgb = color.ToArgb();
+                    break;
+                default:
+                    return;
+            }
+            IsZoneLightingActive = true;
+            Save();
+        }
+
+        public void SetStaticZoneColors(Color z1, Color z2, Color z3, Color z4)
+        {
+            StaticZone1ColorArgb = z1.ToArgb();
+            StaticZone2ColorArgb = z2.ToArgb();
+            StaticZone3ColorArgb = z3.ToArgb();
+            StaticZone4ColorArgb = z4.ToArgb();
+            IsZoneLightingActive = true;
+            Save();
+        }
 
         // Power mode switch smoothing: one mode write, deferred Windows overlay.
         public bool SmoothPowerModeSwitching { get; set; } = true;
@@ -1228,6 +1261,8 @@ namespace PredatorControlApp
             return KeyboardLightingPalette.Serialize(parsed);
         }
 
+        public void Normalize() => Sanitize();
+
         public void Sanitize()
         {
             lock (this)
@@ -1610,6 +1645,7 @@ namespace PredatorControlApp
 
         internal void RestoreMissingStaticZoneColors(bool zone1, bool zone2, bool zone3, bool zone4)
         {
+            if (zone1 && zone2 && zone3 && zone4) return;
             var colors = KeyboardLightingPalette.Parse(KeyboardZoneColors, 4, Color.FromArgb(0, 160, 255));
             if (!zone1) StaticZone1ColorArgb = colors[0].ToArgb();
             if (!zone2) StaticZone2ColorArgb = colors[1].ToArgb();
