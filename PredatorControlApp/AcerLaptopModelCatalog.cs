@@ -819,6 +819,36 @@ namespace PredatorControlApp
             // =========================================================================
 
             new AcerModelProfile
+            {
+                ModelCodePattern = @"\bAN515[-_]41\b",
+                MarketingName = "Acer Nitro 5 AMD (2017)",
+                Year = 2017,
+                DefaultLightingTier = KeyboardLightingTier.SingleZone,
+                HasRearLightbar = false,
+                FanConfiguration = FanConfiguration.DualFan,
+                SupportsCpuPlControl = false
+            },
+            new AcerModelProfile
+            {
+                ModelCodePattern = @"\bAN515[-_]42\b",
+                MarketingName = "Acer Nitro 5 AMD (2018)",
+                Year = 2018,
+                DefaultLightingTier = KeyboardLightingTier.SingleZone,
+                HasRearLightbar = false,
+                FanConfiguration = FanConfiguration.DualFan,
+                SupportsCpuPlControl = false
+            },
+            new AcerModelProfile
+            {
+                ModelCodePattern = @"\bAN515[-_]43\b",
+                MarketingName = "Acer Nitro 5 AMD (2019)",
+                Year = 2019,
+                DefaultLightingTier = KeyboardLightingTier.SingleZone,
+                HasRearLightbar = false,
+                FanConfiguration = FanConfiguration.DualFan,
+                SupportsCpuPlControl = false
+            },
+            new AcerModelProfile
 
             {
 
@@ -902,6 +932,36 @@ namespace PredatorControlApp
 
             },
 
+            new AcerModelProfile
+            {
+                ModelCodePattern = @"\bAN515[-_]51\b",
+                MarketingName = "Acer Nitro 5 Intel (2017)",
+                Year = 2017,
+                DefaultLightingTier = KeyboardLightingTier.SingleZone,
+                HasRearLightbar = false,
+                FanConfiguration = FanConfiguration.DualFan,
+                SupportsCpuPlControl = true
+            },
+            new AcerModelProfile
+            {
+                ModelCodePattern = @"\bAN515[-_]52\b",
+                MarketingName = "Acer Nitro 5 Intel (2018)",
+                Year = 2018,
+                DefaultLightingTier = KeyboardLightingTier.SingleZone,
+                HasRearLightbar = false,
+                FanConfiguration = FanConfiguration.DualFan,
+                SupportsCpuPlControl = true
+            },
+            new AcerModelProfile
+            {
+                ModelCodePattern = @"\bAN515[-_]53\b",
+                MarketingName = "Acer Nitro 5 Intel (2018)",
+                Year = 2018,
+                DefaultLightingTier = KeyboardLightingTier.SingleZone,
+                HasRearLightbar = false,
+                FanConfiguration = FanConfiguration.DualFan,
+                SupportsCpuPlControl = true
+            },
             new AcerModelProfile
 
             {
@@ -1029,6 +1089,16 @@ namespace PredatorControlApp
             },
 
             new AcerModelProfile
+            {
+                ModelCodePattern = @"\bAN517[-_]51\b",
+                MarketingName = "Acer Nitro 5 17-inch Intel (2019)",
+                Year = 2019,
+                DefaultLightingTier = KeyboardLightingTier.ThreeZone,
+                HasRearLightbar = false,
+                FanConfiguration = FanConfiguration.DualFan,
+                SupportsCpuPlControl = true
+            },
+            new AcerModelProfile
 
             {
 
@@ -1049,6 +1119,16 @@ namespace PredatorControlApp
 
             },
 
+            new AcerModelProfile
+            {
+                ModelCodePattern = @"\bAN517[-_]53\b",
+                MarketingName = "Acer Nitro 5 17-inch Intel (2021)",
+                Year = 2021,
+                DefaultLightingTier = KeyboardLightingTier.FourZone,
+                HasRearLightbar = false,
+                FanConfiguration = FanConfiguration.DualFan,
+                SupportsCpuPlControl = true
+            },
             new AcerModelProfile
 
             {
@@ -1224,6 +1304,16 @@ namespace PredatorControlApp
                 SupportsCpuPlControl = true
 
             },
+            new AcerModelProfile
+            {
+                ModelCodePattern = @"\bAN16[-_]73\b",
+                MarketingName = "Acer Nitro 16 Intel (2025/2026)",
+                Year = 2025,
+                DefaultLightingTier = KeyboardLightingTier.FourZone,
+                HasRearLightbar = false,
+                FanConfiguration = FanConfiguration.DualFan,
+                SupportsCpuPlControl = true
+            },
 
             new AcerModelProfile
 
@@ -1329,6 +1419,28 @@ namespace PredatorControlApp
                 SupportsCpuPlControl = true
 
             },
+            new AcerModelProfile
+            {
+                ModelCodePattern = @"\bAN18[-_]71\b",
+                MarketingName = "Acer Nitro 18 Intel (2024)",
+                Year = 2024,
+                DefaultLightingTier = KeyboardLightingTier.FourZone,
+                HasFullKeyboardWithNumpad = true,
+                HasRearLightbar = false,
+                FanConfiguration = FanConfiguration.DualFan,
+                SupportsCpuPlControl = true
+            },
+            new AcerModelProfile
+            {
+                ModelCodePattern = @"\bAN18[-_]72\b",
+                MarketingName = "Acer Nitro 18 Intel (2025)",
+                Year = 2025,
+                DefaultLightingTier = KeyboardLightingTier.FourZone,
+                HasFullKeyboardWithNumpad = true,
+                HasRearLightbar = false,
+                FanConfiguration = FanConfiguration.DualFan,
+                SupportsCpuPlControl = true
+            },
 
             new AcerModelProfile
 
@@ -1425,6 +1537,16 @@ namespace PredatorControlApp
                 SupportsCpuPlControl = true
 
             },
+            new AcerModelProfile
+            {
+                ModelCodePattern = @"\bANV15[-_]52\b",
+                MarketingName = "Acer Nitro V 15 Intel (2024/2025)",
+                Year = 2024,
+                DefaultLightingTier = KeyboardLightingTier.SingleZone,
+                HasRearLightbar = false,
+                FanConfiguration = FanConfiguration.DualFan,
+                SupportsCpuPlControl = true
+            },
 
             new AcerModelProfile
 
@@ -1466,6 +1588,16 @@ namespace PredatorControlApp
 
                 SupportsCpuPlControl = true
 
+            },
+            new AcerModelProfile
+            {
+                ModelCodePattern = @"\bANV16[-_]71\b",
+                MarketingName = "Acer Nitro V 16 Intel (2024/2025)",
+                Year = 2024,
+                DefaultLightingTier = KeyboardLightingTier.SingleZone,
+                HasRearLightbar = false,
+                FanConfiguration = FanConfiguration.DualFan,
+                SupportsCpuPlControl = true
             },
 
             new AcerModelProfile
@@ -1782,7 +1914,7 @@ namespace PredatorControlApp
 
             // Heuristic B: PHN / AN16 / AN17 / PH315 -> FourZone
 
-            if (upper.Contains("PHN") || upper.Contains("AN14") || upper.Contains("AN16") || upper.Contains("AN17") || upper.Contains("PH315") || (upper.Contains("NITRO") && upper.Contains("14")))
+            if (upper.Contains("PHN") || upper.Contains("AN14") || upper.Contains("AN16") || upper.Contains("AN17") || upper.Contains("AN18") || upper.Contains("PH315") || (upper.Contains("NITRO") && upper.Contains("14")))
 
             {
 
@@ -1798,7 +1930,7 @@ namespace PredatorControlApp
 
                 {
 
-                    ModelCodePattern = @"PHN|AN16|AN17|PH315",
+                    ModelCodePattern = @"PHN|AN16|AN17|AN18|PH315",
 
                     MarketingName = fam,
 

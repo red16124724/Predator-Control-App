@@ -9,6 +9,14 @@ Current local 1.5.5 improvements: one update check on startup, including hidden 
 ## Executive Overview
 Version 1.5.5 brings a comprehensive codebase audit, bug fix, and stabilization overhaul across the C# .NET 10 WinForms UI, native Rust Core (predator_core.dll), Ring-0 PawnIO hardware drivers, and the complete 1,941-test suite.
 
+
+### Acer Nitro & Nitro V Series Support (Update 2026-11-03)
+- **Universal Hardware Support for Acer Nitro**: Added complete model definitions and hardware routing for all 45 Acer Nitro models across Nitro 5, Nitro 14, Nitro 16, Nitro 17, Nitro 18, and Nitro V (14, 15, 16) covering 2017 to 2026+.
+- **Accurate Keyboard Lighting Tiers**: Fixed classification so monochrome models (pre-2020 Nitro 5, all Nitro V) use SingleZone, and modern models (2020+ Nitro 5, Nitro 14/16/17/18) use 4-Zone RGB.
+- **Dedicated NitroSense Key Capture**: Physical scancode `0xF5`, RawInput HID pages `0xFF05` and `0xFFA0`, and WMI event triggers now toggle the app instantly over 3D games.
+- **Cooling Tables**: Integrated Nitro series into `UsesFanTable` for direct hardware fan curve control.
+- **2,082 Managed Tests Passed**: Full solution test suite verified 100% clean across all 2,082 managed tests and 185 native Rust core tests.
+
 ### Key Highlights
 1. **Per-Zone RGB Persistence & Boot Decoupling**: Static 4-zone keyboard RGB colors are now strictly isolated from Dynamic RGB animation frames. Booting or launching the app will never clobber individual zone colors with dynamic effect presets.
 2. **Dynamic RGB Streamlining**: The legacy "Twinkling" effect has been completely removed across the entire stack. An explicit "Off (Static)" mode has been added as the primary option to instantly halt animation timers and restore user-defined per-zone static colors.

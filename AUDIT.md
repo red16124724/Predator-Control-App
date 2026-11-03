@@ -52,6 +52,23 @@ Comprehensive multi-agent stress test, chaos engineering, UI rendering validatio
 
 ---
 
+
+### 4. Acer Nitro & Nitro V Series Support Overhaul
+- **Comprehensive Model Catalog (`AcerLaptopModelCatalog.cs`)**: Added full hardware profiles for all 45 Acer Nitro models across all production years (2017–2026+), covering Nitro 5 (`AN515-41..58`, `AN517-41..55`), Nitro 14 (`AN14-41`, `AN14-51`), Nitro 16 (`AN16-41..73`), Nitro 17 (`AN17-41..72`), Nitro 18 (`AN18-71..72`), and Nitro V (`ANV14-61`, `ANV15-41..52`, `ANV16-41..71`).
+- **Correct Keyboard Lighting Tier Classifications (`KeyboardLightingCapabilities.cs`)**:
+  - Eliminated erroneous 3-zone clamping of Nitro models.
+  - Classified monochrome/single-color backlights (pre-2020 Nitro 5 and all Nitro V models) strictly as `SingleZone`.
+  - Classified modern 4-zone RGB models (Nitro 5 2020+, Nitro 14, Nitro 16, Nitro 17, Nitro 18) as `FourZone`.
+- **Dedicated NitroSense Key Capture (`KeyboardHook.cs`, `RawInputKeyWatcher.cs`, `WmiHotkeyWatcher.cs`, `Form1.cs`)**:
+  - Added physical scancode `0xF5` (NitroSense physical key) alongside `0x75` (Predator key) with instant foreground demotion and priority boost.
+  - Registered RawInput HID Usage Pages `0xFF05` (Acer Gaming/EC) and `0xFFA0` (Acer Launch Manager / NitroSense) with dual-offset payload parsing.
+  - Added `SenseKeyPressed` event to `WmiHotkeyWatcher` for WMI event codes `0x05`, `0x81`, and `0xFF`, wired to toggle application visibility.
+- **Cooling & Fan Table Integration (`AcerHardwareProtocols.cs`)**: Added Nitro families (`AN14`, `AN16`, `AN17`, `AN18`, `ANV14`, `ANV15`, `ANV16`) to `UsesFanTable` for direct hardware fan curve control.
+- **Keyboard Lighting Transport Fallback Hardening (`KeyboardLightingController.cs`)**: Resolved transport reachability check to query capability-probed `LightingServiceReachable` and `CommandInterceptor`, preventing unconfigured socket timeouts when per-key scope is gated off on 4-zone devices.
+- **Exhaustive Unit Test Verification (`AcerLaptopModelCatalogTests.cs`)**: Full test suite of 2,082 managed unit and stress tests passed with 100% success (0 failed, 0 skipped), alongside 185 native Rust unit and FFI stress tests.
+
+---
+
 ## Artifact Verification
 - Standalone Executable: `C:\Users\anshu\Downloads\Predator-Control-1.5.5\PredatorControlApp.exe`
 - Size: 54,495,246 bytes

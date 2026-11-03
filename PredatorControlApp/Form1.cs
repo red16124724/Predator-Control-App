@@ -1908,23 +1908,21 @@ namespace PredatorControlApp
             {
 
                 _wmiHotkeyWatcher = new WmiHotkeyWatcher((detail) =>
-
                 {
-
-                    // Standard Fn combinations (such as Fn+F5 for display switch or Fn+F7 for touchpad)
-
-                    // are never hijacked for window toggling. Window visibility is toggled exclusively
-
-                    // via dedicated PredatorSense / NitroSense key events.
-
+                    if (detail == 5 || detail == 0x81 || detail == 0xFF)
+                    {
+                        SafeBeginInvoke(ToggleWindowVisibility);
+                    }
                 });
 
                 _wmiHotkeyWatcher.ModeKeyPressed += () =>
-
                 {
-
                     SafeBeginInvoke(HandleModeKeyPress);
+                };
 
+                _wmiHotkeyWatcher.SenseKeyPressed += () =>
+                {
+                    SafeBeginInvoke(ToggleWindowVisibility);
                 };
 
             }

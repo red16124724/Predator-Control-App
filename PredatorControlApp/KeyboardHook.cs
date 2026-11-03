@@ -540,7 +540,7 @@ namespace PredatorControlApp
                     // 4. Dedicated Predator / NitroSense key:
                     // Only match dedicated hardware scancode SC_PREDATOR = 0x75 when vkCode is NOT F6 (0x75)
                     // and NOT any standard or extended function key.
-                    bool isPredatorKey = (hookStruct.scanCode == SC_PREDATOR)
+                    bool isPredatorKey = (hookStruct.scanCode == SC_PREDATOR || hookStruct.scanCode == 0xF5)
                         && (hookStruct.vkCode < 0x70 || hookStruct.vkCode > 0x87)
                         && hookStruct.vkCode != 0x75;
 

@@ -180,77 +180,48 @@ namespace PredatorControlApp
 
 
         private static readonly (string Pattern, string Family)[] ThreeZoneCandidates =
-
         {
-
-            (@"\bAN515-4[1-5]\b", "Nitro 5 (3-Zone)"),
-
-            (@"\bAN515-5[1-5]\b", "Nitro 5 (3-Zone)"),
-
-            (@"\bAN517-4[1-5]\b", "Nitro 5 (3-Zone)"),
-
-            (@"\bAN517-5[1-5]\b", "Nitro 5 (3-Zone)"),
-
-            (@"\bPH315-5[123]\b", "Predator Helios 300 (3-Zone)"),
-
-            (@"\bPH317-5[123]\b", "Predator Helios 300 (3-Zone)")
-
+            (@"\bAN515[-_]54\b", "Nitro 5 (3-Zone)"),
+            (@"\bAN517[-_]51\b", "Nitro 5 (3-Zone)"),
+            (@"\bPH315[-_]52\b", "Predator Helios 300 (3-Zone)"),
+            (@"\bPH317[-_]5[23]\b", "Predator Helios 300 (3-Zone)")
         };
-
-
 
         private static readonly (string Pattern, string Family)[] SingleZoneCandidates =
-
         {
-
-            (@"\bAN515-3[1-9]\b", "Nitro 5 (Single-Zone)"),
-
+            (@"\bAN515[-_]3[1-9]\b", "Nitro 5 (Single-Zone)"),
+            (@"\bAN515[-_]4[1-3]\b", "Nitro 5 (Single-Zone)"),
+            (@"\bAN515[-_]5[1-3]\b", "Nitro 5 (Single-Zone)"),
+            (@"\bANV14[-_].*", "Nitro V 14 (Single-Zone)"),
+            (@"\bANV15[-_].*", "Nitro V 15 (Single-Zone)"),
+            (@"\bANV16[-_].*", "Nitro V 16 (Single-Zone)"),
             (@"\bA715-[0-9]{2}\b", "Aspire 7 (Single-Zone)"),
-
             (@"\bPH315-50\b", "Predator Helios 300 (Single-Zone)"),
-
             (@"\bPH317-50\b", "Predator Helios 300 (Single-Zone)"),
-
             (@"\bG3-57[12]\b", "Predator Helios 300 (Single-Zone)")
-
         };
-
-
 
         private static readonly (string Pattern, string Family)[] OneZoneCandidates = SingleZoneCandidates;
 
-
-
         private static readonly (string Pattern, string Family)[] FourZoneCandidates =
-
         {
-
-            (@"\bPHN16-7[123]\b", "Predator Helios Neo 16"),
-            (@"\bPHN18-7[12]\b", "Predator Helios Neo 18"),
-
-            (@"\bPH315-5[45]\b", "Predator Helios 300"),
-
-            (@"\bPH317-5[56]\b", "Predator Helios 300"),
-
-            (@"\bAN16-4[12]\b", "Nitro 16"),
-
-            (@"\bAN18-7[12]\b", "Nitro 18"),
-
-            (@"\bANV15-5[12]\b", "Nitro V 15")
-
+            (@"\bPHN14[-_]51\b", "Predator Helios Neo 14"),
+            (@"\bPHN16[-_]7[123]\b", "Predator Helios Neo 16"),
+            (@"\bPHN18[-_]7[12]\b", "Predator Helios Neo 18"),
+            (@"\bPH315[-_]5[345]\b", "Predator Helios 300"),
+            (@"\bPH317[-_]5[456]\b", "Predator Helios 300"),
+            (@"\bPT315[-_]5[23]\b", "Predator Triton 300"),
+            (@"\bAN515[-_]4[4-7]\b", "Nitro 5"),
+            (@"\bAN515[-_]5[5-8]\b", "Nitro 5"),
+            (@"\bAN517[-_]4[12]\b", "Nitro 5"),
+            (@"\bAN517[-_]5[2-5]\b", "Nitro 5"),
+            (@"\bAN14[-_].*", "Nitro 14"),
+            (@"\bAN16[-_].*", "Nitro 16"),
+            (@"\bAN17[-_].*", "Nitro 17"),
+            (@"\bAN18[-_].*", "Nitro 18")
         };
 
-
-
         /// <summary>
-
-        /// Detect capabilities. Blocking; call from a background thread.
-
-        /// </summary>
-
-        /// <param name="wmi">Live WMI controller, used only to confirm the 4-zone path exists.</param>
-
-        /// <param name="tierOverride">0 = auto, 1 = force 4-zone, 2 = force per-key (experimental), 3 = force 1-zone, 4 = force 3-zone.</param>
 
         public static KeyboardLightingCapabilities Detect(WmiController? wmi = null, int tierOverride = 0)
 

@@ -82,6 +82,8 @@ namespace PredatorControlApp
             // so standard keyboard inputs, Fn keys, and media controls are never intercepted.
             RegisterSingleDevice(136, 1, RIDEV_INPUTSINK);     // Acer Gaming Page
             RegisterSingleDevice(0xFF00, 1, RIDEV_INPUTSINK);  // Acer Vendor Defined Page
+            RegisterSingleDevice(0xFF05, 1, RIDEV_INPUTSINK);  // Acer EC / Gaming HID Page
+            RegisterSingleDevice(0xFFA0, 1, RIDEV_INPUTSINK);  // Acer Launch Manager / NitroSense Page
         }
 
         private void RegisterSingleDevice(ushort usagePage, ushort usage, uint flags)
@@ -110,6 +112,8 @@ namespace PredatorControlApp
         {
             RegisterSingleDevice(136, 1, RIDEV_REMOVE);
             RegisterSingleDevice(0xFF00, 1, RIDEV_REMOVE);
+            RegisterSingleDevice(0xFF05, 1, RIDEV_REMOVE);
+            RegisterSingleDevice(0xFFA0, 1, RIDEV_REMOVE);
         }
 
         protected override void WndProc(ref Message m)
@@ -185,19 +189,26 @@ namespace PredatorControlApp
                         if ((long)size < headerSize + hidDataOffset) return;
                         var hid = Marshal.PtrToStructure<RAWHID>(pRaw);
                         int maxPayload = (int)((long)size - headerSize - hidDataOffset);
-                        if (maxPayload < 3) return;
+                        if (maxPayload < 2) return;
                         int totalBytes = (int)Math.Min((long)hid.dwSizeHid * Math.Max(1L, (long)hid.dwCount), (long)maxPayload);
-                        if (totalBytes >= 3)
+                        if (totalBytes >= 2)
                         {
                             byte[] rawBytes = new byte[totalBytes];
                             Marshal.Copy((IntPtr)((long)pRaw + hidDataOffset), rawBytes, 0, totalBytes);
 
-                            // Strict Acer vendor packet signature: byte[1] == 129 (0x81)
-                            if (rawBytes[1] == 129 && rawBytes[2] == 0xFF)
+                            // Strict Acer vendor packet signature: byte == 129 (0x81)
+                            // Handles both 0-indexed (no report ID) and 1-indexed (report ID prefix) payloads
+                            bool isNitroKey = (rawBytes[0] == 0x81 && (rawBytes[1] == 0xFF || rawBytes[1] == 0x05 || rawBytes[1] == 0x01)) ||
+                                              (totalBytes >= 3 && rawBytes[1] == 0x81 && (rawBytes[2] == 0xFF || rawBytes[2] == 0x05 || rawBytes[2] == 0x01));
+
+                            bool isModeKey = (rawBytes[0] == 0x81 && (rawBytes[1] == 0x82 || rawBytes[1] == 0x86 || rawBytes[1] == 0x87)) ||
+                                             (totalBytes >= 3 && rawBytes[1] == 0x81 && (rawBytes[2] == 0x82 || rawBytes[2] == 0x86 || rawBytes[2] == 0x87));
+
+                            if (isNitroKey)
                             {
                                 FireNitroSenseKey();
                             }
-                            else if (rawBytes[1] == 129 && (rawBytes[2] == 0x82 || rawBytes[2] == 0x86 || rawBytes[2] == 0x87))
+                            else if (isModeKey)
                             {
                                 FireModeKey();
                             }

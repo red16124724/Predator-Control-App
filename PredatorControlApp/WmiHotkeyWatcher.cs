@@ -20,6 +20,20 @@ namespace PredatorControlApp
         private const int DebounceThresholdMs = 250;
 
         public event Action? ModeKeyPressed;
+        public event Action? SenseKeyPressed;
+
+        private long _lastSenseKeyTick;
+
+        private void FireSenseKeyPressed()
+        {
+            if (_isDisposed) return;
+            long now = Environment.TickCount64;
+            if (now - _lastSenseKeyTick >= DebounceThresholdMs)
+            {
+                _lastSenseKeyTick = now;
+                try { SenseKeyPressed?.Invoke(); } catch { }
+            }
+        }
 
         public WmiHotkeyWatcher(Action<int> onHotkeyEvent)
         {
@@ -272,6 +286,11 @@ namespace PredatorControlApp
                         if (eventDetail == 0x82 || eventDetail == 0x86 || eventDetail == 0x87)
                         {
                             FireModeKeyPressed();
+                        }
+                        else if (eventDetail == 0x05 || eventDetail == 0x81 || eventDetail == 0xFF)
+                        {
+                            FireSenseKeyPressed();
+                            try { _onHotkeyEvent(eventDetail); } catch { }
                         }
                         else
                         {

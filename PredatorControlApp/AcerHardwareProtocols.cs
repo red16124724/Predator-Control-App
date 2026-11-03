@@ -291,7 +291,7 @@ namespace PredatorControlApp
         }
 
         public static readonly int[] UsbChargingFloors = { 10, 20, 30 };
-        private static readonly string[] FanTableModels = { "AN515-46", "AN515-47", "AN515-58", "AN517-42", "AN517-43", "AN517-55" };
+        private static readonly string[] FanTableModels = { "AN515-46", "AN515-47", "AN515-58", "AN517-42", "AN517-43", "AN517-55", "AN16", "AN17", "AN18", "AN14", "ANV14", "ANV15", "ANV16" };
 
         public static byte Status(ulong output) => NativeAcerProtocol.TryEncode(15, output, 0, 0, 0, out ulong native) ? (byte)native : (byte)(output & 0xFF);
         public static bool IsOk(ulong output) => Status(output) == 0;
