@@ -87,55 +87,6 @@ Predator Control App provides verified native hardware interop across Acer Preda
 
 ---
 
-## 🏗️ Visual Architecture
-
-The application adopts a layered, resilient architecture separating safe UI telemetry from low-level ring-0 kernel hardware dispatch:
-
-```mermaid
-graph TD
-    subgraph UI_Layer["User Interface (.NET 10 / WinForms)"]
-        Form1["Main Window & HUD Telemetry"]
-        FanEditor["Interactive Fan Curve Follower"]
-        RgbStudio["33-Preset RGB Lighting Studio"]
-        Settings["Hardware Configuration & Diagnostics"]
-    end
-
-    subgraph Service_Engine["Coordination & Hook Engine"]
-        RawInputHook["RawInput & Low-Level Keyboard Hooks<br/>(Predator & NitroSense Key Preemption)"]
-        Shortcuts["Global Hotkey Dispatcher (Eco/Bal/Perf/Turbo)"]
-        ThermalGuard["Thermal Guard (Multi-Tier EMA Smoothing & Dynamic Capping)"]
-        BatteryMgr["Battery Care & Fuel-Gauge Calibration"]
-    end
-
-    subgraph Native_Core["Native Rust Core (predator_core.dll)"]
-        SmbiosParser["SMBIOS 170 / 172 Table Parser"]
-        AcpiPpcc["ACPI PPCC Table Extractor"]
-        EcHidCodec["EC-HID Protocol Encoder / Decoder"]
-        RgbRules["Lighting Rule & Brightness Enforcer"]
-    end
-
-    subgraph Hardware_Access["Hardware Interop & Kernel Transports"]
-        WMI["Acer WMI Provider (Root\WMI BIOS Interface)"]
-        PawnIO["PawnIO Signed Kernel Driver (Ring-0 MSR / MMIO)"]
-        DirectEC["Direct Embedded Controller (EC / HID)"]
-        PDH["Windows PDH (Performance Data Helper)"]
-    end
-
-    subgraph Physical_Hardware["Physical Laptop Hardware"]
-        Fans["Dual / Triple Cooling Fans & CoolBoost"]
-        RaplRegisters["Intel RAPL MSR 0x610 / MCHBAR MMIO"]
-        LedMatrix["4-Zone & Per-Key RGB Controllers"]
-        DisplayPanel["MUX Switch & Panel Refresh Controller"]
-    end
-
-    UI_Layer --> Service_Engine
-    Service_Engine --> Native_Core
-    Native_Core --> Hardware_Access
-    Hardware_Access --> Physical_Hardware
-```
-
----
-
 ## ⚡ Quick Start
 
 ### 1. Download & Run
@@ -159,19 +110,6 @@ winget install -e --id namazso.PawnIO
 *Or download `PawnIO.Setup.exe` manually from [pawnio.eu](https://pawnio.eu).*
 
 ---
-
-## ⌨️ Keyboard Shortcuts & Command-Line Arguments
-
-### Command-Line Arguments
-
-Predator Control App supports granular command-line switches for Windows Task Scheduler and automated gaming scripts:
-
-| Argument | Description | Use Case |
-|---|---|---|
-| `--tray` / `--minimized` | Launches the app minimized directly to the Windows system notification tray. | Windows logon startup without visual window popup. |
-| `--apply-power` | Fast headless boot execution. Sets active AC/Battery power profile and fan speeds, then immediately exits in < 100ms. | Lightweight Task Scheduler trigger upon AC plug/unplug events. |
-| `--silent` / `--hidden` | Suppresses any non-critical startup notifications or UI prompts. | Unattended multi-user environments. |
-| `--help` / `-h` | Prints available command-line arguments and version string. | Diagnostic inspection. |
 
 ### Global System Shortcuts
 
