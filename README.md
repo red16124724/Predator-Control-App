@@ -114,25 +114,6 @@ Without PawnIO the app still runs normally: the CPU power card clearly reports t
 - **Active Drift Re-Verification**: Periodically inspects package power limits every 2 seconds and re-asserts target wattage if firmware drifts limits by more than 1 W.
 - **One-Click Reset & Dedicated Re-Scan**: Instant restoration of OEM per-mode defaults with a dedicated, fully responsive **🔍 Re-Scan** button that re-evaluates silicon capabilities and firmware tables on demand.
 
-### 🦀 Full Native Rust Core (`predator_core`)
-High-performance native Rust core compiled to `predator_core.dll` and embedded directly inside the executable, accelerating critical hot paths:
-- **Fan Curve Piece-Wise Linear Interpolation & Damping**: Native sub-millisecond calculation of fan speeds from custom multi-point curves with historical EMA damping buffers to eliminate abrupt fan oscillation.
-- **Low-Level Keyboard Hook Pre-Filter**: High-frequency Win32 keyboard hook interpretation executed in compiled native code with minimal OS dispatch latency, including a passthrough rule that guarantees Windows, modifier, navigation and OEM keys are never hijacked by a scancode collision.
-- **High-Resolution Telemetry Worker**: Ultra-low-overhead sensor acquisition engine polling temperatures, fan tachometers, and wattage without managed garbage collection pauses.
-- **PawnIO Ring-0 Engine**: Direct kernel-mode execution with directional hazard protection for MMIO MCHBAR and MSR register read/write operations.
-- **Multi-Stage Thermal Safety Coordinator**: Native safety supervisor evaluating warning, ceiling, and critical stages with automatic hardware fan step rate limiting.
-- **RGB Animation Frame Generator**: High-speed frame rendering engine calculating 33 hardware-matched dynamic lighting effects plus Off/Static states.
-- **WASAPI Real-Time Audio Spectrum Analyzer**: Zero-allocation lock-free ring buffer with `realfft` Hann-windowed FFT spectrum analysis, log-spaced frequency bands, decaying peak tracking, and automatic reconnect backoff loops on audio device disconnect/unplug.
-- **Zero-Copy ACPI/AML PPCC Parser**: Slice-based binary AML parser extracting platform power capabilities safely without intermediate managed heap allocations.
-- **EC-HID Direct Transport**: Native SetupAPI enumeration and synchronized HID feature report exchanges with zero-copy buffer transfers.
-- **Native Keyboard Decision Engine**: Keystroke interpretation for the low-level hook — modifier tracking, injected-key rejection, function/media pass-through, Predator/Mode scancode disambiguation, hold timeouts, Predator+number combos and custom mode shortcut matching — all decided in compiled native code. `SetWindowsHookEx` itself stays managed for thread affinity and delegate lifetime.
-- **Native Shortcut Rule Engine**: All validation rules for custom mode shortcuts (function keys, Win chords, modifier-only keys, reserved system keys, OS-owned chords, standard Ctrl editing chords) and duplicate-combination detection, with messages still composed in the UI layer.
-- **Native Battery ETA Engine**: EMA smoothing, phase-change handling, sleep/clock-skew re-baselining and plausibility clamps for calibration charge/discharge estimates.
-- **Native Telemetry History**: Fixed-capacity ring buffer with gap-aware min/max/average and bounded snapshot export behind an opaque handle.
-- **Native Graph Projection**: The per-frame series-to-pixel transform for the live telemetry charts.
-- **Native Process Matching**: Executable/process name normalisation, per-profile match checks and game-profile field clamping for Game Sync.
-- **Native Pipe Framing**: Control-character stripping, UTF-8-safe truncation and message validation for the secure named-pipe channel.
-
 ### ❄️ Advanced Fan & Cooling Control
 - **Direct EC Hardware Access**: Native HID transport talks directly to the Embedded Controller (EC) chip with transparent fallback to Acer WMI.
 - **3-Fan Modern Architecture**: Independent speed controls and tachometers for modern Predator laptops with CPU, GPU, and 3rd System/Chassis fans.
