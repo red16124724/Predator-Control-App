@@ -1,4 +1,4 @@
-# 🦅 Predator & Nitro Control App
+# 🦅 Acer Predator & Acer Nitro Control App
 
 A lightweight, zero-bloat, native hardware control center for **Acer Predator** and **Acer Nitro** series gaming laptops. Direct control over cooling fans, power modes, CPU power limits (PL1/PL2), keyboard lighting, battery care, and display settings — without PredatorSense or NitroSense background overhead.
 
@@ -33,7 +33,7 @@ A lightweight, zero-bloat, native hardware control center for **Acer Predator** 
 You **do NOT need to install anything** or set up complicated developer tools! Just follow these 3 simple steps:
 
 ### 1️⃣ Step 1: Download the App
-Use `PredatorControlApp.exe` from the supplied local 1.5.5 package. The **[upstream releases page](https://github.com/red16124724/Predator-Control-App/releases)** contains maintainer releases and may not include this local fix.
+Use `PredatorControlApp.exe` from **[upstream releases page](https://github.com/red16124724/Predator-Control-App/releases)**
 - **`PredatorControlApp.exe`** is a portable, self-contained Windows x64 executable. It bundles the .NET 10 runtime and native `predator_core.dll`; native components are extracted automatically when needed. No manual runtime installation or DLL extraction is required.
 
 ### 2️⃣ Step 2: Run as Administrator
@@ -105,12 +105,6 @@ Predator Control App provides native, direct hardware support across both Acer P
 </details>
 
 <details>
-<summary><b>⚡ Do I have to uninstall Acer PredatorSense or NitroSense first?</b></summary>
-
-> **No!** Predator Control App works cleanly alongside PredatorSense and NitroSense or completely replaces them. Once comfortable with Predator Control App, you can disable background PredatorSense or NitroSense services (see [How to Safely Disable PredatorSense & NitroSense](#-how-to-safely-disable-predatorsense--nitrosense-optional) below) to eliminate background CPU and RAM drain.
-</details>
-
-<details>
 <summary><b>🔄 How do I check for updates?</b></summary>
 
 > The app checks GitHub once at startup, including when launched hidden, and again when you click **"Check for Updates"** in Settings. There is no periodic polling. An upstream release can replace local changes; installation requires an asset-specific SHA-256 and keeps a `.previous.exe` backup.
@@ -121,7 +115,7 @@ Predator Control App provides native, direct hardware support across both Acer P
 ## ✨ Key Features
 
 ### 🚀 Power & Performance Modes
-- **Hardware Power Profiles**: Instantly switch between **Quiet / Eco**, **Balanced**, **Performance**, and **Turbo** modes across Predator and Nitro models.
+- **Hardware Power Profiles**: Instantly switch between **Quiet**, **Eco**, **Balanced**, **Performance**, and **Turbo** modes across Predator and Nitro models.
 - **Acer Protocol Parity**: Direct dispatch of Acer SMBIOS type 170 hotkey and type 172 gaming-record commands, ensuring identical firmware performance mode registration as OEM PredatorSense and NitroSense.
 - **Auto AC/Battery Switching**: Automatically transitions to energy-efficient profiles when unplugged from AC power, restoring full high performance when reconnected.
 - **Smooth Mode Switching**: One serialized, latest-wins hardware dispatch per switch. Windows power overlay synchronization is deferred and telemetry pauses during the settle window, completely eliminating USB/Bluetooth renegotiation stutter and peripheral dropouts.
