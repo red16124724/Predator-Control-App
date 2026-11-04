@@ -423,7 +423,12 @@ namespace PredatorControlApp
         public bool CoolBoost { get; set; } = false;
 
         public int RgbMode { get; set; } = 3;
-        public int RgbBrightness { get; set; } = 100;
+        private int _keyboardBrightness = 100;
+        public int RgbBrightness
+        {
+            get => _keyboardBrightness;
+            set => _keyboardBrightness = Math.Clamp(value, 0, 100);
+        }
         public int RgbSpeed { get; set; } = 50;
         public int RgbR { get; set; } = 0;
         public int RgbG { get; set; } = 150;
@@ -456,7 +461,11 @@ namespace PredatorControlApp
         public int DynamicEffectSecondaryColorArgb { get; set; } = unchecked((int)0xFFFF0080);
         public int DynamicEffectSpeed { get; set; } = 5;
         public int DynamicEffectDirection { get; set; } = 0;
-        public int KeyboardBrightnessLevel { get; set; } = 100;
+        public int KeyboardBrightnessLevel
+        {
+            get => _keyboardBrightness;
+            set => _keyboardBrightness = Math.Clamp(value, 0, 100);
+        }
 
         public void SetStaticZoneColor(int zoneIndex, Color color)
         {
@@ -1830,7 +1839,18 @@ namespace PredatorControlApp
                             if (key.GetValue("CoolBoost") is int cb) settings.CoolBoost = cb == 1;
 
                             if (key.GetValue("RGB_Mode") is int rm) settings.RgbMode = rm;
-                            if (key.GetValue("Brightness") is int br) settings.RgbBrightness = br;
+                            bool hasKbl = TryGetRegistryInt(key, "KeyboardBrightnessLevel", out int kbl);
+                            bool hasBr = TryGetRegistryInt(key, "Brightness", out int br);
+                            if (hasKbl)
+                            {
+                                settings.KeyboardBrightnessLevel = kbl;
+                                settings.RgbBrightness = kbl;
+                            }
+                            else if (hasBr)
+                            {
+                                settings.KeyboardBrightnessLevel = br;
+                                settings.RgbBrightness = br;
+                            }
                             if (key.GetValue("RGB_Speed") is int sp) settings.RgbSpeed = sp;
                             if (key.GetValue("RGB_R") is int r) settings.RgbR = r;
                             if (key.GetValue("RGB_G") is int g) settings.RgbG = g;
@@ -1892,8 +1912,16 @@ namespace PredatorControlApp
                             else if (key.GetValue("RGB_Speed") is int spLegacy) settings.DynamicEffectSpeed = spLegacy;
 
                             if (key.GetValue("DynamicEffectDirection") is int ded) settings.DynamicEffectDirection = ded;
-                            if (key.GetValue("KeyboardBrightnessLevel") is int kbl) settings.KeyboardBrightnessLevel = kbl;
-                            else if (key.GetValue("Brightness") is int brLegacy) settings.KeyboardBrightnessLevel = brLegacy;
+                            if (hasKbl)
+                            {
+                                settings.KeyboardBrightnessLevel = kbl;
+                                settings.RgbBrightness = kbl;
+                            }
+                            else if (hasBr)
+                            {
+                                settings.KeyboardBrightnessLevel = br;
+                                settings.RgbBrightness = br;
+                            }
 
                             if (key.GetValue("SmoothPowerModeSwitching") is int spms) settings.SmoothPowerModeSwitching = spms == 1;
                             if (key.GetValue("WindowsOverlaySyncEnabled") is int wose) settings.WindowsOverlaySyncEnabled = wose == 1;
@@ -2181,7 +2209,8 @@ namespace PredatorControlApp
                         key.SetValue("CoolBoost", snapshot.CoolBoost ? 1 : 0);
 
                         key.SetValue("RGB_Mode", snapshot.RgbMode);
-                        key.SetValue("Brightness", snapshot.RgbBrightness);
+                        key.SetValue("Brightness", snapshot.RgbBrightness, RegistryValueKind.DWord);
+                        key.SetValue("KeyboardBrightnessLevel", snapshot.KeyboardBrightnessLevel, RegistryValueKind.DWord);
                         key.SetValue("RGB_Speed", snapshot.RgbSpeed);
                         key.SetValue("RGB_R", snapshot.RgbR);
                         key.SetValue("RGB_G", snapshot.RgbG);
@@ -2309,6 +2338,8 @@ namespace PredatorControlApp
                         hklmKey.SetValue("StaticZone4ColorArgb", snapshot.StaticZone4ColorArgb, RegistryValueKind.DWord);
                         hklmKey.SetValue("DynamicLightingEffectName", snapshot.DynamicLightingEffectName ?? "Off");
                         hklmKey.SetValue("IsZoneLightingActive", snapshot.IsZoneLightingActive ? 1 : 0, RegistryValueKind.DWord);
+                        hklmKey.SetValue("Brightness", snapshot.RgbBrightness, RegistryValueKind.DWord);
+                        hklmKey.SetValue("KeyboardBrightnessLevel", snapshot.KeyboardBrightnessLevel, RegistryValueKind.DWord);
                         hklmKey.Flush();
                     }
                 }

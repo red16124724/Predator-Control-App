@@ -26,6 +26,10 @@ Version 1.5.5 brings a comprehensive codebase audit, bug fix, and stabilization 
 - **Settings & Background Resilience**: Added typed registry conversion fallbacks, non-blocking TCP reconnect cooldown in background service client, and cancellation token propagation.
 - **100% Full Test Pass Rate**: Full suite passes all 2,092 managed tests and 189 native Rust unit and FFI fuzz tests (0 failed, 0 skipped).
 
+### Keyboard Brightness Persistence & Lid Logo Detachment (Update 2026-11-04)
+- **Keyboard Brightness Persistence Across Reboot & Fast Startup**: Fully synchronized `KeyboardBrightnessLevel` and `RgbBrightness` settings across `AppSettings`, registry keys (`HKCU\SOFTWARE\PredatorControl`), and UI sliders. Configured immediate registry flush on slider commit (`ValueCommitted`) to eliminate race conditions and prevent brightness from reverting to 100% on cold boot, Windows Fast Startup, ACPI power transitions (sleep/resume), session unlock, or application restart.
+- **Complete Detachment of Laptop Lid Logo RGB**: Completely detached laptop lid logo RGB from application lighting routines by eliminating `SetGamingLEDColor` zone `0x01` logo payloads and OpenRGB device 0 triggers. The laptop lid logo is now fully decoupled from application lighting profiles, leaving it permanently under OEM hardware default/BIOS control without interference.
+
 ### Key Highlights
 1. **Per-Zone RGB Persistence & Boot Decoupling**: Static 4-zone keyboard RGB colors are now strictly isolated from Dynamic RGB animation frames. Booting or launching the app will never clobber individual zone colors with dynamic effect presets.
 2. **Dynamic RGB Streamlining**: The legacy "Twinkling" effect has been completely removed across the entire stack. An explicit "Off (Static)" mode has been added as the primary option to instantly halt animation timers and restore user-defined per-zone static colors.
@@ -34,6 +38,8 @@ Version 1.5.5 brings a comprehensive codebase audit, bug fix, and stabilization 
 5. **Thermal Safety Blackout Resilience**: AntiThrottleSafety and ThermalSafetyCoordinator handle sensor dropout, NaN, and negative temperatures gracefully while maintaining fail-safe throttling without corrupting persistent settings.
 6. **100% Test Pass Rate**: Full test suite passes **1,941 / 1,941 tests (0 failed, 0 skipped)**.
 7. **Single-File Portable Packaging**: Standalone PredatorControlApp.exe (~54.5 MB) bundles the .NET runtime, native Rust core, and PawnIO drivers as embedded resources with automatic runtime extraction fallback.
+8. **Keyboard Brightness Persistence**: Synchronized `KeyboardBrightnessLevel` and `RgbBrightness` with immediate registry flush on slider commit, preventing unwanted reversion to 100% across cold boots, Windows Fast Startup, and application restarts.
+9. **Laptop Lid Logo Detachment**: Completely decoupled laptop lid logo RGB from application lighting by eliminating `SetGamingLEDColor` zone `0x01` logo payloads and OpenRGB device 0 triggers, preserving OEM hardware/BIOS defaults.
 
 ---
 
@@ -70,3 +76,5 @@ This earlier release was unsigned. See the current 1.5.5 improvements note above
 Local audit update: see AUDIT.md at the source root for fixes, exact verification scope, and unresolved hardware-policy findings.
 
 Zone restoration update (2026-11-03): restores missing legacy zone colors, preserves selected layout after capability detection, and prevents queued lighting requests from sending stale snapshots. 92 selected managed tests and 174 Rust unit tests passed. Physical restart verification and full hardware-writing suite remain outstanding.
+
+Brightness persistence & lid logo detachment update (2026-11-04): synchronizes KeyboardBrightnessLevel and RgbBrightness, forces immediate registry flush on slider commit to eliminate 100% brightness reversion across reboots, fast startup, and app restarts; completely detaches laptop lid logo RGB by removing SetGamingLEDColor zone 0x01 payloads and OpenRGB device 0 triggers, leaving exterior lid lighting under OEM hardware default.

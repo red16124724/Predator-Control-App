@@ -356,6 +356,7 @@ namespace PredatorControlApp
                     int scaledBrightness = ServiceBrightness(brightness);
                     string color = $"#{r:X2}{g:X2}{b:X2}";
 
+                    // Rear lightbars & accent only: lid logo (AcerService device 4 / OpenRGB device 0) is strictly excluded
                     var devices = new List<(int Id, string Name)>();
                     if (includeLightbars)
                     {
@@ -733,7 +734,7 @@ namespace PredatorControlApp
 
                     if (cancellationToken.IsCancellationRequested) return false;
 
-                    try { TrySendOpenRgbLeds(0, colors, brightness); } catch { }
+                    // OpenRGB Device 1 is keyboard only; Device 0 (lid logo / exterior accent) is disconnected
                     try { TrySendOpenRgbLeds(1, colors, brightness); } catch { }
 
                     EnsureAcerService();

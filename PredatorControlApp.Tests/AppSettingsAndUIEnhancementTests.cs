@@ -1460,6 +1460,27 @@ namespace PredatorControlApp.Tests
 
 
 
+        [Fact]
+        public void AppSettings_KeyboardBrightness_StrictlySynchronizedAndClamped()
+        {
+            var settings = new AppSettings();
+            settings.KeyboardBrightnessLevel = 42;
+            Assert.Equal(42, settings.KeyboardBrightnessLevel);
+            Assert.Equal(42, settings.RgbBrightness);
+
+            settings.RgbBrightness = 78;
+            Assert.Equal(78, settings.KeyboardBrightnessLevel);
+            Assert.Equal(78, settings.RgbBrightness);
+
+            settings.KeyboardBrightnessLevel = 150;
+            Assert.Equal(100, settings.KeyboardBrightnessLevel);
+            Assert.Equal(100, settings.RgbBrightness);
+
+            settings.RgbBrightness = -10;
+            Assert.Equal(0, settings.KeyboardBrightnessLevel);
+            Assert.Equal(0, settings.RgbBrightness);
+        }
+
         #endregion
 
         #endregion

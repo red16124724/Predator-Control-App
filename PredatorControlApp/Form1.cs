@@ -1307,6 +1307,8 @@ namespace PredatorControlApp
 
 
 
+        private bool _startupLightingRestored;
+
         protected override void SetVisibleCore(bool value)
 
         {
@@ -1318,6 +1320,16 @@ namespace PredatorControlApp
                 value = false;
 
                 if (!IsHandleCreated) CreateHandle();
+
+                if (!_startupLightingRestored)
+
+                {
+
+                    _startupLightingRestored = true;
+
+                    _ = RestoreSavedKeyboardLightingWithBootRetryAsync(_shutdownCts.Token);
+
+                }
 
             }
 
@@ -1333,6 +1345,7 @@ namespace PredatorControlApp
             try { Thread.CurrentThread.Priority = ThreadPriority.AboveNormal; } catch { }
 
             _isInitializing = true;
+            _backlightMgr.SavedAcBrightness = _appSettings.KeyboardBrightnessLevel;
 
             try
 
@@ -7591,9 +7604,9 @@ namespace PredatorControlApp
 
             var cardParams = MakeCard(_pnlLighting, "LIGHTING SETTINGS", col2X, topY, cardW, topH);
 
-            _lblBrightHdr = MakeLabel(cardParams, "BRIGHTNESS: 100%", cPad, S(44), FontSectionHeader, SubHeaderColor);
+            _lblBrightHdr = MakeLabel(cardParams, $"BRIGHTNESS: {_appSettings.KeyboardBrightnessLevel}%", cPad, S(44), FontSectionHeader, SubHeaderColor);
 
-            _brightnessSlider = new PredatorSlider { Location = new Point(cPad, S(66)), Size = new Size(cInnerW, S(28)), Minimum = 0, Maximum = 100, Value = 100 };
+            _brightnessSlider = new PredatorSlider { Location = new Point(cPad, S(66)), Size = new Size(cInnerW, S(28)), Minimum = 0, Maximum = 100, Value = _appSettings.KeyboardBrightnessLevel };
 
             _brightnessSlider.ValueChanged += (s, e) =>
 
@@ -7613,19 +7626,29 @@ namespace PredatorControlApp
             _brightnessSlider.ValueCommitted += (s, e) =>
             {
                 if (_isInitializingLightingUi) return;
+                int bVal = _brightnessSlider.Value;
+                _appSettings.KeyboardBrightnessLevel = bVal;
+                _appSettings.RgbBrightness = bVal;
+                SaveState("Brightness", bVal);
+                SaveState("KeyboardBrightnessLevel", bVal);
+                _appSettings.Save();
+                _backlightMgr.SavedAcBrightness = bVal;
+                if (_lightingController != null)
+                {
+                    _lightingController.Brightness = bVal;
+                }
+
                 bool onBat = IsOnBattery();
                 if (onBat)
                 {
-                    _manualBacklightOnBattery = _brightnessSlider.Value > 0;
-                    _backlightMgr.OnUserAdjustedBrightness(_brightnessSlider.Value, true);
+                    _manualBacklightOnBattery = bVal > 0;
+                    _backlightMgr.OnUserAdjustedBrightness(bVal, true);
                 }
                 else
                 {
-                    _backlightMgr.OnUserAdjustedBrightness(_brightnessSlider.Value, false);
-                    SaveState("Brightness", _brightnessSlider.Value);
+                    _backlightMgr.OnUserAdjustedBrightness(bVal, false);
                 }
 
-                int bVal = _brightnessSlider.Value;
                 int gen = Interlocked.Increment(ref _brightnessApplyGeneration);
 
                 if (bVal == 0)
@@ -9206,7 +9229,7 @@ namespace PredatorControlApp
                 },
                 ParsePerKeyColors(_appSettings.KeyboardPerKeyColors));
 
-            _lightingController.Brightness = _appSettings.RgbBrightness;
+            _lightingController.Brightness = _appSettings.KeyboardBrightnessLevel;
 
             _lightingController.Speed = _appSettings.RgbSpeed > 0 ? _appSettings.RgbSpeed : 50;
 
@@ -13905,11 +13928,12 @@ namespace PredatorControlApp
                 var scope = (_zoneLayoutMode == 0 && _lightingCapabilities?.PerKeySupported == true)
                     ? KeyboardLightingScope.PerKey
                     : KeyboardLightingScope.Zones;
+                _lightingController.Brightness = _appSettings.KeyboardBrightnessLevel;
                 _ = _lightingController.ApplyAsync(scope);
             }
             else if (_wmi != null)
             {
-                int bright = _brightnessSlider?.Value ?? 100;
+                int bright = _appSettings.KeyboardBrightnessLevel;
                 Task.Run(() => _wmi.SetZoneColors(new[] { z1, z2, z3, z4 }, bright));
             }
             RefreshZoneButtons();
@@ -13955,7 +13979,7 @@ namespace PredatorControlApp
                 int brightVal = _brightnessSlider.Value;
                 if (brightVal == 0)
                 {
-                    brightVal = _backlightMgr.SavedAcBrightness > 0 ? _backlightMgr.SavedAcBrightness : 100;
+                    brightVal = _appSettings.KeyboardBrightnessLevel > 0 ? _appSettings.KeyboardBrightnessLevel : (_backlightMgr.SavedAcBrightness > 0 ? _backlightMgr.SavedAcBrightness : 100);
                     _brightnessSlider.Value = brightVal;
                     _lblBrightHdr.Text = $"BRIGHTNESS: {brightVal}%";
                     if (IsOnBattery())
@@ -14689,7 +14713,15 @@ namespace PredatorControlApp
 
                             case "RGB_Mode": _appSettings.RgbMode = value; break;
 
-                            case "Brightness": _appSettings.RgbBrightness = value; break;
+                            case "Brightness":
+                                _appSettings.RgbBrightness = value;
+                                _appSettings.KeyboardBrightnessLevel = value;
+                                break;
+
+                            case "KeyboardBrightnessLevel":
+                                _appSettings.KeyboardBrightnessLevel = value;
+                                _appSettings.RgbBrightness = value;
+                                break;
 
                             case "RGB_Speed": _appSettings.RgbSpeed = value; break;
 
@@ -14718,6 +14750,7 @@ namespace PredatorControlApp
                         using var key = Registry.CurrentUser.CreateSubKey(@"SOFTWARE\PredatorControl");
 
                         key?.SetValue(name, value);
+                        key?.Flush();
 
                     }
 
@@ -14795,7 +14828,7 @@ namespace PredatorControlApp
 
 
 
-                int savedBrightness = settings.RgbBrightness;
+                int savedBrightness = settings.KeyboardBrightnessLevel;
 
                 int savedSpeed = settings.RgbSpeed;
 
@@ -15211,6 +15244,7 @@ namespace PredatorControlApp
                 _appSettings.DynamicLightingEffectName = settings.DynamicLightingEffectName;
                 _appSettings.DynamicEffectPrimaryColorArgb = settings.DynamicEffectPrimaryColorArgb;
                 _appSettings.KeyboardBrightnessLevel = settings.KeyboardBrightnessLevel;
+                _appSettings.RgbBrightness = settings.KeyboardBrightnessLevel;
                 _appSettings.IsZoneLightingActive = settings.IsZoneLightingActive;
                 _appSettings.KeyboardZoneColors = settings.KeyboardZoneColors;
 
@@ -15264,6 +15298,7 @@ namespace PredatorControlApp
 
                         if (_lightingController != null)
                         {
+                            _lightingController.Brightness = _appSettings.KeyboardBrightnessLevel;
                             var scope = (_zoneLayoutMode == 0 && _lightingCapabilities?.PerKeySupported == true)
                                 ? KeyboardLightingScope.PerKey
                                 : KeyboardLightingScope.Zones;
@@ -15271,7 +15306,7 @@ namespace PredatorControlApp
                         }
                         else if (_wmi != null)
                         {
-                            Task.Run(() => _wmi.SetZoneColors(staticColors, savedBrightness));
+                            Task.Run(() => _wmi.SetZoneColors(staticColors, _appSettings.KeyboardBrightnessLevel));
                         }
                     }
                     else
@@ -18160,7 +18195,11 @@ namespace PredatorControlApp
         protected override void OnLoad(EventArgs e)
     {
         base.OnLoad(e);
-        _ = RestoreSavedKeyboardLightingWithBootRetryAsync(_shutdownCts.Token);
+        if (!_startupLightingRestored)
+        {
+            _startupLightingRestored = true;
+            _ = RestoreSavedKeyboardLightingWithBootRetryAsync(_shutdownCts.Token);
+        }
         TriggerStartupUpdateCheckAsync();
     }
 
@@ -18217,6 +18256,7 @@ namespace PredatorControlApp
             if (_lightingController != null)
             {
                 _lightingController.StopDynamicEffect();
+                _lightingController.Brightness = settings.KeyboardBrightnessLevel;
                 _lightingController.ApplyPerZoneStaticColors(
                     Color.FromArgb(settings.StaticZone1ColorArgb),
                     Color.FromArgb(settings.StaticZone2ColorArgb),
@@ -18242,6 +18282,7 @@ namespace PredatorControlApp
         {
             if (_lightingController != null)
             {
+                _lightingController.Brightness = settings.KeyboardBrightnessLevel;
                 _lightingController.StartDynamicEffect(
                     settings.DynamicLightingEffectName,
                     Color.FromArgb(settings.DynamicEffectPrimaryColorArgb),

@@ -19,6 +19,11 @@ namespace PredatorControlApp
         private bool _isDimmed = false;
         private DateTime _lastActivityUtc = DateTime.UtcNow;
 
+        public BacklightStateManager(int initialAcBrightness = 100)
+        {
+            _savedAcBrightness = Math.Clamp(initialAcBrightness, 0, 100);
+        }
+
         public bool IsLidClosed { get { lock (_lock) { return _isLidClosed; } } private set { lock (_lock) { _isLidClosed = value; } } }
         public bool IsSleeping { get { lock (_lock) { return _isSleeping; } } private set { lock (_lock) { _isSleeping = value; } } }
         public bool? IsPluggedIn { get { lock (_lock) { return _isPluggedIn; } } private set { lock (_lock) { _isPluggedIn = value; } } }

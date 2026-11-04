@@ -62,11 +62,16 @@ Stock OEM utilities (**PredatorSense** & **NitroSense**) consume up to **500 MB+
 | Feature | Description | Architecture / Implementation |
 |---|---|---|
 | **⚡ Ultra-Low Latency Telemetry** | Real-time monitoring of CPU/GPU temperatures, fan RPM tachometers, and package wattage. | Native Windows PDH counters + Direct EC polling at sub-100ms intervals with rolling history graphs. |
-| **🌈 4-Zone & Per-Key RGB Lighting** | Full keyboard lighting control with reboot persistence and 33 dynamic lighting animations. | Granular per-zone palette management, independent static/dynamic state separation, and firmware brightness scaling. |
+| **🌈 4-Zone & Per-Key RGB Lighting** | Full keyboard lighting control with guaranteed reboot persistence, 33 dynamic lighting animations, and isolated lid logo behavior. | Granular per-zone palette management, synchronized `KeyboardBrightnessLevel` & `RgbBrightness` with immediate registry flush on slider commit (preventing 100% reversion across reboots/restarts), and complete detachment of lid logo RGB (`SetGamingLEDColor` zone `0x01` and OpenRGB device 0 eliminated; OEM default preserved). |
 | **❄️ Intelligent Fan Curves & Hysteresis** | Smooth temperature-to-RPM curves, dual/triple fan support, and Acer CoolBoost hardware ceiling toggle. | Multi-point curve follower with EMA spike-damping to eliminate fan revving during transient CPU spikes. |
 | **🔋 CPU PL1/PL2 Power Limits** | Dynamic sustained (PL1) and burst (PL2) wattage tuning with BIOS default rollback protection. | Signed PawnIO Ring-0 MMIO/MSR driver interop with directional split-write hazard protection and MCHBAR sync. |
 | **🩺 Battery Calibration Wizard** | Integrated battery health diagnostics, wear percentage tracking, and automated recalibration. | Hardware fuel-gauge recalibration workflow with automated wake-lock protection and real-time EMA discharge ETA calculation. |
 | **⌨️ Custom Shortcuts & Key Interception** | Dedicated Predator/NitroSense key capture and customizable system-wide mode hotkeys. | Low-level Win32 `RawInput` hooks with fullscreen game preemption (`AttachThreadInput` + `SetWindowPos TOPMOST`). |
+
+> [!NOTE]
+> **Keyboard Brightness & Exterior Lighting Architecture:**
+> - **Guaranteed Brightness Persistence**: Keyboard brightness level (`KeyboardBrightnessLevel` strictly synchronized with `RgbBrightness`) is immediately committed and flushed to the Windows Registry upon slider release. This guarantees saved brightness levels persist across system reboots, Windows Fast Startup, power transitions (sleep/resume), and application restarts without reverting to 100%.
+> - **Complete Lid Logo Detachment**: The laptop lid logo RGB is fully decoupled from the application by eliminating `SetGamingLEDColor` zone `0x01` logo payloads and OpenRGB device 0 triggers. The lid logo remains entirely under OEM hardware/BIOS defaults and is never overridden or clobbered.
 
 ---
 

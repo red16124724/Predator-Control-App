@@ -1489,32 +1489,10 @@ namespace PredatorControlApp
 
 
         public void UpdateModeKeyLed(byte mode)
-
         {
-
-            lock (_lock)
-
-            {
-
-                try
-
-                {
-
-                    var (r, g, b) = GetModeLedColor(mode);
-
-                    ulong logoColorPayload = ((ulong)b << 24) | ((ulong)g << 16) | ((ulong)r << 8) | 0x01ul;
-
-                    SendCommandUnderLock("SetGamingLEDColor", logoColorPayload);
-
-                }
-
-                catch { }
-
-            }
-
+            // Disconnected: laptop lid logo RGB control removed.
+            // Power mode changes must never turn on or recolor the lid logo RGB.
         }
-
-
 
         private byte? _lastAppliedPowerMode;
 
@@ -2158,7 +2136,8 @@ namespace PredatorControlApp
 
                     // Exterior LED off via WMI
 
-                    ulong[] offZones = { 0x05ul, 0x06ul, 0x07ul, 0x0Ful, 0xF0ul, 0x01ul };
+                    // Exterior LED off via WMI (excluding lid logo 0x01ul: all lid logo app control disconnected)
+                    ulong[] offZones = { 0x05ul, 0x06ul, 0x07ul, 0x0Ful, 0xF0ul };
 
                     foreach (var z in offZones)
 
@@ -2791,8 +2770,12 @@ namespace PredatorControlApp
                         pkt[9] = zoneIdx;
                         any |= SendLedArrayCommandUnderLock("SetGamingKBBacklight", pkt);
                         any |= SendLedArrayCommandUnderLock("SetGamingLED", pkt);
-                        ulong colorPayload = ((uint)scaledB << 24) | ((uint)scaledG << 16) | ((uint)scaledR << 8) | (uint)zoneIdx;
-                        SendCommandUnderLock("SetGamingLEDColor", colorPayload);
+                        // Ensure zone 0x01ul (lid logo) is never targeted for turning on
+                        if (zoneIdx != 1)
+                        {
+                            ulong colorPayload = ((uint)scaledB << 24) | ((uint)scaledG << 16) | ((uint)scaledR << 8) | (uint)zoneIdx;
+                            SendCommandUnderLock("SetGamingLEDColor", colorPayload);
+                        }
                     }
                 }
                 else
@@ -2817,8 +2800,12 @@ namespace PredatorControlApp
                         pkt[9] = (byte)(i + 1); // Zones 1, 2, 3, 4
                         any |= SendLedArrayCommandUnderLock("SetGamingKBBacklight", pkt);
                         any |= SendLedArrayCommandUnderLock("SetGamingLED", pkt);
-                        ulong colorPayload = ((uint)scaledB << 24) | ((uint)scaledG << 16) | ((uint)scaledR << 8) | (uint)(i + 1);
-                        SendCommandUnderLock("SetGamingLEDColor", colorPayload);
+                        // Ensure zone 0x01ul (lid logo) is never targeted for turning on
+                        if ((i + 1) != 1)
+                        {
+                            ulong colorPayload = ((uint)scaledB << 24) | ((uint)scaledG << 16) | ((uint)scaledR << 8) | (uint)(i + 1);
+                            SendCommandUnderLock("SetGamingLEDColor", colorPayload);
+                        }
                     }
                 }
 

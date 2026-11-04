@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.5.5 Keyboard Brightness Persistence & Lid Logo Detachment Update] - 2026-11-04
+
+Targeted reliability update ensuring persistent keyboard brightness across power cycles and complete detachment of the exterior laptop lid logo RGB:
+
+### Fixed & Improved
+- **Keyboard Brightness Persistence Across Reboot, Fast Startup & Restarts**:
+  - Synchronized `KeyboardBrightnessLevel` and `RgbBrightness` state across `AppSettings`, Windows Registry (`HKCU\SOFTWARE\PredatorControl`), and UI sliders.
+  - Implemented immediate registry flush on slider commit (`ValueCommitted`) to ensure brightness values are durably persisted to disk without relying on graceful process exit.
+  - Eliminated unwanted brightness reversion to 100% across cold boots, Windows Fast Startup cycles, ACPI sleep/resume transitions, and application restarts.
+  - Aligned multi-pass startup lighting restoration to reliably reapply persisted brightness levels to hardware and WMI transports.
+- **Complete Detachment of Laptop Lid Logo RGB**:
+  - Completely detached laptop lid logo RGB from application lighting routines, eliminating unintended exterior color overrides.
+  - Eliminated `SetGamingLEDColor` zone `0x01` logo payload dispatch from WMI controller and lighting engine routines.
+  - Removed OpenRGB device 0 triggers in background lighting service clients, preventing external RGB device conflicts.
+  - Preserved OEM hardware/BIOS defaults for the lid logo, leaving it completely untouched and managed exclusively by firmware.
+
+---
+
 ## [1.5.5 Comprehensive Audit, Bug Fix & Stabilization Overhaul] - 2026-11-02
 
 Comprehensive stability and hardening overhaul across C# WinForms, Rust Core (`predator_core`), and the test suite:

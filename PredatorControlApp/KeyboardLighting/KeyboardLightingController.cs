@@ -211,7 +211,7 @@ namespace PredatorControlApp
             }
         }
 
-                public void ApplyPerZoneStaticColors(Color zone1, Color zone2, Color zone3, Color zone4, int brightness = 100)
+        public void ApplyPerZoneStaticColors(Color zone1, Color zone2, Color zone3, Color zone4, int brightness = -1)
         {
             lock (_sync)
             {
@@ -219,7 +219,10 @@ namespace PredatorControlApp
                 _zoneColors[1] = zone2;
                 _zoneColors[2] = zone3;
                 _zoneColors[3] = zone4;
-                _brightness = Math.Clamp(brightness, 0, 100);
+                if (brightness >= 0)
+                {
+                    _brightness = Math.Clamp(brightness, 0, 100);
+                }
                 _effect = "STATIC";
             }
             StopDynamicEffect();
@@ -231,16 +234,18 @@ namespace PredatorControlApp
             LightingEffectsManager.StopSoftwareAnimation();
         }
 
-        public void StartDynamicEffect(string effectName, Color primaryColor, int speed, int brightness)
+        public void StartDynamicEffect(string effectName, Color primaryColor, int speed, int brightness = -1)
         {
             if (_wmi != null)
             {
                 int effectIdx = LightingEffectsManager.GetEffectIndex(effectName);
+                int effBrightness = brightness >= 0 ? Math.Clamp(brightness, 0, 100) : Brightness;
+                lock (_sync) _brightness = effBrightness;
                 LightingEffectsManager.ApplyEffect(
                     effectIdx,
                     _wmi,
                     primaryColor,
-                    (byte)Math.Clamp(brightness, 0, 100),
+                    (byte)effBrightness,
                     (byte)Math.Clamp(speed, 1, 100));
             }
         }
