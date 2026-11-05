@@ -508,6 +508,97 @@ pub fn scan_acpi_tables(blob: &[u8]) -> Vec<AcpiTable> {
     tables
 }
 
+// ============================================================================
+// Direct Win32 Kernel Firmware Table Acquisition
+// ============================================================================
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn GetSystemFirmwareTable(
+        provider: u32,
+        table_id: u32,
+        buffer: *mut u8,
+        buffer_size: u32,
+    ) -> u32;
+    fn EnumSystemFirmwareTables(
+        provider: u32,
+        buffer: *mut u8,
+        buffer_size: u32,
+    ) -> u32;
+}
+
+pub fn fetch_and_parse_ppcc() -> Option<PpccSummary> {
+    #[cfg(windows)]
+    {
+        // 1. Try RSMB table (Raw SMBIOS firmware table)
+        let rsmb_provider = 0x52534D42; // 'RSMB'
+        let size = unsafe { GetSystemFirmwareTable(rsmb_provider, 0, std::ptr::null_mut(), 0) };
+        if size >= 8 && size <= 16 * 1024 * 1024 {
+            let mut buf = vec![0u8; size as usize];
+            let read = unsafe { GetSystemFirmwareTable(rsmb_provider, 0, buf.as_mut_ptr(), size) };
+            if read >= 8 && read <= size {
+                if let Some(summary) = parse_ppcc_summary(&buf[8..read as usize]) {
+                    return Some(summary);
+                }
+            }
+        }
+
+        // 2. Try ACPI provider
+        let acpi_provider = 0x41435049; // 'ACPI'
+        let enum_size = unsafe { EnumSystemFirmwareTables(acpi_provider, std::ptr::null_mut(), 0) };
+        if enum_size >= 4 && enum_size <= 1024 * 1024 {
+            let mut id_buf = vec![0u8; enum_size as usize];
+            let read_ids = unsafe { EnumSystemFirmwareTables(acpi_provider, id_buf.as_mut_ptr(), enum_size) };
+            if read_ids >= 4 {
+                let table_count = (read_ids / 4) as usize;
+                for i in 0..table_count {
+                    let table_id = u32::from_le_bytes([
+                        id_buf[i * 4],
+                        id_buf[i * 4 + 1],
+                        id_buf[i * 4 + 2],
+                        id_buf[i * 4 + 3],
+                    ]);
+                    let table_size = unsafe { GetSystemFirmwareTable(acpi_provider, table_id, std::ptr::null_mut(), 0) };
+                    if table_size >= 36 && table_size <= 16 * 1024 * 1024 {
+                        let mut table_buf = vec![0u8; table_size as usize];
+                        let table_read = unsafe { GetSystemFirmwareTable(acpi_provider, table_id, table_buf.as_mut_ptr(), table_size) };
+                        if table_read >= 36 {
+                            if let Some(summary) = parse_ppcc_summary(&table_buf[..table_read as usize]) {
+                                return Some(summary);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_acpi_fetch_and_parse_ppcc(
+    out_summary: *mut PpccSummary,
+) -> i32 {
+    crate::safe_ffi(-1, || {
+        if out_summary.is_null() || !crate::is_valid_mut_ptr(out_summary) {
+            return -1;
+        }
+        if let Some(summary) = fetch_and_parse_ppcc() {
+            unsafe {
+                std::ptr::write_unaligned(out_summary, summary);
+            }
+            0
+        } else {
+            -1
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

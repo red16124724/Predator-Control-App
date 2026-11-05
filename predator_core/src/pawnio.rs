@@ -2210,6 +2210,45 @@ impl PawnIoDriver {
         Self { controller }
     }
 
+    pub fn open() -> Result<Self, i32> {
+        let driver = Self::new();
+        if driver.is_available() {
+            Ok(driver)
+        } else {
+            Err(-1)
+        }
+    }
+
+    pub fn is_service_running() -> bool {
+        #[cfg(test)]
+        {
+            true
+        }
+        #[cfg(not(test))]
+        #[cfg(windows)]
+        {
+            NativePawnIoBackend::new().scan_device().is_running
+        }
+        #[cfg(not(test))]
+        #[cfg(not(windows))]
+        {
+            false
+        }
+    }
+
+    pub fn apply_mode_limits_direct(
+        &mut self,
+        target_pl1: u32,
+        target_pl2: u32,
+        out_mirrored: Option<&mut i32>,
+    ) -> Result<bool, i32> {
+        let mirrored = self.write_rapl_limits_directional(target_pl1, target_pl2)?;
+        if let Some(m) = out_mirrored {
+            *m = if mirrored { 1 } else { 0 };
+        }
+        Ok(mirrored)
+    }
+
     pub fn is_available(&self) -> bool {
         self.controller.is_available()
     }

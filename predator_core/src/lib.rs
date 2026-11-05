@@ -10,6 +10,7 @@ pub mod history;
 pub mod hook;
 pub mod lighting_rules;
 pub mod migration_exports;
+pub mod model_catalog;
 pub mod nvapi;
 pub mod pawnio;
 pub mod pipeguard;
@@ -174,6 +175,9 @@ pub unsafe extern "C" fn predator_core_cleanup() {
             let mut ec_guard = GLOBAL_ECHID.lock().unwrap_or_else(|e| e.into_inner());
             ec_guard.take();
         }
+
+        ec_hid::predator_enek_close();
+        audio::predator_audio_capture_stop();
 
         nvapi::shutdown();
     });
@@ -1080,6 +1084,151 @@ pub unsafe extern "C" fn predator_echid_exchange(
 #[no_mangle]
 pub unsafe extern "C" fn predator_echid_enumerate(limit: usize) -> i32 {
     safe_ffi(0, || ec_hid::enumerate_hid_paths(limit) as i32)
+}
+
+// ============================================================================
+// Phase 2: 7 Migrated Native Core Subsystems (PawnIO, Enek, AntiThrottle, Audio, ACPI, UEFI, Catalog)
+// ============================================================================
+
+// 1. PawnIO Ring-0 Driver Management
+#[no_mangle]
+pub unsafe extern "C" fn predator_pawnio_open_driver() -> i32 {
+    safe_ffi(-1, || {
+        let mut guard = GLOBAL_PAWNIO.lock().unwrap_or_else(|e| e.into_inner());
+        match PawnIoDriver::open() {
+            Ok(driver) => {
+                *guard = Some(driver);
+                0
+            }
+            Err(e) => e,
+        }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_pawnio_close_driver() {
+    safe_ffi((), || {
+        let mut guard = GLOBAL_PAWNIO.lock().unwrap_or_else(|e| e.into_inner());
+        *guard = None;
+    });
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_pawnio_is_driver_open() -> i32 {
+    safe_ffi(0, || {
+        let guard = GLOBAL_PAWNIO.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(ref d) = *guard {
+            if d.is_available() { 1 } else { 0 }
+        } else {
+            0
+        }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_pawnio_apply_mode_limits_direct(
+    target_pl1: u32,
+    target_pl2: u32,
+    out_mirrored: *mut i32,
+) -> i32 {
+    safe_ffi(-1, || {
+        let mut guard = GLOBAL_PAWNIO.lock().unwrap_or_else(|e| e.into_inner());
+        if guard.is_none() {
+            if let Ok(driver) = PawnIoDriver::open() {
+                *guard = Some(driver);
+            } else {
+                return -1;
+            }
+        }
+        if let Some(ref mut driver) = *guard {
+            let mut mirrored_val = 0i32;
+            match driver.apply_mode_limits_direct(target_pl1, target_pl2, Some(&mut mirrored_val)) {
+                Ok(_) => {
+                    if !out_mirrored.is_null() && is_valid_mut_buffer(out_mirrored) {
+                        std::ptr::write_unaligned(out_mirrored, mirrored_val);
+                    }
+                    0
+                }
+                Err(err) => err,
+            }
+        } else {
+            -1
+        }
+    })
+}
+
+// 2. ENEK5130 RGB Device Transport
+pub use ec_hid::{
+    predator_enek_close, predator_enek_is_open, predator_enek_open, predator_enek_send_report,
+    predator_enek_set_zones,
+};
+
+// 3. AntiThrottle Safety Evaluation
+pub use thermal::predator_antithrottle_evaluate;
+
+// 4. WASAPI Audio Loopback
+pub use audio::{
+    predator_audio_capture_get_bands, predator_audio_capture_get_level,
+    predator_audio_capture_get_zones, predator_audio_capture_is_active,
+    predator_audio_capture_start, predator_audio_capture_stop,
+};
+
+// 5. Direct ACPI / SMBIOS / UEFI Table Acquisition
+pub use acpi::predator_acpi_fetch_and_parse_ppcc;
+pub use smbios::predator_smbios_fetch_and_parse;
+pub use uefi::predator_uefi_fetch_and_scan_power;
+
+// 7. Native Model Catalog Lookup
+pub use model_catalog::predator_model_catalog_lookup;
+
+// Subsystem aliases and lifecycle controls for C-ABI compatibility
+#[no_mangle]
+pub unsafe extern "C" fn predator_pawnio_open() -> i32 {
+    predator_pawnio_open_driver()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_pawnio_is_service_running() -> i32 {
+    predator_pawnio_is_driver_open()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_audio_capture_read(
+    out_bands: *mut f32,
+    band_count: usize,
+) -> i32 {
+    predator_audio_capture_get_bands(out_bands, band_count)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_telemetry_start() -> i32 {
+    safe_ffi(-1, || {
+        let mut guard = GLOBAL_TELEMETRY.lock().unwrap_or_else(|e| e.into_inner());
+        if guard.is_none() {
+            let mut worker = TelemetryWorker::new();
+            worker.start();
+            *guard = Some(worker);
+        }
+        0
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_telemetry_stop() {
+    safe_ffi((), || {
+        let mut guard = GLOBAL_TELEMETRY.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(mut worker) = guard.take() {
+            worker.stop();
+        }
+    });
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_telemetry_is_active() -> i32 {
+    safe_ffi(0, || {
+        let guard = GLOBAL_TELEMETRY.lock().unwrap_or_else(|e| e.into_inner());
+        if guard.is_some() { 1 } else { 0 }
+    })
 }
 
 #[cfg(test)]

@@ -104,6 +104,58 @@ namespace PredatorControlApp
                     );
                 }
 
+                if (PredatorNativeCore.IsNativeCoreAvailable)
+                {
+                    long nowMs = Environment.TickCount64;
+                    long hold = _tripwireLockedUntilTick > 0 ? TripwireHoldDurationMs : -TripwireHoldDurationMs;
+                    int rc = PredatorNativeCore.AntiThrottleEvaluate(
+                        temperature,
+                        nowMs,
+                        Limits.ThrottleThresholdCelsius,
+                        Limits.CeilingThresholdCelsius,
+                        Limits.CriticalThresholdCelsius,
+                        45,
+                        45,
+                        15,
+                        hold,
+                        out int powerCap,
+                        out int tripwireLocked);
+
+                    if (rc >= 0)
+                    {
+                        int nBoost = CalculateBoost(temperature);
+                        bool nativeTripwireActive = tripwireLocked != 0;
+                        if (nativeTripwireActive)
+                        {
+                            _tripwireLockedUntilTick = nowMs + TripwireHoldDurationMs;
+                        }
+                        else if (_tripwireLockedUntilTick > 0)
+                        {
+                            if (nowMs < _tripwireLockedUntilTick && temperature > Limits.ThrottleThresholdCelsius)
+                            {
+                                nativeTripwireActive = true;
+                            }
+                            else
+                            {
+                                _tripwireLockedUntilTick = 0;
+                            }
+                        }
+
+                        int nativeFloor = nativeTripwireActive ? 100 : nBoost;
+                        bool nativeActive = nativeTripwireActive || (nBoost > 0);
+
+                        return new AntiThrottleResult(
+                            IsEnabled: Enabled,
+                            IsActive: nativeActive,
+                            IsTripwireLocked: nativeTripwireActive,
+                            TargetFloorPercent: nativeFloor,
+                            CurrentTemp: temperature,
+                            ThermalLimit: Limits.CeilingThresholdCelsius,
+                            Chip: chip
+                        );
+                    }
+                }
+
                 long now = Environment.TickCount64;
                 int boost = CalculateBoost(temperature);
                 bool criticalHit = temperature >= Limits.CriticalThresholdCelsius || boost >= 100;

@@ -734,6 +734,48 @@ namespace PredatorControlApp
             bool hasOemThermal = false;
             var oemSummary = new StringBuilder();
 
+            if (PredatorNativeCore.IsNativeCoreAvailable)
+            {
+                try
+                {
+                    if (FirmwareParsingNative.TryFetchAndParsePpccDirect(out var directSummary) && directSummary.MaxPl1Watts > 0)
+                    {
+                        foundMin = directSummary.MinPowerWatts;
+                        foundMaxPl1 = directSummary.MaxPl1Watts;
+                        foundMaxPl2 = directSummary.MaxPl2Watts;
+                        foundTdp = directSummary.BaseTdpWatts;
+                        sourceTable = "ACPI/PPCC (Direct Native)";
+                        ppccEntries.Add(new PpccPowerLimitEntry
+                        {
+                            PowerLimitIndex = 0,
+                            MinPowerLimitMilliwatts = directSummary.MinPowerWatts * 1000,
+                            MaxPowerLimitMilliwatts = directSummary.MaxPl1Watts * 1000
+                        });
+                        ppccEntries.Add(new PpccPowerLimitEntry
+                        {
+                            PowerLimitIndex = 1,
+                            MinPowerLimitMilliwatts = directSummary.MinPowerWatts * 1000,
+                            MaxPowerLimitMilliwatts = directSummary.MaxPl2Watts * 1000
+                        });
+                        sbDiag.AppendLine($"[Source 2] Direct Native ACPI PPCC parsed: Min={foundMin}W, MaxPL1={foundMaxPl1}W, MaxPL2={foundMaxPl2}W, TDP={foundTdp}W");
+                    }
+
+                    if (FirmwareParsingNative.TryFetchAndScanUefiPowerDirect(out var directUefi) && directUefi.Pl1Watts > 0)
+                    {
+                        sbDiag.AppendLine($"[Source 2] Direct Native UEFI Power parsed: PL1={directUefi.Pl1Watts}W, PL2={directUefi.Pl2Watts}W, OCLock={directUefi.OverclockingLock}, CfgLock={directUefi.CfgLock}");
+                        if (foundMaxPl1 == null || foundMaxPl1 == 0)
+                        {
+                            foundMaxPl1 = (int)directUefi.Pl1Watts;
+                            foundMaxPl2 = (int)directUefi.Pl2Watts;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    sbDiag.AppendLine($"[Source 2] Direct Native firmware scan fallback: {ex.Message}");
+                }
+            }
+
             try
             {
                 // 1. Query RSMB (Raw SMBIOS) provider
@@ -810,9 +852,10 @@ namespace PredatorControlApp
                                             oemSummary.Append($"{tableName}({oemId}/{oemTableId}) ");
                                         }
 
-                                        // Check for PPCC in SSDT or DSDT
-                                        if (tableName.StartsWith("SSDT", StringComparison.OrdinalIgnoreCase) ||
-                                            tableName.StartsWith("DSDT", StringComparison.OrdinalIgnoreCase))
+                                        // Check for PPCC in SSDT or DSDT (skip re-parse if direct native already populated ppccEntries)
+                                        if (ppccEntries.Count == 0 &&
+                                            (tableName.StartsWith("SSDT", StringComparison.OrdinalIgnoreCase) ||
+                                             tableName.StartsWith("DSDT", StringComparison.OrdinalIgnoreCase)))
                                         {
                                             // byte[] overload: parsed natively without copying the table.
                                             var entries = ExtractPpccEntriesFromAml(buffer);

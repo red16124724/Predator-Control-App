@@ -75,6 +75,11 @@ namespace PredatorControlApp
             get
             {
                 if (!IsAvailable) return 0f;
+                if (PredatorNativeCore.IsNativeCoreAvailable && PredatorNativeCore.AudioCaptureIsActive())
+                {
+                    float nativeLevel = PredatorNativeCore.AudioCaptureGetLevel();
+                    if (nativeLevel > 0f) return nativeLevel;
+                }
                 lock (_gate)
                 {
                     return _nativeHandle != IntPtr.Zero ? PredatorNativeCore.AudioGetLevel(_nativeHandle) : 0f;
@@ -113,6 +118,13 @@ namespace PredatorControlApp
         public int GetSpectrum(float[]? destination)
         {
             if (destination == null || destination.Length == 0 || !IsAvailable) return 0;
+            if (PredatorNativeCore.IsNativeCoreAvailable && PredatorNativeCore.AudioCaptureIsActive())
+            {
+                if (PredatorNativeCore.AudioCaptureGetBands(destination))
+                {
+                    return Math.Min(destination.Length, BandCount);
+                }
+            }
             lock (_gate)
             {
                 if (_nativeHandle == IntPtr.Zero) return 0;
@@ -141,6 +153,13 @@ namespace PredatorControlApp
         {
             if (destination == null || zoneCount <= 0 || !IsAvailable) return 0;
             if (destination.Length < zoneCount * 3) return 0;
+            if (PredatorNativeCore.IsNativeCoreAvailable && PredatorNativeCore.AudioCaptureIsActive())
+            {
+                if (PredatorNativeCore.AudioCaptureGetZones(r, g, b, brightness, destination))
+                {
+                    return zoneCount;
+                }
+            }
             lock (_gate)
             {
                 if (_nativeHandle == IntPtr.Zero) return 0;
@@ -164,11 +183,19 @@ namespace PredatorControlApp
         public void Start()
         {
             if (_disposed || !IsAvailable) return;
+            if (PredatorNativeCore.IsNativeCoreAvailable)
+            {
+                PredatorNativeCore.AudioCaptureStart((uint)TargetSampleRate, (nuint)FftSize, (nuint)BandCount);
+            }
             _capture.Start();
         }
 
         public void Stop()
         {
+            if (PredatorNativeCore.IsNativeCoreAvailable)
+            {
+                PredatorNativeCore.AudioCaptureStop();
+            }
             _capture.Stop();
         }
 

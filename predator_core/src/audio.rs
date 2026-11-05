@@ -459,6 +459,510 @@ impl SpectrumAnalyzer {
     }
 }
 
+// ============================================================================
+// WASAPI Audio Loopback Capture Worker
+// ============================================================================
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::JoinHandle;
+use std::time::Duration;
+
+#[cfg(windows)]
+mod wasapi_ffi {
+    use std::ffi::c_void;
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    pub struct Guid {
+        pub data1: u32,
+        pub data2: u16,
+        pub data3: u16,
+        pub data4: [u8; 8],
+    }
+
+    pub const CLSID_MMDEVICE_ENUMERATOR: Guid = Guid {
+        data1: 0xBCDE0395,
+        data2: 0xE52F,
+        data3: 0x467C,
+        data4: [0x8E, 0x3D, 0xC4, 0x57, 0x92, 0x91, 0x49, 0x2E],
+    };
+
+    pub const IID_IMMDEVICE_ENUMERATOR: Guid = Guid {
+        data1: 0xA95664D2,
+        data2: 0x9614,
+        data3: 0x4F35,
+        data4: [0xA7, 0x46, 0xDE, 0x8D, 0xB6, 0x36, 0x17, 0xE6],
+    };
+
+    pub const IID_IAUDIOCLIENT: Guid = Guid {
+        data1: 0x1CB9AD4C,
+        data2: 0xDBFA,
+        data3: 0x4C32,
+        data4: [0xB1, 0x78, 0xC2, 0xF5, 0x68, 0xA7, 0x03, 0xB2],
+    };
+
+    pub const IID_IAUDIOCAPTURECLIENT: Guid = Guid {
+        data1: 0xC8ADBD64,
+        data2: 0xE71E,
+        data3: 0x48A0,
+        data4: [0xA4, 0xDE, 0x18, 0x5C, 0x39, 0x5C, 0xD3, 0x17],
+    };
+
+    pub const COINIT_MULTITHREADED: u32 = 0x0;
+    pub const CLSCTX_ALL: u32 = 23;
+    pub const E_RENDER: i32 = 0;
+    pub const E_CONSOLE: i32 = 0;
+    pub const AUDCLNT_SHAREMODE_SHARED: i32 = 0;
+    pub const AUDCLNT_STREAMFLAGS_LOOPBACK: u32 = 0x0002_0000;
+    pub const AUDCLNT_BUFFERFLAGS_SILENT: u32 = 0x2;
+
+    #[repr(C, packed(1))]
+    #[derive(Copy, Clone, Default)]
+    pub struct WaveFormatEx {
+        pub format_tag: u16,
+        pub channels: u16,
+        pub samples_per_sec: u32,
+        pub avg_bytes_per_sec: u32,
+        pub block_align: u16,
+        pub bits_per_sample: u16,
+        pub extra_size: u16,
+    }
+
+    #[repr(C)]
+    pub struct IUnknownVtbl {
+        pub query_interface: unsafe extern "system" fn(*mut c_void, *const Guid, *mut *mut c_void) -> i32,
+        pub add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
+        pub release: unsafe extern "system" fn(*mut c_void) -> u32,
+    }
+
+    #[repr(C)]
+    pub struct IMMDeviceEnumeratorVtbl {
+        pub parent: IUnknownVtbl,
+        pub enum_audio_endpoints: unsafe extern "system" fn(*mut c_void, i32, u32, *mut *mut c_void) -> i32,
+        pub get_default_audio_endpoint: unsafe extern "system" fn(*mut c_void, i32, i32, *mut *mut c_void) -> i32,
+        pub get_device: unsafe extern "system" fn(*mut c_void, *const u16, *mut *mut c_void) -> i32,
+        pub register_endpoint_notification_callback: unsafe extern "system" fn(*mut c_void, *mut c_void) -> i32,
+        pub unregister_endpoint_notification_callback: unsafe extern "system" fn(*mut c_void, *mut c_void) -> i32,
+    }
+
+    #[repr(C)]
+    pub struct IMMDeviceVtbl {
+        pub parent: IUnknownVtbl,
+        pub activate: unsafe extern "system" fn(*mut c_void, *const Guid, u32, *mut c_void, *mut *mut c_void) -> i32,
+        pub open_property_store: unsafe extern "system" fn(*mut c_void, u32, *mut *mut c_void) -> i32,
+        pub get_id: unsafe extern "system" fn(*mut c_void, *mut *mut u16) -> i32,
+        pub get_state: unsafe extern "system" fn(*mut c_void, *mut u32) -> i32,
+    }
+
+    #[repr(C)]
+    pub struct IAudioClientVtbl {
+        pub parent: IUnknownVtbl,
+        pub initialize: unsafe extern "system" fn(*mut c_void, i32, u32, i64, i64, *const c_void, *const c_void) -> i32,
+        pub get_buffer_size: unsafe extern "system" fn(*mut c_void, *mut u32) -> i32,
+        pub get_stream_latency: unsafe extern "system" fn(*mut c_void, *mut i64) -> i32,
+        pub get_current_padding: unsafe extern "system" fn(*mut c_void, *mut u32) -> i32,
+        pub is_format_supported: unsafe extern "system" fn(*mut c_void, i32, *const c_void, *mut *mut c_void) -> i32,
+        pub get_mix_format: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> i32,
+        pub get_device_period: unsafe extern "system" fn(*mut c_void, *mut i64, *mut i64) -> i32,
+        pub start: unsafe extern "system" fn(*mut c_void) -> i32,
+        pub stop: unsafe extern "system" fn(*mut c_void) -> i32,
+        pub reset: unsafe extern "system" fn(*mut c_void) -> i32,
+        pub set_event_handle: unsafe extern "system" fn(*mut c_void, *mut c_void) -> i32,
+        pub get_service: unsafe extern "system" fn(*mut c_void, *const Guid, *mut *mut c_void) -> i32,
+    }
+
+    #[repr(C)]
+    pub struct IAudioCaptureClientVtbl {
+        pub parent: IUnknownVtbl,
+        pub get_buffer: unsafe extern "system" fn(*mut c_void, *mut *mut u8, *mut u32, *mut u32, *mut u64, *mut u64) -> i32,
+        pub release_buffer: unsafe extern "system" fn(*mut c_void, u32) -> i32,
+        pub get_next_packet_size: unsafe extern "system" fn(*mut c_void, *mut u32) -> i32,
+    }
+
+    #[link(name = "ole32")]
+    extern "system" {
+        pub fn CoInitializeEx(pv_reserved: *mut c_void, dw_co_init: u32) -> i32;
+        pub fn CoUninitialize();
+        pub fn CoCreateInstance(
+            rclsid: *const Guid,
+            p_unk_outer: *mut c_void,
+            dw_cls_context: u32,
+            riid: *const Guid,
+            ppv: *mut *mut c_void,
+        ) -> i32;
+        pub fn CoTaskMemFree(pv: *mut c_void);
+    }
+}
+
+pub struct AudioCaptureWorker {
+    analyzer: Arc<SpectrumAnalyzer>,
+    is_running: Arc<AtomicBool>,
+    is_active: Arc<AtomicBool>,
+    thread_handle: Option<JoinHandle<()>>,
+}
+
+impl AudioCaptureWorker {
+    pub fn new(sample_rate: u32, fft_size: usize, band_count: usize) -> Option<Self> {
+        let analyzer = Arc::new(SpectrumAnalyzer::new(sample_rate, fft_size, band_count)?);
+        Some(Self {
+            analyzer,
+            is_running: Arc::new(AtomicBool::new(false)),
+            is_active: Arc::new(AtomicBool::new(false)),
+            thread_handle: None,
+        })
+    }
+
+    pub fn start(&mut self) -> bool {
+        if self.is_running.swap(true, Ordering::SeqCst) {
+            return true;
+        }
+
+        let is_running = self.is_running.clone();
+        let is_active = self.is_active.clone();
+        let analyzer = self.analyzer.clone();
+
+        self.thread_handle = Some(std::thread::spawn(move || {
+            #[cfg(windows)]
+            run_wasapi_capture_loop(is_running, is_active, analyzer);
+
+            #[cfg(not(windows))]
+            {
+                is_active.store(true, Ordering::Release);
+                while is_running.load(Ordering::Acquire) {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                is_active.store(false, Ordering::Release);
+            }
+        }));
+
+        true
+    }
+
+    pub fn stop(&mut self) {
+        self.is_running.store(false, Ordering::SeqCst);
+        self.is_active.store(false, Ordering::Release);
+        if let Some(handle) = self.thread_handle.take() {
+            let _ = handle.join();
+        }
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.is_active.load(Ordering::Acquire)
+    }
+
+    pub fn analyzer(&self) -> &Arc<SpectrumAnalyzer> {
+        &self.analyzer
+    }
+
+    pub fn get_level(&self) -> f32 {
+        self.analyzer.level()
+    }
+
+    pub fn get_zones(&self, base: [u8; 3], brightness: u8, out_zones: &mut [u8]) -> usize {
+        self.analyzer.render_zones(base, brightness, out_zones)
+    }
+
+    pub unsafe fn copy_bands(&self, out: *mut f32, cap: usize) -> usize {
+        self.analyzer.copy_bands_unaligned(out, cap)
+    }
+}
+
+impl Drop for AudioCaptureWorker {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+#[cfg(windows)]
+fn run_wasapi_capture_loop(
+    is_running: Arc<AtomicBool>,
+    is_active: Arc<AtomicBool>,
+    analyzer: Arc<SpectrumAnalyzer>,
+) {
+    use wasapi_ffi::*;
+    unsafe {
+        let _ = CoInitializeEx(std::ptr::null_mut(), COINIT_MULTITHREADED);
+    }
+
+    while is_running.load(Ordering::Acquire) {
+        let mut enumerator: *mut std::ffi::c_void = std::ptr::null_mut();
+        let hr = unsafe {
+            CoCreateInstance(
+                &CLSID_MMDEVICE_ENUMERATOR,
+                std::ptr::null_mut(),
+                CLSCTX_ALL,
+                &IID_IMMDEVICE_ENUMERATOR,
+                &mut enumerator,
+            )
+        };
+
+        if hr != 0 || enumerator.is_null() {
+            std::thread::sleep(Duration::from_millis(500));
+            continue;
+        }
+
+        let enum_vtbl = unsafe { &*(*(enumerator as *mut *mut IMMDeviceEnumeratorVtbl)) };
+        let mut device: *mut std::ffi::c_void = std::ptr::null_mut();
+        let hr = unsafe {
+            (enum_vtbl.get_default_audio_endpoint)(enumerator, E_RENDER, E_CONSOLE, &mut device)
+        };
+
+        if hr != 0 || device.is_null() {
+            unsafe { ((&*(*(enumerator as *mut *mut IUnknownVtbl))).release)(enumerator) };
+            std::thread::sleep(Duration::from_millis(500));
+            continue;
+        }
+
+        let dev_vtbl = unsafe { &*(*(device as *mut *mut IMMDeviceVtbl)) };
+        let mut audio_client: *mut std::ffi::c_void = std::ptr::null_mut();
+        let hr = unsafe {
+            (dev_vtbl.activate)(device, &IID_IAUDIOCLIENT, CLSCTX_ALL, std::ptr::null_mut(), &mut audio_client)
+        };
+
+        if hr != 0 || audio_client.is_null() {
+            unsafe {
+                ((&*(*(device as *mut *mut IUnknownVtbl))).release)(device);
+                ((&*(*(enumerator as *mut *mut IUnknownVtbl))).release)(enumerator);
+            }
+            std::thread::sleep(Duration::from_millis(500));
+            continue;
+        }
+
+        let client_vtbl = unsafe { &*(*(audio_client as *mut *mut IAudioClientVtbl)) };
+        let mut p_format: *mut std::ffi::c_void = std::ptr::null_mut();
+        let hr = unsafe { (client_vtbl.get_mix_format)(audio_client, &mut p_format) };
+
+        if hr != 0 || p_format.is_null() {
+            unsafe {
+                ((&*(*(audio_client as *mut *mut IUnknownVtbl))).release)(audio_client);
+                ((&*(*(device as *mut *mut IUnknownVtbl))).release)(device);
+                ((&*(*(enumerator as *mut *mut IUnknownVtbl))).release)(enumerator);
+            }
+            std::thread::sleep(Duration::from_millis(500));
+            continue;
+        }
+
+        let wave_format = unsafe { *(p_format as *const WaveFormatEx) };
+        let channels = (wave_format.channels as usize).max(1);
+
+        let buffer_duration_hns: i64 = 1_000_000; // 100 ms
+        let hr = unsafe {
+            (client_vtbl.initialize)(
+                audio_client,
+                AUDCLNT_SHAREMODE_SHARED,
+                AUDCLNT_STREAMFLAGS_LOOPBACK,
+                buffer_duration_hns,
+                0,
+                p_format,
+                std::ptr::null(),
+            )
+        };
+
+        unsafe { CoTaskMemFree(p_format) };
+
+        if hr != 0 {
+            unsafe {
+                ((&*(*(audio_client as *mut *mut IUnknownVtbl))).release)(audio_client);
+                ((&*(*(device as *mut *mut IUnknownVtbl))).release)(device);
+                ((&*(*(enumerator as *mut *mut IUnknownVtbl))).release)(enumerator);
+            }
+            std::thread::sleep(Duration::from_millis(500));
+            continue;
+        }
+
+        let mut capture_client: *mut std::ffi::c_void = std::ptr::null_mut();
+        let hr = unsafe {
+            (client_vtbl.get_service)(audio_client, &IID_IAUDIOCAPTURECLIENT, &mut capture_client)
+        };
+
+        if hr != 0 || capture_client.is_null() {
+            unsafe {
+                ((&*(*(audio_client as *mut *mut IUnknownVtbl))).release)(audio_client);
+                ((&*(*(device as *mut *mut IUnknownVtbl))).release)(device);
+                ((&*(*(enumerator as *mut *mut IUnknownVtbl))).release)(enumerator);
+            }
+            std::thread::sleep(Duration::from_millis(500));
+            continue;
+        }
+
+        let capture_vtbl = unsafe { &*(*(capture_client as *mut *mut IAudioCaptureClientVtbl)) };
+        let _ = unsafe { (client_vtbl.start)(audio_client) };
+
+        is_active.store(true, Ordering::Release);
+
+        while is_running.load(Ordering::Acquire) {
+            let mut packet_size: u32 = 0;
+            let hr = unsafe { (capture_vtbl.get_next_packet_size)(capture_client, &mut packet_size) };
+            if hr != 0 {
+                break;
+            }
+
+            if packet_size == 0 {
+                std::thread::sleep(Duration::from_millis(10));
+                continue;
+            }
+
+            let mut p_data: *mut u8 = std::ptr::null_mut();
+            let mut num_frames: u32 = 0;
+            let mut flags: u32 = 0;
+            let mut dev_pos: u64 = 0;
+            let mut qpc_pos: u64 = 0;
+
+            let hr = unsafe {
+                (capture_vtbl.get_buffer)(
+                    capture_client,
+                    &mut p_data,
+                    &mut num_frames,
+                    &mut flags,
+                    &mut dev_pos,
+                    &mut qpc_pos,
+                )
+            };
+
+            if hr == 0 && !p_data.is_null() && num_frames > 0 {
+                let total_samples = (num_frames as usize) * channels;
+                if (flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0 {
+                    let silence = vec![0.0f32; total_samples];
+                    analyzer.push_interleaved(&silence, channels);
+                } else {
+                    let float_ptr = p_data as *const f32;
+                    let slice = unsafe { std::slice::from_raw_parts(float_ptr, total_samples) };
+                    analyzer.push_interleaved(slice, channels);
+                }
+                unsafe { (capture_vtbl.release_buffer)(capture_client, num_frames) };
+            }
+
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        is_active.store(false, Ordering::Release);
+        unsafe {
+            let _ = (client_vtbl.stop)(audio_client);
+            ((&*(*(capture_client as *mut *mut IUnknownVtbl))).release)(capture_client);
+            ((&*(*(audio_client as *mut *mut IUnknownVtbl))).release)(audio_client);
+            ((&*(*(device as *mut *mut IUnknownVtbl))).release)(device);
+            ((&*(*(enumerator as *mut *mut IUnknownVtbl))).release)(enumerator);
+        }
+
+        if is_running.load(Ordering::Acquire) {
+            std::thread::sleep(Duration::from_millis(500));
+        }
+    }
+
+    unsafe {
+        CoUninitialize();
+    }
+}
+
+pub static GLOBAL_AUDIO_CAPTURE: std::sync::Mutex<Option<AudioCaptureWorker>> =
+    std::sync::Mutex::new(None);
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_audio_capture_start(
+    sample_rate: u32,
+    fft_size: usize,
+    band_count: usize,
+) -> i32 {
+    crate::safe_ffi(-1, || {
+        let mut guard = GLOBAL_AUDIO_CAPTURE.lock().unwrap_or_else(|e| e.into_inner());
+        let sr = if sample_rate > 0 { sample_rate } else { 48_000 };
+        let fft = if fft_size > 0 { fft_size } else { 2048 };
+        let bands = if band_count > 0 { band_count } else { 8 };
+
+        match AudioCaptureWorker::new(sr, fft, bands) {
+            Some(mut worker) => {
+                worker.start();
+                *guard = Some(worker);
+                0
+            }
+            None => -1,
+        }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_audio_capture_stop() {
+    crate::safe_ffi((), || {
+        let mut guard = GLOBAL_AUDIO_CAPTURE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(mut worker) = guard.take() {
+            worker.stop();
+        }
+    });
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_audio_capture_is_active() -> i32 {
+    crate::safe_ffi(0, || {
+        let guard = GLOBAL_AUDIO_CAPTURE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(worker) = guard.as_ref() {
+            if worker.is_active() { 1 } else { 0 }
+        } else {
+            0
+        }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_audio_capture_get_zones(
+    r: u8,
+    g: u8,
+    b: u8,
+    brightness: u8,
+    out_zones: *mut u8,
+    zone_count: usize,
+) -> i32 {
+    crate::safe_ffi(-1, || {
+        if out_zones.is_null()
+            || zone_count == 0
+            || !crate::is_valid_mut_buffer_range(out_zones, zone_count * 3)
+        {
+            return -1;
+        }
+
+        let guard = GLOBAL_AUDIO_CAPTURE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(worker) = guard.as_ref() {
+            let slice = unsafe { std::slice::from_raw_parts_mut(out_zones, zone_count * 3) };
+            worker.get_zones([r, g, b], brightness, slice) as i32
+        } else {
+            -2
+        }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_audio_capture_get_level() -> f32 {
+    crate::safe_ffi(0.0, || {
+        let guard = GLOBAL_AUDIO_CAPTURE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(worker) = guard.as_ref() {
+            worker.get_level()
+        } else {
+            0.0
+        }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_audio_capture_get_bands(
+    out_bands: *mut f32,
+    band_count: usize,
+) -> i32 {
+    crate::safe_ffi(-1, || {
+        if out_bands.is_null()
+            || band_count == 0
+            || !crate::is_valid_mut_buffer_range(out_bands, band_count)
+        {
+            return -1;
+        }
+
+        let guard = GLOBAL_AUDIO_CAPTURE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(worker) = guard.as_ref() {
+            worker.copy_bands(out_bands, band_count) as i32
+        } else {
+            -2
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -470,6 +974,25 @@ mod tests {
                 amp * (std::f32::consts::TAU * freq * t).sin()
             })
             .collect()
+    }
+
+    #[test]
+    fn test_audio_capture_worker_lifecycle() {
+        let mut worker = AudioCaptureWorker::new(48_000, 1024, 8).expect("worker");
+        assert!(!worker.is_active());
+        assert_eq!(worker.get_level(), 0.0);
+
+        worker.analyzer().push(&tone(440.0, 48_000.0, 2048, 0.8));
+        assert!(worker.get_level() > 0.0);
+
+        let mut zones = [0u8; 12];
+        let count = worker.get_zones([255, 0, 0], 100, &mut zones);
+        assert_eq!(count, 4);
+
+        assert!(worker.start());
+        // Worker started without panicking
+        worker.stop();
+        assert!(!worker.is_active());
     }
 
     #[test]

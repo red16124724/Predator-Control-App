@@ -705,6 +705,153 @@ pub fn monotonic_ms() -> u64 {
     START.get_or_init(Instant::now).elapsed().as_millis() as u64
 }
 
+// ============================================================================
+// AntiThrottle Safety Engine with 3,000ms Tripwire Hold Lockout
+// ============================================================================
+
+pub const DEFAULT_TRIPWIRE_HOLD_MS: i64 = 3000;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AntiThrottleEngine {
+    pub tripwire_locked_until_ms: i64,
+    pub hold_duration_ms: i64,
+}
+
+impl Default for AntiThrottleEngine {
+    fn default() -> Self {
+        Self {
+            tripwire_locked_until_ms: 0,
+            hold_duration_ms: DEFAULT_TRIPWIRE_HOLD_MS,
+        }
+    }
+}
+
+impl AntiThrottleEngine {
+    pub fn new(hold_duration_ms: i64) -> Self {
+        Self {
+            tripwire_locked_until_ms: 0,
+            hold_duration_ms: if hold_duration_ms > 0 { hold_duration_ms } else { DEFAULT_TRIPWIRE_HOLD_MS },
+        }
+    }
+
+    pub fn reset_tripwire(&mut self) {
+        self.tripwire_locked_until_ms = 0;
+    }
+
+    pub fn is_tripwire_locked(&self, now_ms: i64, temp: f64, throttle_thresh: f64) -> bool {
+        self.tripwire_locked_until_ms > 0 && now_ms < self.tripwire_locked_until_ms && temp > throttle_thresh
+    }
+
+    /// Evaluates transient thermal conditions, updates the tripwire latch, and calculates the PL1 power cap.
+    pub fn evaluate(
+        &mut self,
+        temp: f64,
+        now_ms: i64,
+        throttle_thresh: f64,
+        ceiling_thresh: f64,
+        critical_thresh: f64,
+        safe_target: i32,
+        base_tdp: i32,
+        min_w: i32,
+    ) -> (Option<i32>, bool) {
+        // Sensor blackout or non-finite inputs
+        if !temp.is_finite() || temp <= 0.0 {
+            let was_locked = self.tripwire_locked_until_ms > 0 && now_ms < self.tripwire_locked_until_ms;
+            return (None, was_locked);
+        }
+
+        // Trip the wire on critical temperature threshold
+        if temp >= critical_thresh {
+            self.tripwire_locked_until_ms = now_ms + self.hold_duration_ms;
+        }
+
+        let is_locked = self.is_tripwire_locked(now_ms, temp, throttle_thresh);
+
+        // Safe temperature and tripwire not locked: no intervention
+        if !is_locked && temp <= throttle_thresh {
+            return (None, false);
+        }
+
+        let target = safe_target.max(5);
+        let min_power = min_w.max(5);
+        let effective_min = min_power.min(target);
+        let tdp = if base_tdp > 0 { base_tdp } else { effective_min.max(target) };
+
+        // Critical hit or tripwire locked: drop immediately to effective minimum
+        if temp >= critical_thresh || is_locked {
+            return (Some(effective_min), is_locked);
+        }
+
+        let target_floor = if target > tdp { tdp } else { effective_min };
+        if temp >= ceiling_thresh {
+            return (Some(effective_min.max(target_floor)), is_locked);
+        }
+
+        let span = ceiling_thresh - throttle_thresh;
+        if span <= 0.0 {
+            return (Some(effective_min.max(target_floor)), is_locked);
+        }
+
+        let progress = ((temp - throttle_thresh) / span).clamp(0.0, 1.0);
+        let reduction_range = (target - target_floor).max(0);
+        let capped = target - (progress * reduction_range as f64).round() as i32;
+        (Some(capped.clamp(effective_min, target)), is_locked)
+    }
+}
+
+pub static GLOBAL_ANTITHROTTLE: std::sync::Mutex<AntiThrottleEngine> =
+    std::sync::Mutex::new(AntiThrottleEngine {
+        tripwire_locked_until_ms: 0,
+        hold_duration_ms: DEFAULT_TRIPWIRE_HOLD_MS,
+    });
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_antithrottle_evaluate(
+    temp: f64,
+    now_ms: i64,
+    throttle_thresh: f64,
+    ceiling_thresh: f64,
+    critical_thresh: f64,
+    safe_target: i32,
+    base_tdp: i32,
+    min_w: i32,
+    hold_ms: i64,
+    out_power_cap: *mut i32,
+    out_tripwire_locked: *mut i32,
+) -> i32 {
+    crate::safe_ffi(-1, || {
+        if !crate::is_valid_mut_ptr(out_power_cap) || !crate::is_valid_mut_ptr(out_tripwire_locked) {
+            return -1;
+        }
+
+        let mut engine = GLOBAL_ANTITHROTTLE.lock().unwrap_or_else(|e| e.into_inner());
+        if hold_ms < 0 {
+            engine.reset_tripwire();
+            engine.hold_duration_ms = hold_ms.abs();
+        } else if hold_ms > 0 {
+            engine.hold_duration_ms = hold_ms;
+        }
+
+        let (cap_opt, locked) = engine.evaluate(
+            temp,
+            now_ms,
+            throttle_thresh,
+            ceiling_thresh,
+            critical_thresh,
+            safe_target,
+            base_tdp,
+            min_w,
+        );
+
+        unsafe {
+            std::ptr::write_unaligned(out_power_cap, cap_opt.unwrap_or(-1));
+            std::ptr::write_unaligned(out_tripwire_locked, if locked { 1 } else { 0 });
+        }
+
+        0
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -918,6 +1065,48 @@ mod tests {
         // Third consecutive miss halves the EMA so the guard cannot latch forever
         coord.evaluate_at(0.0, 50.0, 65, 15, 45, 0);
         assert_eq!(coord.cpu_ema.value(), 40.0);
+    }
+
+    #[test]
+    fn test_antithrottle_engine_tripwire_lockout_and_caps() {
+        let mut engine = AntiThrottleEngine::new(3000);
+
+        // 1. Normal safe temperature (70 C <= 75 C): no cap, not locked
+        let (cap, locked) = engine.evaluate(70.0, 1000, 75.0, 95.0, 100.0, 65, 45, 15);
+        assert_eq!(cap, None);
+        assert!(!locked);
+
+        // 2. Interpolation between throttle (75 C) and ceiling (95 C)
+        // Midpoint 85 C: halfway between 65W and target_floor (45W) = 55W
+        let (cap, locked) = engine.evaluate(85.0, 1100, 75.0, 95.0, 100.0, 65, 45, 15);
+        assert_eq!(cap, Some(55));
+        assert!(!locked);
+
+        // 3. Ceiling threshold (95 C): target_floor 45W
+        let (cap, locked) = engine.evaluate(95.0, 1200, 75.0, 95.0, 100.0, 65, 45, 15);
+        assert_eq!(cap, Some(45));
+        assert!(!locked);
+
+        // 4. Critical hit (101 C >= 100 C): trips wire to now + 3000ms = 4300ms, drops to effective min (15W)
+        let (cap, locked) = engine.evaluate(101.0, 1300, 75.0, 95.0, 100.0, 65, 45, 15);
+        assert_eq!(cap, Some(15));
+        assert!(locked);
+
+        // 5. During hold duration (now = 2000ms < 4300ms, temp = 80 C > 75 C): locked remains active!
+        let (cap, locked) = engine.evaluate(80.0, 2000, 75.0, 95.0, 100.0, 65, 45, 15);
+        assert_eq!(cap, Some(15), "Tripwire lockout must enforce minimum power cap");
+        assert!(locked);
+
+        // 6. After hold duration expired (now = 4500ms > 4300ms, temp = 80 C): lockout lifts!
+        let (cap, locked) = engine.evaluate(80.0, 4500, 75.0, 95.0, 100.0, 65, 45, 15);
+        assert!(!locked);
+        assert!(cap.is_some() && cap.unwrap() > 15);
+
+        // 7. Sensor blackout (NaN or <= 0): returns None
+        let (cap, _) = engine.evaluate(f64::NAN, 5000, 75.0, 95.0, 100.0, 65, 45, 15);
+        assert_eq!(cap, None);
+        let (cap, _) = engine.evaluate(0.0, 5000, 75.0, 95.0, 100.0, 65, 45, 15);
+        assert_eq!(cap, None);
     }
 
     #[test]

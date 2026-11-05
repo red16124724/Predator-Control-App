@@ -8,6 +8,15 @@ internal static class FirmwareParsingNative
     private static extern int predator_smbios_parse(byte[] input, nuint length,
         [Out] uint[] records, nuint capacity, out int version);
 
+    [DllImport("predator_core.dll", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern int predator_acpi_fetch_and_parse_ppcc(out PredatorNativeCore.NativePpccSummary outSummary);
+
+    [DllImport("predator_core.dll", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern int predator_smbios_fetch_and_parse(out uint outGaming, out uint outHotkey, out byte outDgpu, out ushort outVersion);
+
+    [DllImport("predator_core.dll", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern int predator_uefi_fetch_and_scan_power(out NativeUefiPowerConfig outConfig);
+
     internal static bool TryParseSmbios(ReadOnlySpan<byte> table, out AcerSmbios result)
     {
         result = AcerSmbios.Empty;
@@ -32,6 +41,48 @@ internal static class FirmwareParsingNative
             byte? minor = version < 0 ? null : (byte)version;
             result = new AcerSmbios(major, minor, gaming, hotkeys);
             return true;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or SEHException)
+        {
+            return false;
+        }
+    }
+
+    internal static bool TryFetchAndParsePpccDirect(out PredatorNativeCore.NativePpccSummary summary)
+    {
+        summary = default;
+        if (!PredatorNativeCore.IsNativeCoreAvailable) return false;
+        try
+        {
+            return predator_acpi_fetch_and_parse_ppcc(out summary) == 0;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or SEHException)
+        {
+            return false;
+        }
+    }
+
+    internal static bool TryFetchAndParseSmbiosDirect(out uint gaming, out uint hotkey, out byte dgpu, out ushort ver)
+    {
+        gaming = 0; hotkey = 0; dgpu = 0; ver = 0;
+        if (!PredatorNativeCore.IsNativeCoreAvailable) return false;
+        try
+        {
+            return predator_smbios_fetch_and_parse(out gaming, out hotkey, out dgpu, out ver) == 0;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or SEHException)
+        {
+            return false;
+        }
+    }
+
+    internal static bool TryFetchAndScanUefiPowerDirect(out NativeUefiPowerConfig config)
+    {
+        config = default;
+        if (!PredatorNativeCore.IsNativeCoreAvailable) return false;
+        try
+        {
+            return predator_uefi_fetch_and_scan_power(out config) == 0;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or SEHException)
         {

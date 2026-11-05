@@ -70,7 +70,12 @@ namespace PredatorControlApp
         private bool EnsureDeviceOpen()
         {
             if (_isDisposed) return false;
+            if (PredatorNativeCore.IsNativeCoreAvailable && PredatorNativeCore.EnekIsOpen())
+                return true;
             if (_deviceHandle != null && !_deviceHandle.IsInvalid && !_deviceHandle.IsClosed)
+                return true;
+
+            if (PredatorNativeCore.IsNativeCoreAvailable && PredatorNativeCore.EnekOpen())
                 return true;
 
             try
@@ -115,6 +120,10 @@ namespace PredatorControlApp
         {
             try
             {
+                if (PredatorNativeCore.IsNativeCoreAvailable)
+                {
+                    PredatorNativeCore.EnekClose();
+                }
                 _deviceHandle?.Dispose();
             }
             catch { }
@@ -143,6 +152,19 @@ namespace PredatorControlApp
                 if (b == 0)
                 {
                     return TurnOffBacklight();
+                }
+
+                if (FeatureReportInterceptor == null && PredatorNativeCore.IsNativeCoreAvailable && (PredatorNativeCore.EnekIsOpen() || PredatorNativeCore.EnekOpen()))
+                {
+                    if (PredatorNativeCore.EnekSetZones(
+                        zoneColors[0].R, zoneColors[0].G, zoneColors[0].B,
+                        zoneColors[1].R, zoneColors[1].G, zoneColors[1].B,
+                        zoneColors[2].R, zoneColors[2].G, zoneColors[2].B,
+                        zoneColors[3].R, zoneColors[3].G, zoneColors[3].B,
+                        b))
+                    {
+                        return true;
+                    }
                 }
 
                 // Dispatch 4 per-zone feature reports using confirmed masks 0x01, 0x02, 0x04, 0x08
@@ -274,6 +296,14 @@ namespace PredatorControlApp
             if (FeatureReportInterceptor != null)
             {
                 return FeatureReportInterceptor(packet);
+            }
+
+            if (PredatorNativeCore.IsNativeCoreAvailable && (PredatorNativeCore.EnekIsOpen() || PredatorNativeCore.EnekOpen()))
+            {
+                if (PredatorNativeCore.EnekSendReport(packet))
+                {
+                    return true;
+                }
             }
 
             if (_deviceHandle == null || _deviceHandle.IsInvalid || _deviceHandle.IsClosed)

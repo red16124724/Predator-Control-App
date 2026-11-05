@@ -758,6 +758,87 @@ namespace PredatorControlApp
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         private static extern int predator_echid_enumerate(nuint limit);
 
+        #region Native Subsystem Migrations (Phase 2 P/Invokes)
+
+        // 1. PawnIO Ring-0 Driver
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_pawnio_open_driver();
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern void predator_pawnio_close_driver();
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_pawnio_is_driver_open();
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_pawnio_apply_mode_limits_direct(uint targetPl1, uint targetPl2, out int outMirrored);
+
+        // 2. ENEK5130 RGB Device Transport
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_enek_open(ushort vid, ushort pid);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern void predator_enek_close();
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_enek_is_open();
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_enek_send_report([In] byte[] reportBytes, nuint len);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_enek_set_zones(byte r1, byte g1, byte b1, byte r2, byte g2, byte b2, byte r3, byte g3, byte b3, byte r4, byte g4, byte b4, byte brightness);
+
+        // 3. AntiThrottle Safety Evaluation
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_antithrottle_evaluate(
+            double temp,
+            long nowMs,
+            double throttleThresh,
+            double ceilingThresh,
+            double criticalThresh,
+            int safeTarget,
+            int baseTdp,
+            int minW,
+            long holdMs,
+            out int outPowerCap,
+            out int outTripwireLocked);
+
+        // 4. WASAPI Audio Loopback
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_audio_capture_start(uint sampleRate, nuint fftSize, nuint bandCount);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern void predator_audio_capture_stop();
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_audio_capture_is_active();
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_audio_capture_get_zones(byte r, byte g, byte b, byte brightness, [Out] byte[] outZones, nuint zoneCount);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern float predator_audio_capture_get_level();
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_audio_capture_get_bands([Out] float[] outBands, nuint bandCount);
+
+        // 5. Direct ACPI & SMBIOS & UEFI
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_acpi_fetch_and_parse_ppcc(out NativePpccSummary outSummary);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_smbios_fetch_and_parse(out uint outGaming, out uint outHotkey, out byte outDgpu, out ushort outVersion);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_uefi_fetch_and_scan_power(out NativeUefiPowerConfig outConfig);
+
+        // 7. Native Model Catalog Lookup
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_model_catalog_lookup([In] byte[] modelPtr, nuint modelLen, out int outTier, out int outFans, out int outYear);
+
+        #endregion
+
         // ---- RGB animation ----
 
         public static IntPtr RgbCreate(int effect, byte r, byte g, byte b, byte brightness, byte speed, byte direction, int zones)
@@ -1019,6 +1100,183 @@ namespace PredatorControlApp
             if (!IsNativeCoreAvailable) return 0;
             try { return predator_echid_enumerate((nuint)Math.Max(1, limit)); }
             catch (Exception ex) { HandleNativeException(ex); return 0; }
+        }
+
+        #endregion
+
+        #region Native Subsystem Migrations (Phase 2 Public Helpers)
+
+        // 1. PawnIO
+        public static bool PawnIoOpenDriver()
+        {
+            if (!IsNativeCoreAvailable) return false;
+            try { return predator_pawnio_open_driver() == 0; }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        public static void PawnIoCloseDriver()
+        {
+            if (!IsNativeCoreAvailable) return;
+            try { predator_pawnio_close_driver(); }
+            catch (Exception ex) { HandleNativeException(ex); }
+        }
+
+        public static bool PawnIoIsDriverOpen()
+        {
+            if (!IsNativeCoreAvailable) return false;
+            try { return predator_pawnio_is_driver_open() != 0; }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        public static int PawnIoApplyModeLimitsDirect(uint targetPl1, uint targetPl2, out int outMirrored)
+        {
+            outMirrored = 0;
+            if (!IsNativeCoreAvailable) return -1;
+            try { return predator_pawnio_apply_mode_limits_direct(targetPl1, targetPl2, out outMirrored); }
+            catch (Exception ex) { HandleNativeException(ex); return -1; }
+        }
+
+        // 2. ENEK5130 RGB Device Transport
+        public static bool EnekOpen(ushort vid = 0x048D, ushort pid = 0)
+        {
+            if (!IsNativeCoreAvailable) return false;
+            try { return predator_enek_open(vid, pid) == 0; }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        public static void EnekClose()
+        {
+            if (!IsNativeCoreAvailable) return;
+            try { predator_enek_close(); }
+            catch (Exception ex) { HandleNativeException(ex); }
+        }
+
+        public static bool EnekIsOpen()
+        {
+            if (!IsNativeCoreAvailable) return false;
+            try { return predator_enek_is_open() != 0; }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        public static bool EnekSendReport(byte[] reportBytes)
+        {
+            if (!IsNativeCoreAvailable || reportBytes == null || reportBytes.Length == 0) return false;
+            try { return predator_enek_send_report(reportBytes, (nuint)reportBytes.Length) == 0; }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        public static bool EnekSetZones(byte r1, byte g1, byte b1, byte r2, byte g2, byte b2, byte r3, byte g3, byte b3, byte r4, byte g4, byte b4, byte brightness)
+        {
+            if (!IsNativeCoreAvailable) return false;
+            try { return predator_enek_set_zones(r1, g1, b1, r2, g2, b2, r3, g3, b3, r4, g4, b4, brightness) == 0; }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        // 3. AntiThrottle Safety Evaluation
+        public static int AntiThrottleEvaluate(
+            double temp,
+            long nowMs,
+            double throttleThresh,
+            double ceilingThresh,
+            double criticalThresh,
+            int safeTarget,
+            int baseTdp,
+            int minW,
+            long holdMs,
+            out int outPowerCap,
+            out int outTripwireLocked)
+        {
+            outPowerCap = -1;
+            outTripwireLocked = 0;
+            if (!IsNativeCoreAvailable) return -1;
+            try
+            {
+                return predator_antithrottle_evaluate(
+                    temp, nowMs, throttleThresh, ceilingThresh, criticalThresh,
+                    safeTarget, baseTdp, minW, holdMs, out outPowerCap, out outTripwireLocked);
+            }
+            catch (Exception ex) { HandleNativeException(ex); return -1; }
+        }
+
+        // 4. WASAPI Audio Loopback
+        public static bool AudioCaptureStart(uint sampleRate = 48000, nuint fftSize = 2048, nuint bandCount = 8)
+        {
+            if (!IsNativeCoreAvailable) return false;
+            try { return predator_audio_capture_start(sampleRate, fftSize, bandCount) == 0; }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        public static void AudioCaptureStop()
+        {
+            if (!IsNativeCoreAvailable) return;
+            try { predator_audio_capture_stop(); }
+            catch (Exception ex) { HandleNativeException(ex); }
+        }
+
+        public static bool AudioCaptureIsActive()
+        {
+            if (!IsNativeCoreAvailable) return false;
+            try { return predator_audio_capture_is_active() != 0; }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        public static bool AudioCaptureGetZones(byte r, byte g, byte b, byte brightness, byte[] outZones)
+        {
+            if (!IsNativeCoreAvailable || outZones == null || outZones.Length < 4) return false;
+            try { return predator_audio_capture_get_zones(r, g, b, brightness, outZones, (nuint)outZones.Length) == 0; }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        public static float AudioCaptureGetLevel()
+        {
+            if (!IsNativeCoreAvailable) return 0f;
+            try { return predator_audio_capture_get_level(); }
+            catch (Exception ex) { HandleNativeException(ex); return 0f; }
+        }
+
+        public static bool AudioCaptureGetBands(float[] outBands)
+        {
+            if (!IsNativeCoreAvailable || outBands == null || outBands.Length == 0) return false;
+            try { return predator_audio_capture_get_bands(outBands, (nuint)outBands.Length) == 0; }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        // 5. Direct ACPI & SMBIOS & UEFI
+        public static bool AcpiFetchAndParsePpcc(out NativePpccSummary summary)
+        {
+            summary = default;
+            if (!IsNativeCoreAvailable) return false;
+            try { return predator_acpi_fetch_and_parse_ppcc(out summary) == 0; }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        public static bool SmbiosFetchAndParse(out uint gamingCount, out uint hotkeyCount, out byte dgpuFlag, out ushort version)
+        {
+            gamingCount = 0; hotkeyCount = 0; dgpuFlag = 0; version = 0;
+            if (!IsNativeCoreAvailable) return false;
+            try { return predator_smbios_fetch_and_parse(out gamingCount, out hotkeyCount, out dgpuFlag, out version) == 0; }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        public static bool UefiFetchAndScanPower(out NativeUefiPowerConfig config)
+        {
+            config = default;
+            if (!IsNativeCoreAvailable) return false;
+            try { return predator_uefi_fetch_and_scan_power(out config) == 0; }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        // 7. Native Model Catalog Lookup
+        public static bool ModelCatalogLookup(string model, out int tier, out int fans, out int year)
+        {
+            tier = 0; fans = 2; year = 2024;
+            if (!IsNativeCoreAvailable || string.IsNullOrEmpty(model)) return false;
+            try
+            {
+                byte[] bytes = System.Text.Encoding.UTF8.GetBytes(model);
+                return predator_model_catalog_lookup(bytes, (nuint)bytes.Length, out tier, out fans, out year) == 0;
+            }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
         }
 
         #endregion

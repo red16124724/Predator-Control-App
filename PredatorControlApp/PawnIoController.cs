@@ -715,7 +715,8 @@ namespace PredatorControlApp
             }
         }
 
-        public bool IsOpen => _deviceHandle != null && !_deviceHandle.IsInvalid && !_deviceHandle.IsClosed && _isModuleLoaded;
+        public bool IsOpen => (PredatorNativeCore.IsNativeCoreAvailable && PredatorNativeCore.PawnIoIsDriverOpen()) ||
+                              (_deviceHandle != null && !_deviceHandle.IsInvalid && !_deviceHandle.IsClosed && _isModuleLoaded);
         public ulong MchbarAddress => _cachedMchbarAddress;
         public bool IsDriverLoaded => IsOpen;
         public bool IsDriverInstalled { get; private set; }
@@ -729,6 +730,12 @@ namespace PredatorControlApp
             {
                 if (IsOpen)
                     return PowerLimitApplyStatus.Success;
+
+                if (PredatorNativeCore.IsNativeCoreAvailable && PredatorNativeCore.PawnIoOpenDriver())
+                {
+                    IsDriverInstalled = true;
+                    return PowerLimitApplyStatus.Success;
+                }
 
                 string[] candidatePaths = {
                     GlobalDevicePath,
@@ -1536,6 +1543,10 @@ namespace PredatorControlApp
         {
             lock (_ioLock)
             {
+                if (PredatorNativeCore.IsNativeCoreAvailable)
+                {
+                    PredatorNativeCore.PawnIoCloseDriver();
+                }
                 _isModuleLoaded = false;
                 _isMchbarLoaded = false;
                 if (_deviceHandle != null && !_deviceHandle.IsClosed)
@@ -2196,6 +2207,21 @@ namespace PredatorControlApp
         {
             lock (_syncLock)
             {
+                if (_backend is NativePawnIoBackend && PredatorNativeCore.IsNativeCoreAvailable)
+                {
+                    int nativeStatus = PredatorNativeCore.PawnIoApplyModeLimitsDirect((uint)targetPl1Watts, (uint)targetPl2Watts, out int mirrored);
+                    if (nativeStatus == 0)
+                    {
+                        int directPl1 = Math.Max(5, targetPl1Watts);
+                        int directPl2 = Math.Max(directPl1, targetPl2Watts);
+                        return PowerLimitApplyResult.Success(
+                            directPl1,
+                            directPl2,
+                            mmioMirrored: mirrored != 0,
+                            message: "Power limits applied directly via native PawnIO driver core.");
+                    }
+                }
+
                 var initStatus = EnsureInitialized();
                 if (initStatus != PowerLimitApplyStatus.Success)
                 {

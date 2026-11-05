@@ -90,6 +90,97 @@ pub unsafe extern "C" fn predator_smbios_parse(
     })
 }
 
+// ============================================================================
+// Direct Win32 Kernel RSMB Firmware Table Acquisition
+// ============================================================================
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn GetSystemFirmwareTable(
+        provider: u32,
+        table_id: u32,
+        buffer: *mut u8,
+        buffer_size: u32,
+    ) -> u32;
+}
+
+pub fn fetch_and_parse_smbios() -> Option<(u32, u32, u8, u16)> {
+    #[cfg(windows)]
+    {
+        let rsmb_provider = 0x52534D42; // 'RSMB'
+        let size = unsafe { GetSystemFirmwareTable(rsmb_provider, 0, std::ptr::null_mut(), 0) };
+        if size < 8 || size > 16 * 1024 * 1024 {
+            return None;
+        }
+        let mut buf = vec![0u8; size as usize];
+        let bytes_read = unsafe { GetSystemFirmwareTable(rsmb_provider, 0, buf.as_mut_ptr(), size) };
+        if bytes_read < 8 || bytes_read > size {
+            return None;
+        }
+
+        let declared_len = u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]) as usize;
+        let len = declared_len.min((bytes_read as usize).saturating_sub(8));
+        if len == 0 {
+            return None;
+        }
+
+        let parsed = parse(&buf[8..8 + len]);
+        let gaming_count = parsed.records.iter().filter(|r| (*r & 0x0100_0000) == 0).count() as u32;
+        let hotkey_count = parsed.records.iter().filter(|r| (*r & 0x0100_0000) != 0).count() as u32;
+        let dgpu_flag = if parsed.records.iter().any(|r| (*r & 0xFF) == 0x09) { 1u8 } else { 0u8 };
+        let version = parsed.version.map_or(0u16, |(maj, min)| ((maj as u16) << 8) | (min as u16));
+        Some((gaming_count, hotkey_count, dgpu_flag, version))
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_smbios_fetch_and_parse(
+    out_gaming: *mut u32,
+    out_hotkey: *mut u32,
+    out_dgpu: *mut u8,
+    out_version: *mut u16,
+) -> i32 {
+    crate::safe_ffi(-1, || {
+        if !out_gaming.is_null() && !crate::is_valid_mut_ptr(out_gaming) {
+            return -1;
+        }
+        if !out_hotkey.is_null() && !crate::is_valid_mut_ptr(out_hotkey) {
+            return -1;
+        }
+        if !out_dgpu.is_null() && !crate::is_valid_mut_ptr(out_dgpu) {
+            return -1;
+        }
+        if !out_version.is_null() && !crate::is_valid_mut_ptr(out_version) {
+            return -1;
+        }
+
+        if let Some((gaming, hotkeys, dgpu, ver)) = fetch_and_parse_smbios() {
+            unsafe {
+                if !out_gaming.is_null() {
+                    std::ptr::write_unaligned(out_gaming, gaming);
+                }
+                if !out_hotkey.is_null() {
+                    std::ptr::write_unaligned(out_hotkey, hotkeys);
+                }
+                if !out_dgpu.is_null() {
+                    std::ptr::write_unaligned(out_dgpu, dgpu);
+                }
+                if !out_version.is_null() {
+                    std::ptr::write_unaligned(out_version, ver);
+                }
+            }
+            0
+        } else {
+            -1
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

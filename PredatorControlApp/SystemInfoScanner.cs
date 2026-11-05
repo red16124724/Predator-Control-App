@@ -49,12 +49,30 @@ namespace PredatorControlApp
             bool gpuAsleep = onBattery;
             bool hasHwMode = false;
             byte probedHwMode = 0;
+            bool queryGpu = !onBattery;
 
-            try
+            // 1. Native hardware telemetry consolidation (low overhead Ring-0 / NVAPI)
+            if (PredatorNativeCore.IsNativeCoreAvailable &&
+                PredatorNativeCore.TelemetryGetSnapshot(out var snap) &&
+                snap.TimestampMs > 0)
             {
-                cpuTemp = wmi.CpuTemp;
+                if (snap.CpuTemp > 0) cpuTemp = (int)Math.Round(snap.CpuTemp);
+                if (queryGpu && snap.GpuTemp > 0) gpuTemp = (int)Math.Round(snap.GpuTemp);
+                if (isWindowVisible)
+                {
+                    if (snap.CpuFanRpm > 0) cpuRpm = (int)snap.CpuFanRpm;
+                    if (queryGpu && snap.GpuFanRpm > 0) gpuRpm = (int)snap.GpuFanRpm;
+                }
+                if (snap.CpuLoad >= 0) cpuLoad = Math.Clamp(snap.CpuLoad, 0.0, 100.0);
+                if (queryGpu && snap.GpuLoad >= 0) gpuLoad = Math.Clamp(snap.GpuLoad, 0.0, 100.0);
             }
-            catch { }
+
+            // 2. Managed WMI fallbacks
+            if (cpuTemp <= 0)
+            {
+                try { cpuTemp = wmi.CpuTemp; }
+                catch { }
+            }
 
             lock (_sync)
             {
@@ -70,31 +88,29 @@ namespace PredatorControlApp
 
             if (isWindowVisible)
             {
-                try { cpuRpm = wmi.CpuFanRpm; } catch { }
+                if (cpuRpm <= 0) { try { cpuRpm = wmi.CpuFanRpm; } catch { } }
                 try { sysRpm = wmi.SystemFanRpm; } catch { }
             }
 
-            bool queryGpu = !onBattery;
             if (queryGpu)
             {
-                try
+                if (gpuTemp <= 0)
                 {
-                    gpuTemp = wmi.GpuTemp;
-                    if (isWindowVisible)
-                    {
-                        gpuRpm = wmi.GpuFanRpm;
-                    }
+                    try { gpuTemp = wmi.GpuTemp; } catch { }
                 }
-                catch { }
+                if (isWindowVisible && gpuRpm <= 0)
+                {
+                    try { gpuRpm = wmi.GpuFanRpm; } catch { }
+                }
             }
 
-            if (isWindowVisible && pdhMonitor != null)
+            if (isWindowVisible && pdhMonitor != null && (cpuLoad == null || (queryGpu && gpuLoad == null)))
             {
                 try
                 {
                     var (sampledCpu, sampledGpu) = pdhMonitor.Sample(queryGpu);
-                    cpuLoad = sampledCpu;
-                    gpuLoad = sampledGpu;
+                    cpuLoad ??= sampledCpu;
+                    gpuLoad ??= sampledGpu;
                 }
                 catch { }
             }

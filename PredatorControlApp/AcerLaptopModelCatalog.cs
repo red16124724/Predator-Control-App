@@ -1852,7 +1852,23 @@ namespace PredatorControlApp
 
                 return CreateGenericFallback(combined);
 
-
+            // 0. Native laptop model catalog lookup
+            if (PredatorNativeCore.IsNativeCoreAvailable &&
+                PredatorNativeCore.ModelCatalogLookup(combined, out int nTier, out int nFans, out int nYear))
+            {
+                // Correlate with static catalog entry to retain complete profile metadata and object identity
+                foreach (var entry in CatalogEntries)
+                {
+                    try
+                    {
+                        if (entry.Regex.IsMatch(combined))
+                        {
+                            return entry;
+                        }
+                    }
+                    catch (RegexMatchTimeoutException) { }
+                }
+            }
 
             // 1. Exact catalog match via regular expressions
             foreach (var entry in CatalogEntries)

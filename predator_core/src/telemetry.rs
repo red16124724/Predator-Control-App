@@ -280,6 +280,43 @@ impl TelemetryWorker {
                 let cpu_load = cpu_sampler.sample().unwrap_or(0.0);
                 let gpu_load = nvapi.sample_gpu_load().unwrap_or(0.0);
 
+                let mut cpu_temp = 0.0f64;
+                let mut pl1 = 0u32;
+                let mut pl2 = 0u32;
+
+                // Sample CPU temperature and power limits via PawnIO
+                {
+                    let mut p_guard = crate::GLOBAL_PAWNIO.lock().unwrap_or_else(|e| e.into_inner());
+                    if let Some(ref mut driver) = *p_guard {
+                        if let Ok(tj) = driver.controller().read_temperature_target() {
+                            let tj_max = tj.target_temp_celsius;
+                            if let Ok(therm) = driver.read_msr(0x1B1) {
+                                let delta = ((therm >> 16) & 0x7F) as u32;
+                                if (therm & (1 << 31)) != 0 && delta <= tj_max {
+                                    cpu_temp = (tj_max - delta) as f64;
+                                }
+                            }
+                            if cpu_temp == 0.0 {
+                                if let Ok(therm) = driver.read_msr(0x19C) {
+                                    let delta = ((therm >> 16) & 0x7F) as u32;
+                                    if (therm & (1 << 31)) != 0 && delta <= tj_max {
+                                        cpu_temp = (tj_max - delta) as f64;
+                                    }
+                                }
+                            }
+                        }
+                        if let Ok((units, _)) = driver.controller().read_power_units() {
+                            if let Ok(limits) = driver.controller().read_power_limits(units) {
+                                pl1 = limits.pl1_watts.max(0) as u32;
+                                pl2 = limits.pl2_watts.max(0) as u32;
+                            }
+                        }
+                    }
+                }
+
+                // Sample GPU temperature via NVAPI
+                let gpu_temp = crate::nvapi::gpu_temperature().unwrap_or(0.0);
+
                 let now_ms = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_millis() as u64)
@@ -289,6 +326,10 @@ impl TelemetryWorker {
                     let mut snap = snapshot.write().unwrap_or_else(|e| e.into_inner());
                     snap.cpu_load = cpu_load;
                     snap.gpu_load = gpu_load;
+                    snap.cpu_temp = cpu_temp;
+                    snap.gpu_temp = gpu_temp;
+                    snap.current_pl1 = pl1;
+                    snap.current_pl2 = pl2;
                     snap.timestamp_ms = now_ms;
                 }
 
@@ -317,6 +358,20 @@ impl TelemetryWorker {
         *self.snapshot.read().unwrap_or_else(|e| e.into_inner())
     }
 
+    pub fn update_hardware_metrics(
+        &self,
+        cpu_temp: f64,
+        gpu_temp: f64,
+        current_pl1: u32,
+        current_pl2: u32,
+    ) {
+        let mut snap = self.snapshot.write().unwrap_or_else(|e| e.into_inner());
+        snap.cpu_temp = cpu_temp;
+        snap.gpu_temp = gpu_temp;
+        snap.current_pl1 = current_pl1;
+        snap.current_pl2 = current_pl2;
+    }
+
     pub fn stop(&mut self) {
         self.is_running.store(false, Ordering::SeqCst);
         if let Some(handle) = self.worker_thread.take() {
@@ -328,5 +383,21 @@ impl TelemetryWorker {
 impl Drop for TelemetryWorker {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_telemetry_snapshot_hardware_metrics() {
+        let worker = TelemetryWorker::new();
+        worker.update_hardware_metrics(68.5, 72.0, 45, 90);
+        let snap = worker.get_snapshot();
+        assert_eq!(snap.cpu_temp, 68.5);
+        assert_eq!(snap.gpu_temp, 72.0);
+        assert_eq!(snap.current_pl1, 45);
+        assert_eq!(snap.current_pl2, 90);
     }
 }

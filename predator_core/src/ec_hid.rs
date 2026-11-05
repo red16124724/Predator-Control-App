@@ -33,6 +33,16 @@ const MAX_DEVICE_PATHS: usize = 16;
 const EXCHANGE_ATTEMPTS: u32 = 3;
 const BUSY_TIMEOUT_MS: u32 = 500;
 
+pub const ENEK_VID: u16 = 0x048D;
+pub const ENEK_USAGE_PAGE: u16 = 0xFF00;
+pub const ENEK_USAGE: u16 = 0x0001;
+pub const ENEK_REPORT_LEN: usize = 17;
+pub const ENEK_REPORT_ID: u8 = 0xA4;
+pub const ENEK_TARGET_KEYBOARD: u8 = 0x21;
+pub const ENEK_TARGET_COVER_LOGO: u8 = 0x83;
+pub const ENEK_EFFECT_STATIC: u8 = 0x02;
+pub const ENEK_ZONE_MASKS: [u8; 4] = [0x01, 0x02, 0x04, 0x08];
+
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 struct Guid {
@@ -260,6 +270,167 @@ impl EcHid {
         with_hid_api(|api| Self::open_with(api, vendor_id, product_id, usage_page, usage)).flatten()
     }
 
+    /// Enumerates HID interfaces and opens the ENEK5130 RGB controller.
+    pub fn open_enek(vendor_id: u16, product_id: u16) -> Option<EcHid> {
+        let vid = if vendor_id == 0 { ENEK_VID } else { vendor_id };
+        with_hid_api(|api| Self::open_enek_with(api, vid, product_id)).flatten()
+    }
+
+    fn open_enek_with(api: &HidApi, vendor_id: u16, product_id: u16) -> Option<EcHid> {
+        let mut hid_guid = Guid::default();
+        unsafe { (api.get_hid_guid)(&mut hid_guid) };
+
+        let info_set = unsafe {
+            SetupDiGetClassDevsW(
+                &hid_guid,
+                std::ptr::null(),
+                std::ptr::null_mut(),
+                DIGCF_PRESENT | DIGCF_DEVICEINTERFACE,
+            )
+        };
+        if info_set.is_null() || info_set == INVALID_HANDLE_VALUE as *mut c_void {
+            return None;
+        }
+
+        let mut device = std::ptr::null_mut();
+        let mut report_length = ENEK_REPORT_LEN;
+
+        let mut index = 0u32;
+        'outer: while index < 64 {
+            let mut did = SpDeviceInterfaceData::default();
+            let ok = unsafe {
+                SetupDiEnumDeviceInterfaces(info_set, std::ptr::null_mut(), &hid_guid, index, &mut did)
+            };
+            if ok == 0 {
+                break;
+            }
+            index += 1;
+
+            let mut required: u32 = 0;
+            unsafe {
+                SetupDiGetDeviceInterfaceDetailW(
+                    info_set,
+                    &mut did,
+                    std::ptr::null_mut(),
+                    0,
+                    &mut required,
+                    std::ptr::null_mut(),
+                );
+            }
+            if required == 0 || required > 16 * 1024 {
+                continue;
+            }
+
+            let words = (required as usize + 7) / 8;
+            let mut buf: Vec<u64> = vec![0; words];
+            let header = buf.as_mut_ptr() as *mut SpDeviceInterfaceDetailHeader;
+            unsafe {
+                (*header).cb_size = if cfg!(target_pointer_width = "64") { 8 } else { 6 };
+            }
+            let ok = unsafe {
+                SetupDiGetDeviceInterfaceDetailW(
+                    info_set,
+                    &mut did,
+                    buf.as_mut_ptr() as *mut c_void,
+                    required,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            };
+            if ok == 0 {
+                continue;
+            }
+
+            let path_ptr = unsafe { (buf.as_ptr() as *const u8).add(4) as *const u16 };
+            let limit = (required as usize).saturating_sub(4) / 2;
+            let path_len = unsafe {
+                let mut n = 0usize;
+                while n < limit && *path_ptr.add(n) != 0 {
+                    n += 1;
+                }
+                n
+            };
+            if path_len == 0 {
+                continue;
+            }
+
+            let path_slice = unsafe { std::slice::from_raw_parts(path_ptr, path_len) };
+            let path_str = String::from_utf16_lossy(path_slice);
+            let has_enek_tag = path_str.to_uppercase().contains("ENEK5130");
+
+            let mut wide: Vec<u16> = path_slice.to_vec();
+            wide.push(0);
+
+            let mut handle = unsafe {
+                CreateFileW(
+                    wide.as_ptr(),
+                    GENERIC_READ_WRITE,
+                    FILE_SHARE_RW,
+                    std::ptr::null_mut(),
+                    OPEN_EXISTING,
+                    FILE_ATTRIBUTE_NORMAL,
+                    std::ptr::null_mut(),
+                )
+            };
+            if handle.is_null() || handle == INVALID_HANDLE_VALUE as *mut c_void {
+                handle = unsafe {
+                    CreateFileW(
+                        wide.as_ptr(),
+                        0,
+                        FILE_SHARE_RW,
+                        std::ptr::null_mut(),
+                        OPEN_EXISTING,
+                        FILE_ATTRIBUTE_NORMAL,
+                        std::ptr::null_mut(),
+                    )
+                };
+            }
+            if handle.is_null() || handle == INVALID_HANDLE_VALUE as *mut c_void {
+                continue;
+            }
+
+            let mut attributes = HiddAttributes {
+                size: std::mem::size_of::<HiddAttributes>() as u32,
+                ..Default::default()
+            };
+            let attrs_ok = unsafe { (api.get_attributes)(handle, &mut attributes) } != 0;
+
+            let vid_match = attrs_ok && (attributes.vendor_id == vendor_id);
+            let pid_match = product_id == 0 || (attrs_ok && attributes.product_id == product_id);
+
+            let rep_len = read_report_length(handle, api);
+            let usage_match = usage_matches(handle, api, ENEK_USAGE_PAGE, ENEK_USAGE);
+
+            let is_enek = has_enek_tag || (vid_match && pid_match && (usage_match || rep_len == 17 || rep_len >= 11));
+
+            if !is_enek {
+                unsafe { CloseHandle(handle) };
+                continue;
+            }
+
+            report_length = rep_len.max(ENEK_REPORT_LEN);
+            device = handle;
+            break 'outer;
+        }
+
+        unsafe { SetupDiDestroyDeviceInfoList(info_set) };
+
+        if device.is_null() || device == INVALID_HANDLE_VALUE as *mut c_void {
+            return None;
+        }
+
+        let mutex_name: Vec<u16> = format!("Global\\ECHIDFeatureVID_{:04X}&PID_{:04X}\0", vendor_id, product_id)
+            .encode_utf16()
+            .collect();
+        let mutex = unsafe { CreateMutexW(std::ptr::null_mut(), 0, mutex_name.as_ptr()) };
+
+        Some(EcHid {
+            device,
+            mutex,
+            report_length,
+        })
+    }
+
     fn open_with(
         api: &HidApi,
         vendor_id: u16,
@@ -444,6 +615,52 @@ impl EcHid {
     ///
     /// Returns the number of bytes written to `out`, or `None` on failure.
     /// The caller owns the report framing (report id, header, command bytes).
+    /// Sends a raw feature report buffer to the device via HidD_SetFeature.
+    pub fn send_feature_report(&self, report: &[u8]) -> bool {
+        if !self.is_open() || report.is_empty() {
+            return false;
+        }
+        let len = self.report_length.max(report.len()).clamp(11, MAX_REPORT_LENGTH);
+        let mut buf = vec![0u8; len];
+        let copy_len = report.len().min(len);
+        buf[..copy_len].copy_from_slice(&report[..copy_len]);
+
+        with_hid_api(|api| {
+            let locked = self.lock();
+            let ok = unsafe { (api.set_feature)(self.device, buf.as_mut_ptr(), len as u32) } != 0;
+            self.unlock(locked);
+            ok
+        })
+        .unwrap_or(false)
+    }
+
+    /// Sets 4 keyboard zone colors on ENEK5130 hardware via direct HID feature reports.
+    pub fn set_enek_zones(
+        &self,
+        r1: u8, g1: u8, b1: u8,
+        r2: u8, g2: u8, b2: u8,
+        r3: u8, g3: u8, b3: u8,
+        r4: u8, g4: u8, b4: u8,
+        brightness: u8,
+    ) -> bool {
+        let colors = [
+            (r1, g1, b1),
+            (r2, g2, b2),
+            (r3, g3, b3),
+            (r4, g4, b4),
+        ];
+        let b = brightness.min(100);
+        let mut all_ok = true;
+        for i in 0..4 {
+            let (r, g, b_val) = colors[i];
+            let pkt = build_enek_zone_report(i, r, g, b_val, b);
+            if !self.send_feature_report(&pkt) {
+                all_ok = false;
+            }
+        }
+        all_ok
+    }
+
     pub fn exchange(&self, request: &[u8], out: &mut [u8]) -> Option<usize> {
         if !self.is_open() || request.is_empty() {
             return None;
@@ -509,6 +726,101 @@ impl Drop for EcHid {
     }
 }
 
+/// Formats an 11-byte static ENEK zone feature report.
+pub fn build_enek_zone_report(zone_index: usize, r: u8, g: u8, b: u8, brightness: u8) -> [u8; 11] {
+    let mut pkt = [0u8; 11];
+    pkt[0] = ENEK_REPORT_ID;
+    pkt[1] = ENEK_TARGET_KEYBOARD;
+    pkt[2] = if brightness == 0 { 0x02 } else { ENEK_EFFECT_STATIC };
+    pkt[3] = brightness.min(100);
+    pkt[4] = 0;
+    pkt[5] = 0;
+    pkt[6] = r;
+    pkt[7] = g;
+    pkt[8] = b;
+    pkt[9] = ENEK_ZONE_MASKS[zone_index.min(3)];
+    pkt[10] = 0x00;
+    pkt
+}
+
+pub static GLOBAL_ENEK: std::sync::Mutex<Option<EcHid>> = std::sync::Mutex::new(None);
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_enek_open(vid: u16, pid: u16) -> i32 {
+    crate::safe_ffi(-1, || {
+        let mut guard = GLOBAL_ENEK.lock().unwrap_or_else(|e| e.into_inner());
+        match EcHid::open_enek(vid, pid) {
+            Some(dev) => {
+                *guard = Some(dev);
+                0
+            }
+            None => -1,
+        }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_enek_close() {
+    crate::safe_ffi((), || {
+        let mut guard = GLOBAL_ENEK.lock().unwrap_or_else(|e| e.into_inner());
+        guard.take();
+    });
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_enek_is_open() -> i32 {
+    crate::safe_ffi(0, || {
+        let guard = GLOBAL_ENEK.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(dev) = guard.as_ref() {
+            if dev.is_open() { 1 } else { 0 }
+        } else {
+            0
+        }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_enek_send_report(report_bytes: *const u8, len: usize) -> i32 {
+    crate::safe_ffi(-1, || {
+        if report_bytes.is_null() || len == 0 || !crate::is_valid_buffer_range(report_bytes, len) {
+            return -1;
+        }
+        let slice = unsafe { std::slice::from_raw_parts(report_bytes, len) };
+        let guard = GLOBAL_ENEK.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(dev) = guard.as_ref() {
+            if dev.send_feature_report(slice) {
+                0
+            } else {
+                -2
+            }
+        } else {
+            -3
+        }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_enek_set_zones(
+    r1: u8, g1: u8, b1: u8,
+    r2: u8, g2: u8, b2: u8,
+    r3: u8, g3: u8, b3: u8,
+    r4: u8, g4: u8, b4: u8,
+    brightness: u8,
+) -> i32 {
+    crate::safe_ffi(-1, || {
+        let guard = GLOBAL_ENEK.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(dev) = guard.as_ref() {
+            if dev.set_enek_zones(r1, g1, b1, r2, g2, b2, r3, g3, b3, r4, g4, b4, brightness) {
+                0
+            } else {
+                -2
+            }
+        } else {
+            -3
+        }
+    })
+}
+
 /// Number of HID device interface paths currently enumerable (diagnostics only).
 pub fn enumerate_hid_paths(limit: usize) -> usize {
     with_hid_api(|api| {
@@ -553,6 +865,29 @@ mod tests {
     #[test]
     fn enumeration_never_panics() {
         let _ = enumerate_hid_paths(64);
+    }
+
+    #[test]
+    fn test_enek_report_formatting_and_zone_masks() {
+        assert_eq!(ENEK_VID, 0x048D);
+        assert_eq!(ENEK_USAGE_PAGE, 0xFF00);
+        assert_eq!(ENEK_USAGE, 0x0001);
+
+        for zone in 0..4 {
+            let pkt = build_enek_zone_report(zone, 10, 20, 30, 80);
+            assert_eq!(pkt[0], 0xA4);
+            assert_eq!(pkt[1], 0x21);
+            assert_eq!(pkt[2], 0x02);
+            assert_eq!(pkt[3], 80);
+            assert_eq!(pkt[6], 10);
+            assert_eq!(pkt[7], 20);
+            assert_eq!(pkt[8], 30);
+            assert_eq!(pkt[9], ENEK_ZONE_MASKS[zone]);
+        }
+
+        // Test brightness clamping
+        let pkt = build_enek_zone_report(0, 255, 255, 255, 150);
+        assert_eq!(pkt[3], 100);
     }
 
     #[test]

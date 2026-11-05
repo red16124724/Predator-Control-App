@@ -46,6 +46,8 @@ extern "system" {
 }
 
 /// Synthesized UEFI/AML power configuration and silicon overclocking lock bits.
+pub type NativeUefiPowerConfig = UefiPowerConfig;
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct UefiPowerConfig {
@@ -373,6 +375,100 @@ fn scan_aml_integers(bytes: &[u8]) -> Vec<u32> {
         }
     }
     results
+}
+
+// ============================================================================
+// Direct Win32 Kernel ACPI / UEFI Table Acquisition
+// ============================================================================
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn GetSystemFirmwareTable(
+        provider: u32,
+        table_id: u32,
+        buffer: *mut u8,
+        buffer_size: u32,
+    ) -> u32;
+    fn EnumSystemFirmwareTables(
+        provider: u32,
+        buffer: *mut u8,
+        buffer_size: u32,
+    ) -> u32;
+}
+
+pub fn fetch_and_scan_power() -> Option<UefiPowerConfig> {
+    #[cfg(windows)]
+    {
+        // 1. Scan ACPI tables via GetSystemFirmwareTable
+        let acpi_provider = 0x41435049; // 'ACPI'
+        let enum_size = unsafe { EnumSystemFirmwareTables(acpi_provider, std::ptr::null_mut(), 0) };
+        if enum_size >= 4 && enum_size <= 1024 * 1024 {
+            let mut id_buf = vec![0u8; enum_size as usize];
+            let read_ids = unsafe { EnumSystemFirmwareTables(acpi_provider, id_buf.as_mut_ptr(), enum_size) };
+            if read_ids >= 4 {
+                let table_count = (read_ids / 4) as usize;
+                for i in 0..table_count {
+                    let table_id = u32::from_le_bytes([
+                        id_buf[i * 4],
+                        id_buf[i * 4 + 1],
+                        id_buf[i * 4 + 2],
+                        id_buf[i * 4 + 3],
+                    ]);
+                    let table_size = unsafe { GetSystemFirmwareTable(acpi_provider, table_id, std::ptr::null_mut(), 0) };
+                    if table_size >= 36 && table_size <= 16 * 1024 * 1024 {
+                        let mut table_buf = vec![0u8; table_size as usize];
+                        let table_read = unsafe { GetSystemFirmwareTable(acpi_provider, table_id, table_buf.as_mut_ptr(), table_size) };
+                        if table_read >= 36 {
+                            if let Some(config) = parse_aml_power_limits(&table_buf[..table_read as usize]) {
+                                return Some(config);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Scan UEFI NVRAM variables
+        let dptf_var = read_variable("DptfPwr", GUID_INTEL_DPTF);
+        if let Some(buf) = dptf_var {
+            if let Some(cfg) = parse_aml_power_limits(&buf) {
+                return Some(cfg);
+            }
+        }
+
+        let setup_var = read_variable("Setup", GUID_INSYDE_SETUP);
+        if let Some(buf) = setup_var {
+            if let Some(cfg) = parse_aml_power_limits(&buf) {
+                return Some(cfg);
+            }
+        }
+
+        None
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_uefi_fetch_and_scan_power(
+    out_config: *mut NativeUefiPowerConfig,
+) -> i32 {
+    crate::safe_ffi(-1, || {
+        if out_config.is_null() || !crate::is_valid_mut_ptr(out_config) {
+            return -1;
+        }
+        if let Some(cfg) = fetch_and_scan_power() {
+            unsafe {
+                std::ptr::write_unaligned(out_config, cfg);
+            }
+            0
+        } else {
+            -1
+        }
+    })
 }
 
 #[cfg(test)]
