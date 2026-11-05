@@ -142,9 +142,7 @@ Predator Control App communicates directly with your laptop's hardware via ACPI,
 1. Press `Win + R`, type **`services.msc`**, and press **Enter**.
 2. Locate and disable the following services (if present on your system):
    - `Acer Gaming Service`
-   - `Acer Quick Access Service`
    - `AcerService`
-   - `Acer Power Button Service`
    - `NitroSense Service` (on Nitro laptops)
    - `PredatorSense Service` (on Predator laptops)
 3. For each service:
