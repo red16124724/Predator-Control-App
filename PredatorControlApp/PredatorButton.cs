@@ -20,21 +20,48 @@ namespace PredatorControlApp
         public bool IsActive
         {
             get => _isActive;
-            set { _isActive = value; Invalidate(); }
+            set
+            {
+                if (IsHandleCreated && InvokeRequired)
+                {
+                    try { BeginInvoke(new Action(() => { if (!IsDisposed && !Disposing) IsActive = value; })); } catch { }
+                    return;
+                }
+                _isActive = value;
+                Invalidate();
+            }
         }
 
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public bool IsNavButton
         {
             get => _isNavButton;
-            set { _isNavButton = value; Invalidate(); }
+            set
+            {
+                if (IsHandleCreated && InvokeRequired)
+                {
+                    try { BeginInvoke(new Action(() => { if (!IsDisposed && !Disposing) IsNavButton = value; })); } catch { }
+                    return;
+                }
+                _isNavButton = value;
+                Invalidate();
+            }
         }
 
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public Color? CustomActiveColor
         {
             get => _customActiveColor;
-            set { _customActiveColor = value; Invalidate(); }
+            set
+            {
+                if (IsHandleCreated && InvokeRequired)
+                {
+                    try { BeginInvoke(new Action(() => { if (!IsDisposed && !Disposing) CustomActiveColor = value; })); } catch { }
+                    return;
+                }
+                _customActiveColor = value;
+                Invalidate();
+            }
         }
 
         private bool _useMnemonic = false;
@@ -43,7 +70,16 @@ namespace PredatorControlApp
         public bool UseMnemonic
         {
             get => _useMnemonic;
-            set { _useMnemonic = value; Invalidate(); }
+            set
+            {
+                if (IsHandleCreated && InvokeRequired)
+                {
+                    try { BeginInvoke(new Action(() => { if (!IsDisposed && !Disposing) UseMnemonic = value; })); } catch { }
+                    return;
+                }
+                _useMnemonic = value;
+                Invalidate();
+            }
         }
 
         private static readonly Font s_defaultFont = new("Segoe UI", 9.25f, FontStyle.Regular);

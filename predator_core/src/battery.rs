@@ -413,6 +413,46 @@ where
     }
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct RawBatteryInfo {
+    pub capabilities: u32,
+    pub technology: u8,
+    pub designed_capacity: u32,
+    pub full_charged_capacity: u32,
+    pub cycle_count: u32,
+    pub wear_level_percent: f64,
+}
+
+/// Decodes Windows SetupAPI BATTERY_INFORMATION (36 bytes) buffer.
+pub fn parse_battery_info(bytes: &[u8]) -> Option<RawBatteryInfo> {
+    if bytes.len() < 36 {
+        return None;
+    }
+
+    let capabilities = u32::from_le_bytes(bytes[0..4].try_into().ok()?);
+    let technology = bytes[4];
+    let designed_capacity = u32::from_le_bytes(bytes[12..16].try_into().ok()?);
+    let full_charged_capacity = u32::from_le_bytes(bytes[16..20].try_into().ok()?);
+    let cycle_count = u32::from_le_bytes(bytes[32..36].try_into().ok()?);
+
+    let wear_level_percent = if designed_capacity > 0 {
+        let wear = (1.0 - (full_charged_capacity as f64 / designed_capacity as f64)) * 100.0;
+        wear.clamp(0.0, 100.0)
+    } else {
+        0.0
+    };
+
+    Some(RawBatteryInfo {
+        capabilities,
+        technology,
+        designed_capacity,
+        full_charged_capacity,
+        cycle_count,
+        wear_level_percent,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -456,7 +496,14 @@ mod tests {
     #[test]
     fn discharging_estimate_uses_remaining_capacity() {
         let mut c = EtaCalculator::new(1.0);
-        let (code, secs) = c.calculate(PHASE_DISCHARGING, 30_000, 60_000, Some(30_000.0), false, None);
+        let (code, secs) = c.calculate(
+            PHASE_DISCHARGING,
+            30_000,
+            60_000,
+            Some(30_000.0),
+            false,
+            None,
+        );
         assert_eq!(code, RESULT_ESTIMATE);
         assert!((secs - 3600.0).abs() < 1.0, "got {secs}");
     }
@@ -521,5 +568,50 @@ mod tests {
         assert!((secs - 4500.0).abs() < 1.0);
         let (some, _) = EtaCalculator::warmup_estimate(PHASE_DISCHARGING, 50);
         assert!(!some);
+    }
+
+    #[test]
+    fn parses_raw_battery_info_correctly() {
+        let mut buf = [0u8; 36];
+        buf[0..4].copy_from_slice(&0x40000000u32.to_le_bytes()); // capabilities
+        buf[4] = 1; // technology
+        buf[8..12].copy_from_slice(b"LION"); // chemistry
+        buf[12..16].copy_from_slice(&60000u32.to_le_bytes()); // designed capacity: 60,000 mWh
+        buf[16..20].copy_from_slice(&54000u32.to_le_bytes()); // full charged capacity: 54,000 mWh (10% wear)
+        buf[32..36].copy_from_slice(&125u32.to_le_bytes()); // cycle count: 125
+
+        let info = parse_battery_info(&buf).expect("Should parse valid 36-byte battery info");
+        assert_eq!(info.capabilities, 0x40000000);
+        assert_eq!(info.technology, 1);
+        assert_eq!(info.designed_capacity, 60000);
+        assert_eq!(info.full_charged_capacity, 54000);
+        assert_eq!(info.cycle_count, 125);
+        assert!((info.wear_level_percent - 10.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn parses_raw_battery_info_zero_capacity_and_clamping() {
+        let mut buf = [0u8; 36];
+        // Zero designed capacity
+        let info = parse_battery_info(&buf).expect("Should parse zero capacity");
+        assert_eq!(info.designed_capacity, 0);
+        assert_eq!(info.wear_level_percent, 0.0);
+
+        // Full capacity greater than designed capacity (wear clamped to 0.0)
+        buf[12..16].copy_from_slice(&50000u32.to_le_bytes());
+        buf[16..20].copy_from_slice(&55000u32.to_le_bytes());
+        let info = parse_battery_info(&buf).expect("Should parse overflow capacity");
+        assert_eq!(info.wear_level_percent, 0.0);
+
+        // Completely dead battery (full capacity 0 -> 100% wear)
+        buf[16..20].copy_from_slice(&0u32.to_le_bytes());
+        let info = parse_battery_info(&buf).expect("Should parse dead battery");
+        assert_eq!(info.wear_level_percent, 100.0);
+    }
+
+    #[test]
+    fn parse_battery_info_rejects_truncated() {
+        assert!(parse_battery_info(&[]).is_none());
+        assert!(parse_battery_info(&[0u8; 35]).is_none());
     }
 }

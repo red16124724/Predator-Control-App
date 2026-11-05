@@ -289,11 +289,12 @@ namespace PredatorControlApp
             IntPtr hSnap = CreateToolhelp32Snapshot(0x00000002 /* TH32CS_SNAPPROCESS */, 0);
             if (hSnap != IntPtr.Zero && hSnap != (IntPtr)(-1))
             {
+                using var safeSnap = new Microsoft.Win32.SafeHandles.SafeFileHandle(hSnap, ownsHandle: true);
                 try
                 {
                     var pe = new PROCESSENTRY32();
                     pe.dwSize = (uint)Marshal.SizeOf<PROCESSENTRY32>();
-                    if (Process32First(hSnap, ref pe))
+                    if (Process32First(safeSnap.DangerousGetHandle(), ref pe))
                     {
                         do
                         {
@@ -301,14 +302,10 @@ namespace PredatorControlApp
                             {
                                 set.Add(pe.szExeFile);
                             }
-                        } while (Process32Next(hSnap, ref pe));
+                        } while (Process32Next(safeSnap.DangerousGetHandle(), ref pe));
                     }
                 }
                 catch { }
-                finally
-                {
-                    CloseHandle(hSnap);
-                }
             }
             else
             {
@@ -338,6 +335,9 @@ namespace PredatorControlApp
 
         public static string? GetForegroundProcessName()
         {
+            string? nativeFg = PredatorNativeMigrations.GetForegroundProcessName();
+            if (!string.IsNullOrEmpty(nativeFg)) return nativeFg;
+
             try
             {
                 IntPtr fgHwnd = GetForegroundWindow();
@@ -362,6 +362,9 @@ namespace PredatorControlApp
         private bool IsProcessActive(string nameWithoutExe)
         {
             if (string.IsNullOrWhiteSpace(nameWithoutExe)) return false;
+
+            if (PredatorNativeMigrations.IsProcessRunning(nameWithoutExe))
+                return true;
 
             string? fg = GetForegroundProcessName();
             if (fg != null && fg.Equals(nameWithoutExe, StringComparison.OrdinalIgnoreCase))

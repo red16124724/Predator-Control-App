@@ -197,6 +197,11 @@ namespace PredatorControlApp
             }
             if (raw.Count < 2) return new List<Point>(DefaultCpuPoints);
 
+            if (PredatorNativeMigrations.TryNormalizeCurve(raw, out var nativeNormalized))
+            {
+                return nativeNormalized;
+            }
+
             var clamped = raw
                 .Select(p => new Point(Math.Clamp(p.X, TempMin, TempMax), Math.Clamp(p.Y, SpeedMin, SpeedMax)))
                 .OrderBy(p => p.X)
@@ -578,7 +583,7 @@ namespace PredatorControlApp
 
         private void DrawCurveFill(Graphics g, RectangleF area)
         {
-            if (_points.Count < 2 || area.Height < 1f || area.Width < 1f || Math.Abs(area.Bottom - area.Top) < 1f || float.IsNaN(area.Top) || float.IsNaN(area.Bottom)) return;
+            if (_points.Count < 2 || area.Height < 1f || area.Width < 1f || Math.Abs(area.Bottom - area.Top) < 1f || float.IsNaN(area.Top) || float.IsNaN(area.Bottom) || float.IsInfinity(area.Top) || float.IsInfinity(area.Bottom)) return;
 
             using var path = new GraphicsPath();
             var pixels = _points.Select(CurvePointToPixel).ToArray();

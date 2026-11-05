@@ -61,12 +61,12 @@ pub unsafe extern "C" fn predator_smbios_parse(
     version: *mut i32,
 ) -> i32 {
     crate::safe_ffi(-1, || {
-        if (input as usize) < 0x10000
-            || (output as usize) < 0x10000
-            || (version as usize) < 0x10000
-            || len == 0
+        if len == 0
             || len > isize::MAX as usize
             || capacity > isize::MAX as usize / 4
+            || !crate::is_valid_buffer_range(input, len)
+            || !crate::is_valid_mut_buffer_range(output, capacity)
+            || !crate::is_valid_mut_buffer(version)
         {
             return -1;
         }

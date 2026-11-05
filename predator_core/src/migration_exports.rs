@@ -6,8 +6,8 @@
 //! may hand over buffers that are not naturally aligned.
 
 use crate::{
-    battery, graphproj, history, hook, is_valid_buffer, is_valid_mut_buffer, pipeguard, procsync,
-    shortcuts,
+    backlight, battery, cpu_spec, curve, graphproj, history, hook, is_valid_buffer,
+    is_valid_mut_buffer, pipeguard, procsync, shortcuts, uefi,
 };
 
 // ============================================================================
@@ -175,6 +175,9 @@ pub unsafe extern "C" fn predator_battery_eta_calculate(
             None
         };
         battery::with_eta(battery::RESULT_NONE, |calc| {
+            if !is_valid_mut_buffer(out_seconds) {
+                return battery::RESULT_NONE;
+            }
             let (code, seconds) = calc.calculate(
                 phase,
                 remaining_capacity,
@@ -183,7 +186,7 @@ pub unsafe extern "C" fn predator_battery_eta_calculate(
                 allow_warmup != 0,
                 percent,
             );
-            if is_valid_mut_buffer(out_seconds) && code != battery::RESULT_NONE {
+            if code != battery::RESULT_NONE {
                 std::ptr::write_unaligned(out_seconds, seconds);
             }
             code
@@ -424,7 +427,7 @@ pub unsafe extern "C" fn predator_hook_set_shortcuts(
 ) -> i32 {
     crate::safe_ffi(0, || {
         hook::with_hook(0, |state| {
-            if (entries as usize) < 0x10000 || count <= 0 {
+            if count <= 0 || !crate::is_valid_buffer_range(entries, count as usize) {
                 state.set_shortcuts(std::ptr::null(), 0);
                 0
             } else {
@@ -590,6 +593,398 @@ pub unsafe extern "C" fn predator_pipeguard_is_valid(input: *const u8, input_len
             1
         } else {
             0
+        }
+    })
+}
+
+
+// ============================================================================
+// Tier 1: 8-Point Fan Curve Normalizer (FanCurveGraph.Normalize)
+// ============================================================================
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_curve_normalize(
+    in_points: *const curve::ControlPoint,
+    in_len: usize,
+    out_points: *mut curve::ControlPoint,
+    out_capacity: usize,
+) -> i32 {
+    crate::safe_ffi(-1, || {
+        if out_capacity < 8 || !is_valid_mut_buffer(out_points) {
+            return -1;
+        }
+        let mut temp_buf = [curve::ControlPoint::default(); 128];
+        let in_slice: &[curve::ControlPoint] = if in_len > 0 && in_len <= 128 && crate::is_valid_buffer_range(in_points, in_len) {
+            if (in_points as usize) % std::mem::align_of::<curve::ControlPoint>() == 0 {
+                std::slice::from_raw_parts(in_points, in_len)
+            } else {
+                for i in 0..in_len {
+                    temp_buf[i] = std::ptr::read_unaligned(in_points.add(i));
+                }
+                &temp_buf[..in_len]
+            }
+        } else {
+            &[]
+        };
+        let normalized = curve::normalize_curve(in_slice);
+        for i in 0..8 {
+            std::ptr::write_unaligned(out_points.add(i), normalized[i]);
+        }
+        8
+    })
+}
+
+// ============================================================================
+// Tier 1: CPU Architecture & TDP Power Limit Matrix (CpuSpecDetector)
+// ============================================================================
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_cpuspec_detect(
+    model_ptr: *const u8,
+    model_len: i32,
+    out_spec: *mut cpu_spec::CpuHardwareSpec,
+) -> i32 {
+    crate::safe_ffi(-1, || {
+        if !is_valid_mut_buffer(out_spec) {
+            return -1;
+        }
+        let model = procsync::read_str(model_ptr, model_len);
+        let spec = cpu_spec::detect_cpu_spec(model);
+        std::ptr::write_unaligned(out_spec, spec);
+        0
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_cpuspec_estimate_proportional_limits(
+    tdp_watts: i32,
+    mode: u8,
+    out_pl1: *mut i32,
+    out_pl2: *mut i32,
+) -> i32 {
+    crate::safe_ffi(-1, || {
+        if !is_valid_mut_buffer(out_pl1) || !is_valid_mut_buffer(out_pl2) {
+            return -1;
+        }
+        let (pl1, pl2) = cpu_spec::estimate_proportional_limits(tdp_watts, mode);
+        std::ptr::write_unaligned(out_pl1, pl1);
+        std::ptr::write_unaligned(out_pl2, pl2);
+        0
+    })
+}
+
+// ============================================================================
+// Tier 1: Backlight State Machine Engine (BacklightStateManager)
+// ============================================================================
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_backlight_create(
+    initial_ac_brightness: i32,
+) -> *mut backlight::BacklightStateManager {
+    crate::safe_ffi(std::ptr::null_mut(), || {
+        Box::into_raw(Box::new(backlight::BacklightStateManager::new(initial_ac_brightness)))
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_backlight_destroy(
+    handle: *mut backlight::BacklightStateManager,
+) {
+    crate::safe_ffi((), || {
+        if crate::is_valid_mut_ptr(handle) {
+            drop(Box::from_raw(handle));
+        }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_backlight_evaluate_idle(
+    handle: *mut backlight::BacklightStateManager,
+    now_sec: i64,
+    out_should_dim: *mut i32,
+    out_brightness: *mut i32,
+) -> i32 {
+    crate::safe_ffi(0, || {
+        if !crate::is_valid_mut_ptr(handle) || !is_valid_mut_buffer(out_should_dim) || !is_valid_mut_buffer(out_brightness) {
+            return 0;
+        }
+        let mgr = &mut *handle;
+        let (handled, should_dim, brightness) = mgr.evaluate_idle(now_sec);
+        std::ptr::write_unaligned(out_should_dim, if should_dim { 1 } else { 0 });
+        std::ptr::write_unaligned(out_brightness, brightness);
+        if handled { 1 } else { 0 }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_backlight_on_activity(
+    handle: *mut backlight::BacklightStateManager,
+    out_should_restore: *mut i32,
+    out_brightness: *mut i32,
+) -> i32 {
+    crate::safe_ffi(0, || {
+        if !crate::is_valid_mut_ptr(handle) || !is_valid_mut_buffer(out_should_restore) || !is_valid_mut_buffer(out_brightness) {
+            return 0;
+        }
+        let mgr = &mut *handle;
+        let (_handled, should_restore, brightness) = mgr.on_activity();
+        std::ptr::write_unaligned(out_should_restore, if should_restore { 1 } else { 0 });
+        std::ptr::write_unaligned(out_brightness, brightness);
+        if should_restore { 1 } else { 0 }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_backlight_is_on_battery(
+    handle: *mut backlight::BacklightStateManager,
+    line_status: i32,
+    charge_status: i32,
+) -> i32 {
+    crate::safe_ffi(0, || {
+        if !crate::is_valid_mut_ptr(handle) {
+            return 0;
+        }
+        let mgr = &*handle;
+        if mgr.is_on_battery(backlight::PowerLineStatus::from(line_status), charge_status) { 1 } else { 0 }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_backlight_on_lid_changed(
+    handle: *mut backlight::BacklightStateManager,
+    is_open: i32,
+    line_status: i32,
+    charge_status: i32,
+    out_turn_off: *mut i32,
+    out_brightness: *mut i32,
+) -> i32 {
+    crate::safe_ffi(0, || {
+        if !crate::is_valid_mut_ptr(handle) || !is_valid_mut_buffer(out_turn_off) || !is_valid_mut_buffer(out_brightness) {
+            return 0;
+        }
+        let mgr = &mut *handle;
+        let (should_turn_off, brightness) = mgr.on_lid_changed(is_open != 0, backlight::PowerLineStatus::from(line_status), charge_status);
+        std::ptr::write_unaligned(out_turn_off, if should_turn_off { 1 } else { 0 });
+        std::ptr::write_unaligned(out_brightness, brightness);
+        1
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_backlight_on_suspend(
+    handle: *mut backlight::BacklightStateManager,
+    out_turn_off: *mut i32,
+    out_brightness: *mut i32,
+) -> i32 {
+    crate::safe_ffi(0, || {
+        if !crate::is_valid_mut_ptr(handle) || !is_valid_mut_buffer(out_turn_off) || !is_valid_mut_buffer(out_brightness) {
+            return 0;
+        }
+        let mgr = &mut *handle;
+        let (should_turn_off, brightness) = mgr.on_suspend();
+        std::ptr::write_unaligned(out_turn_off, if should_turn_off { 1 } else { 0 });
+        std::ptr::write_unaligned(out_brightness, brightness);
+        1
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_backlight_on_resume(
+    handle: *mut backlight::BacklightStateManager,
+    line_status: i32,
+    charge_status: i32,
+    out_turn_off: *mut i32,
+    out_brightness: *mut i32,
+) -> i32 {
+    crate::safe_ffi(0, || {
+        if !crate::is_valid_mut_ptr(handle) || !is_valid_mut_buffer(out_turn_off) || !is_valid_mut_buffer(out_brightness) {
+            return 0;
+        }
+        let mgr = &mut *handle;
+        let (should_turn_off, brightness) = mgr.on_resume(backlight::PowerLineStatus::from(line_status), charge_status);
+        std::ptr::write_unaligned(out_turn_off, if should_turn_off { 1 } else { 0 });
+        std::ptr::write_unaligned(out_brightness, brightness);
+        1
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_backlight_set_plugged_in(
+    handle: *mut backlight::BacklightStateManager,
+    plugged_in: i32,
+) -> i32 {
+    crate::safe_ffi(0, || {
+        if !crate::is_valid_mut_ptr(handle) {
+            return 0;
+        }
+        let mgr = &mut *handle;
+        mgr.set_is_plugged_in(match plugged_in {
+            1 => Some(true),
+            0 => Some(false),
+            _ => None,
+        });
+        1
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_backlight_set_saved_ac(
+    handle: *mut backlight::BacklightStateManager,
+    brightness: i32,
+) -> i32 {
+    crate::safe_ffi(0, || {
+        if !crate::is_valid_mut_ptr(handle) {
+            return 0;
+        }
+        let mgr = &mut *handle;
+        mgr.set_saved_ac_brightness(brightness);
+        1
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_backlight_set_manual_battery(
+    handle: *mut backlight::BacklightStateManager,
+    enabled: i32,
+    brightness: i32,
+) -> i32 {
+    crate::safe_ffi(0, || {
+        if !crate::is_valid_mut_ptr(handle) {
+            return 0;
+        }
+        let mgr = &mut *handle;
+        mgr.set_manual_backlight_on_battery(enabled != 0);
+        mgr.set_manual_battery_brightness(brightness);
+        1
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_backlight_set_idle_config(
+    handle: *mut backlight::BacklightStateManager,
+    timeout_sec: i32,
+    dimmed_percent: i32,
+) -> i32 {
+    crate::safe_ffi(0, || {
+        if !crate::is_valid_mut_ptr(handle) {
+            return 0;
+        }
+        let mgr = &mut *handle;
+        mgr.set_idle_timeout_seconds(timeout_sec);
+        mgr.set_dimmed_brightness_percent(dimmed_percent);
+        1
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_backlight_record_activity(
+    handle: *mut backlight::BacklightStateManager,
+) -> i32 {
+    crate::safe_ffi(0, || {
+        if !crate::is_valid_mut_ptr(handle) {
+            return 0;
+        }
+        let mgr = &mut *handle;
+        mgr.record_activity();
+        1
+    })
+}
+
+// ============================================================================
+// Tier 2: Native Background Process Scanner (GameSyncController)
+// ============================================================================
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_procsync_is_process_running(
+    name_ptr: *const u8,
+    name_len: i32,
+) -> i32 {
+    crate::safe_ffi(0, || {
+        let name = procsync::read_str(name_ptr, name_len);
+        if procsync::is_process_running(name) { 1 } else { 0 }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_procsync_get_foreground_process_name(
+    out: *mut u8,
+    out_capacity: i32,
+) -> i32 {
+    crate::safe_ffi(-1, || {
+        match procsync::get_foreground_process_name() {
+            Some(name) => procsync::copy_result(&name, out, out_capacity),
+            None => -1,
+        }
+    })
+}
+
+// ============================================================================
+// Tier 2: Battery Descriptor Parsing (WindowsBattery in AcerHardwareProtocols)
+// ============================================================================
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_battery_parse_info(
+    bytes: *const u8,
+    len: usize,
+    out_info: *mut battery::RawBatteryInfo,
+) -> i32 {
+    crate::safe_ffi(-1, || {
+        if !is_valid_buffer(bytes) || !is_valid_mut_buffer(out_info) || len < 36 {
+            return -1;
+        }
+        let slice = std::slice::from_raw_parts(bytes, len);
+        match battery::parse_battery_info(slice) {
+            Some(info) => {
+                std::ptr::write_unaligned(out_info, info);
+                0
+            }
+            None => -1,
+        }
+    })
+}
+
+// ============================================================================
+// Tier 2: UEFI Firmware Variable Scanner (BiosUefiPowerScanner)
+// ============================================================================
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_uefi_scan_power_and_locks(
+    aml: *const u8,
+    aml_len: usize,
+    out_cfg: *mut uefi::UefiPowerConfig,
+) -> i32 {
+    crate::safe_ffi(-1, || {
+        if !is_valid_buffer(aml) || !is_valid_mut_buffer(out_cfg) || aml_len == 0 {
+            return -1;
+        }
+        let slice = std::slice::from_raw_parts(aml, aml_len);
+        match uefi::scan_power_and_locks(slice) {
+            Some(cfg) => {
+                std::ptr::write_unaligned(out_cfg, cfg);
+                0
+            }
+            None => -1,
+        }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_uefi_parse_variable_power(
+    data: *const u8,
+    data_len: usize,
+    out_cfg: *mut uefi::UefiPowerConfig,
+) -> i32 {
+    crate::safe_ffi(-1, || {
+        if !is_valid_buffer(data) || !is_valid_mut_buffer(out_cfg) || data_len == 0 {
+            return -1;
+        }
+        let slice = std::slice::from_raw_parts(data, data_len);
+        match uefi::parse_uefi_variable_power(slice) {
+            Some(cfg) => {
+                std::ptr::write_unaligned(out_cfg, cfg);
+                0
+            }
+            None => -1,
         }
     })
 }

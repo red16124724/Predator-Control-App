@@ -17443,6 +17443,12 @@ namespace PredatorControlApp
 
         private void ShowApp()
         {
+            if (IsDisposed || Disposing || _isClosing) return;
+            if (InvokeRequired)
+            {
+                SafeBeginInvoke(ShowApp);
+                return;
+            }
             _allowVisible = true;
             this.Enabled = true;
             this.Show();
@@ -17456,6 +17462,12 @@ namespace PredatorControlApp
 
         private void HideApp()
         {
+            if (IsDisposed || Disposing || _isClosing) return;
+            if (InvokeRequired)
+            {
+                SafeBeginInvoke(HideApp);
+                return;
+            }
             try
             {
                 this.TopMost = false;
@@ -17512,6 +17524,8 @@ namespace PredatorControlApp
 
             base.OnResize(e);
 
+            if (IsDisposed || Disposing || _isClosing) return;
+
             if (WindowState == FormWindowState.Minimized)
 
             {
@@ -17562,6 +17576,12 @@ namespace PredatorControlApp
 
         private void ToggleWindowVisibility()
         {
+            if (IsDisposed || Disposing || _isClosing) return;
+            if (InvokeRequired)
+            {
+                SafeBeginInvoke(ToggleWindowVisibility);
+                return;
+            }
             if ((DateTime.UtcNow - _lastToggleWindowUtc).TotalMilliseconds < 350)
                 return;
             _lastToggleWindowUtc = DateTime.UtcNow;
@@ -18195,6 +18215,7 @@ namespace PredatorControlApp
         protected override void OnLoad(EventArgs e)
     {
         base.OnLoad(e);
+        try { _wmi?.TurnOffLogo(); } catch { }
         if (!_startupLightingRestored)
         {
             _startupLightingRestored = true;
@@ -18233,6 +18254,8 @@ namespace PredatorControlApp
         if (_isClosing || IsDisposed) return;
         var settings = _appSettings;
         if (settings == null) return;
+
+        try { _wmi?.TurnOffLogo(); } catch { }
 
         bool onBattery = false;
         try

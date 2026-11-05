@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.5.5 Predator Helios Neo 16 & 18 (PHN16/PHN18) RGB & Lid Logo Isolation Overhaul] - 2026-11-05
+
+Direct Win32 HID ENEK5130 communication, elimination of periodic keyboard blinking on PHN16/PHN18 models, complete purge of lid logo queries, and permanent dark state enforcement:
+
+### Added & Improved
+- **Direct Win32 HID Client (`EnekRgbClient`)**:
+  - Implemented direct Windows HID communication with ENEK5130 RGB controller (`HID\VID_...&ENEK5130`).
+  - Utilizes 11-byte Feature Report `0xA4` targeting `0x21` for 4-zone static RGB and dynamic hardware effects (`Breathing`, `Neon`, `Wave`, `Zoom`, `Meteor`).
+  - Completely bypasses ACPI-WMI lighting methods (`SetGamingKBBacklight`, `SetGamingLED`, `SetGamingRgbKb`, `SetGamingLEDColor`, `SetGamingLEDBehavior`) when ENEK hardware is detected, eliminating EC bus contention and reset loops causing periodic keyboard blinking and RGB failure on PHN16/PHN18 models.
+- **Complete Purge of Lid Logo Queries**:
+  - Removed all calls and runtime queries to `GetGamingLED` and `GetGamingLEDBehavior` across the entire application codebase.
+  - Zero queries are performed against the laptop lid logo at any point in the application lifecycle.
+- **Permanent Laptop Lid Logo Dark State Enforcement**:
+  - Added dual-transport `TurnOffLogo()` dispatched via direct ENEK HID (Target `0x83`, Effect `0x01`, Brightness `0`) and WMI fallback (`SetGamingLEDBehavior` with opcode `0x06ul | (0x01ul << 8)`, `SetGamingLEDColor` `0x01ul`).
+  - Dispatched `TurnOffLogo()` automatically at application boot, multi-pass hardware sync passes (0ms, 1500ms, 4000ms), zone color changes, and backlight shutdown, ensuring the lid logo remains completely off at all times.
+- **Test Suite**:
+  - Added `EnekRgbAndLogoIsolationTests` verifying report ID packet structure, zone bitmasks, dynamic effect opcodes, WMI bypass, and zero-query static audit.
+
+---
+
+## [1.5.5 Tier 1 & 2 Native Rust Migration & Hardening Overhaul] - 2026-11-05
+
+Comprehensive migration of candidate high-ROI logic into native Rust (predator_core), full-codebase bug scan, thread safety hardening, and stress testing:
+
+### Added & Migrated to Rust (predator_core)
+- **Backlight State Machine FSM** (predator_core/src/backlight.rs): Atomic state transitions across lid, sleep, AC/battery, and idle dimming.
+- **CPU Architecture & TDP Power Matrix** (predator_core/src/cpu_spec.rs): Token-based hardware SKU classification (Intel Core Ultra, Raptor/Alder Lake, AMD Ryzen) and safe proportional TDP estimation with zero startup regexes.
+- **8-Point Monotonic Fan Curve Normalizer** (predator_core/src/curve.rs): Byte-identical temperature sorting, gap enforcement, and monotonic speed clamping across UI and background followers.
+- **Native Process Scanner** (predator_core/src/procsync.rs): Toolhelp32 process snapshotting with zero GC heap allocations and zero string marshaling.
+- **Battery Descriptor Parsing** (predator_core/src/battery.rs): 36-byte raw SetupAPI buffer unpacking and memory-safe wear-level calculation.
+- **UEFI Firmware Variable Scanner** (predator_core/src/uefi.rs): AML package and NVRAM power configuration extraction.
+
+### Hardened & Fixed
+- **WinForms UI Marshaling & GDI+ Safety**: Guarded UI visibility and resize dispatches with InvokeRequired and disposal checks; eliminated GDI+ ArgumentException on degenerate bounds in FanCurveGraph.
+- **Hardware Protocols & Concurrency**: Resolved lock inversion deadlock in CurveFollower; fixed permanent delegate memory leak in PredatorNativeCore with UnpinCallback; protected Toolhelp32 snapshots with SafeFileHandle.
+- **Rust C-ABI & Memory Protection**: Audited all 121 C-ABI exports with safe_ffi (panic catch_unwind); enforced 64-bit user address space bounds checks preventing STATUS_ACCESS_VIOLATION SEH hardware faults; added Mutex wrapping to HistoryHandle; eliminated RGB blend mutable aliasing.
+- **Test Suite**: Expanded test coverage to 2,136 passing tests in .NET suite and 223 passing tests in Rust crate.
+
+---
+
 ## [1.5.5 Keyboard Brightness Persistence & Lid Logo Detachment Update] - 2026-11-04
 
 Targeted reliability update ensuring persistent keyboard brightness across power cycles and complete detachment of the exterior laptop lid logo RGB:

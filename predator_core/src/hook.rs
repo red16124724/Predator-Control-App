@@ -138,7 +138,7 @@ impl HookState {
     pub unsafe fn set_shortcuts(&mut self, entries: *const ShortcutEntry, count: i32) {
         self.shortcuts = [ShortcutEntry::EMPTY; MAX_SHORTCUTS];
         self.shortcut_count = 0;
-        if (entries as usize) < 0x10000 || count <= 0 {
+        if !crate::is_valid_buffer(entries) || count <= 0 {
             return;
         }
         let n = (count as usize).min(MAX_SHORTCUTS);

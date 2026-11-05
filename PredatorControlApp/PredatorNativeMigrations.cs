@@ -37,6 +37,57 @@ namespace PredatorControlApp
         public int RgbB;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct NativePowerPair
+    {
+        public int Pl1Watts;
+        public int Pl2Watts;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct NativeCpuHardwareSpec
+    {
+        public uint Family;
+        public int BaseTdpWatts;
+        public int MinPowerWatts;
+        public int MaxPl1Watts;
+        public int MaxPl2Watts;
+        public NativePowerPair Eco;         // 0x06
+        public NativePowerPair Quiet;       // 0x00
+        public NativePowerPair Balanced;    // 0x01
+        public NativePowerPair Performance; // 0x04
+        public NativePowerPair Turbo;       // 0x05
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct NativeCurvePoint
+    {
+        public int X;
+        public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct NativeRawBatteryInfo
+    {
+        public uint Capabilities;
+        public byte Technology;
+        public uint DesignedCapacity;
+        public uint FullChargedCapacity;
+        public uint CycleCount;
+        public double WearLevelPercent;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct NativeUefiPowerConfig
+    {
+        public uint Pl1Milliwatts;
+        public uint Pl2Milliwatts;
+        public uint Pl1Watts;
+        public uint Pl2Watts;
+        [MarshalAs(UnmanagedType.I1)] public bool OverclockingLock;
+        [MarshalAs(UnmanagedType.I1)] public bool CfgLock;
+    }
+
     /// <summary>
     /// Managed surface for the subsystems whose logic now lives in
     /// <c>predator_core</c>: shortcut rules, battery ETA, history storage,
@@ -208,6 +259,70 @@ namespace PredatorControlApp
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         private static extern int predator_pipeguard_is_valid([In] byte[] input, int inputLen);
+
+        
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_curve_normalize([In] NativeCurvePoint[] inPts, UIntPtr inLen, [Out] NativeCurvePoint[] outPts, UIntPtr outCap);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_cpuspec_detect([In] byte[] modelBytes, int modelLen, out NativeCpuHardwareSpec outSpec);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_cpuspec_estimate_proportional_limits(int tdpWatts, byte mode, out int outPl1, out int outPl2);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern IntPtr predator_backlight_create(int initialAcBrightness);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern void predator_backlight_destroy(IntPtr handle);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_backlight_evaluate_idle(IntPtr handle, long nowSec, out int outShouldDim, out int outBrightness);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_backlight_on_activity(IntPtr handle, out int outShouldRestore, out int outBrightness);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_backlight_is_on_battery(IntPtr handle, int lineStatus, int chargeStatus);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_backlight_on_lid_changed(IntPtr handle, int isOpen, int lineStatus, int chargeStatus, out int outTurnOff, out int outBrightness);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_backlight_on_suspend(IntPtr handle, out int outTurnOff, out int outBrightness);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_backlight_on_resume(IntPtr handle, int lineStatus, int chargeStatus, out int outTurnOff, out int outBrightness);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_backlight_set_plugged_in(IntPtr handle, int pluggedIn);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_backlight_set_saved_ac(IntPtr handle, int brightness);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_backlight_set_manual_battery(IntPtr handle, int enabled, int brightness);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_backlight_set_idle_config(IntPtr handle, int timeoutSec, int dimmedPercent);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_backlight_record_activity(IntPtr handle);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_procsync_is_process_running([In] byte[] namePtr, int nameLen);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_procsync_get_foreground_process_name([Out] byte[] outBuffer, int outCapacity);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_battery_parse_info([In] byte[] bytes, UIntPtr len, out NativeRawBatteryInfo outInfo);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_uefi_scan_power_and_locks([In] byte[] aml, UIntPtr amlLen, out NativeUefiPowerConfig outCfg);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_uefi_parse_variable_power([In] byte[] data, UIntPtr dataLen, out NativeUefiPowerConfig outCfg);
 
         #endregion
 
@@ -609,6 +724,260 @@ namespace PredatorControlApp
             catch { return Unavailable; }
         }
 
+
         #endregion
+
+        #region Tier 1: 8-Point Fan Curve Normalizer
+
+        public static bool TryNormalizeCurve(System.Collections.Generic.IReadOnlyList<System.Drawing.Point>? points, out System.Collections.Generic.List<System.Drawing.Point> normalized)
+        {
+            normalized = new System.Collections.Generic.List<System.Drawing.Point>();
+            if (!Available || points == null || points.Count < 2) return false;
+            try
+            {
+                var inArr = new NativeCurvePoint[points.Count];
+                for (int i = 0; i < points.Count; i++)
+                {
+                    inArr[i] = new NativeCurvePoint { X = points[i].X, Y = points[i].Y };
+                }
+                var outArr = new NativeCurvePoint[8];
+                int res = predator_curve_normalize(inArr, (UIntPtr)inArr.Length, outArr, (UIntPtr)outArr.Length);
+                if (res != 8) return false;
+                for (int i = 0; i < 8; i++)
+                {
+                    normalized.Add(new System.Drawing.Point(outArr[i].X, outArr[i].Y));
+                }
+                return true;
+            }
+            catch { return false; }
+        }
+
+        #endregion
+
+        #region Tier 1: CPU Spec & Power Limits
+
+        public static bool TryDetectCpuSpec(string? model, out NativeCpuHardwareSpec spec)
+        {
+            spec = default;
+            if (!Available) return false;
+            try
+            {
+                byte[] bytes = Encoding.UTF8.GetBytes(model ?? string.Empty);
+                return predator_cpuspec_detect(bytes, bytes.Length, out spec) == 0;
+            }
+            catch { return false; }
+        }
+
+        public static bool TryEstimateProportionalLimits(int tdpWatts, byte mode, out int pl1, out int pl2)
+        {
+            pl1 = 0;
+            pl2 = 0;
+            if (!Available) return false;
+            try
+            {
+                return predator_cpuspec_estimate_proportional_limits(tdpWatts, mode, out pl1, out pl2) == 0;
+            }
+            catch { return false; }
+        }
+
+        #endregion
+
+        #region Tier 1: Backlight State Machine Native Engine
+
+        public static IntPtr BacklightCreate(int initialAcBrightness)
+        {
+            if (!Available) return IntPtr.Zero;
+            try { return predator_backlight_create(initialAcBrightness); }
+            catch { return IntPtr.Zero; }
+        }
+
+        public static void BacklightDestroy(IntPtr handle)
+        {
+            if (handle == IntPtr.Zero || !Available) return;
+            try { predator_backlight_destroy(handle); } catch { }
+        }
+
+        public static bool BacklightEvaluateIdle(IntPtr handle, long nowSec, out bool shouldDim, out int brightness)
+        {
+            shouldDim = false;
+            brightness = 0;
+            if (handle == IntPtr.Zero || !Available) return false;
+            try
+            {
+                int res = predator_backlight_evaluate_idle(handle, nowSec, out int dim, out brightness);
+                shouldDim = dim != 0;
+                return res != 0;
+            }
+            catch { return false; }
+        }
+
+        public static bool BacklightOnActivity(IntPtr handle, out bool shouldRestore, out int brightness)
+        {
+            shouldRestore = false;
+            brightness = 0;
+            if (handle == IntPtr.Zero || !Available) return false;
+            try
+            {
+                int res = predator_backlight_on_activity(handle, out int restore, out brightness);
+                shouldRestore = restore != 0;
+                return res != 0;
+            }
+            catch { return false; }
+        }
+
+        public static int BacklightIsOnBattery(IntPtr handle, int lineStatus, int chargeStatus)
+        {
+            if (handle == IntPtr.Zero || !Available) return Unavailable;
+            try { return predator_backlight_is_on_battery(handle, lineStatus, chargeStatus); }
+            catch { return Unavailable; }
+        }
+
+        public static bool BacklightOnLidChanged(IntPtr handle, bool isOpen, int lineStatus, int chargeStatus, out bool shouldTurnOff, out int targetBrightness)
+        {
+            shouldTurnOff = false;
+            targetBrightness = 0;
+            if (handle == IntPtr.Zero || !Available) return false;
+            try
+            {
+                int res = predator_backlight_on_lid_changed(handle, isOpen ? 1 : 0, lineStatus, chargeStatus, out int off, out targetBrightness);
+                shouldTurnOff = off != 0;
+                return res != 0;
+            }
+            catch { return false; }
+        }
+
+        public static bool BacklightOnSuspend(IntPtr handle, out bool shouldTurnOff, out int targetBrightness)
+        {
+            shouldTurnOff = false;
+            targetBrightness = 0;
+            if (handle == IntPtr.Zero || !Available) return false;
+            try
+            {
+                int res = predator_backlight_on_suspend(handle, out int off, out targetBrightness);
+                shouldTurnOff = off != 0;
+                return res != 0;
+            }
+            catch { return false; }
+        }
+
+        public static bool BacklightOnResume(IntPtr handle, int lineStatus, int chargeStatus, out bool shouldTurnOff, out int targetBrightness)
+        {
+            shouldTurnOff = false;
+            targetBrightness = 0;
+            if (handle == IntPtr.Zero || !Available) return false;
+            try
+            {
+                int res = predator_backlight_on_resume(handle, lineStatus, chargeStatus, out int off, out targetBrightness);
+                shouldTurnOff = off != 0;
+                return res != 0;
+            }
+            catch { return false; }
+        }
+
+        public static void BacklightSetPluggedIn(IntPtr handle, bool? pluggedIn)
+        {
+            if (handle == IntPtr.Zero || !Available) return;
+            try
+            {
+                int val = pluggedIn.HasValue ? (pluggedIn.Value ? 1 : 0) : -1;
+                predator_backlight_set_plugged_in(handle, val);
+            }
+            catch { }
+        }
+
+        public static void BacklightSetSavedAc(IntPtr handle, int brightness)
+        {
+            if (handle == IntPtr.Zero || !Available) return;
+            try { predator_backlight_set_saved_ac(handle, brightness); } catch { }
+        }
+
+        public static void BacklightSetManualBattery(IntPtr handle, bool enabled, int brightness)
+        {
+            if (handle == IntPtr.Zero || !Available) return;
+            try { predator_backlight_set_manual_battery(handle, enabled ? 1 : 0, brightness); } catch { }
+        }
+
+        public static void BacklightSetIdleConfig(IntPtr handle, int timeoutSec, int dimmedPercent)
+        {
+            if (handle == IntPtr.Zero || !Available) return;
+            try { predator_backlight_set_idle_config(handle, timeoutSec, dimmedPercent); } catch { }
+        }
+
+        public static void BacklightRecordActivity(IntPtr handle)
+        {
+            if (handle == IntPtr.Zero || !Available) return;
+            try { predator_backlight_record_activity(handle); } catch { }
+        }
+
+        #endregion
+
+        #region Tier 2: Background Process Scanner
+
+        public static bool IsProcessRunning(string exeName)
+        {
+            if (!Available || string.IsNullOrWhiteSpace(exeName)) return false;
+            try
+            {
+                byte[] bytes = Encoding.UTF8.GetBytes(exeName.Trim());
+                return predator_procsync_is_process_running(bytes, bytes.Length) == 1;
+            }
+            catch { return false; }
+        }
+
+        public static string? GetForegroundProcessName()
+        {
+            if (!Available) return null;
+            try
+            {
+                byte[] buf = new byte[512];
+                int written = predator_procsync_get_foreground_process_name(buf, buf.Length);
+                return written > 0 ? Encoding.UTF8.GetString(buf, 0, written) : null;
+            }
+            catch { return null; }
+        }
+
+        #endregion
+
+        #region Tier 2: Battery Descriptor Parsing
+
+        public static bool TryParseBatteryInfo(byte[] rawBytes, out NativeRawBatteryInfo info)
+        {
+            info = default;
+            if (!Available || rawBytes == null || rawBytes.Length < 36) return false;
+            try
+            {
+                return predator_battery_parse_info(rawBytes, (UIntPtr)rawBytes.Length, out info) == 0;
+            }
+            catch { return false; }
+        }
+
+        #endregion
+
+        #region Tier 2: UEFI Firmware Scanner
+
+        public static bool TryScanUefiPowerAndLocks(byte[] aml, out NativeUefiPowerConfig cfg)
+        {
+            cfg = default;
+            if (!Available || aml == null || aml.Length == 0) return false;
+            try
+            {
+                return predator_uefi_scan_power_and_locks(aml, (UIntPtr)aml.Length, out cfg) == 0;
+            }
+            catch { return false; }
+        }
+
+        public static bool TryParseUefiVariablePower(byte[] data, out NativeUefiPowerConfig cfg)
+        {
+            cfg = default;
+            if (!Available || data == null || data.Length == 0) return false;
+            try
+            {
+                return predator_uefi_parse_variable_power(data, (UIntPtr)data.Length, out cfg) == 0;
+            }
+            catch { return false; }
+        }
+
+        #endregion
+
     }
 }

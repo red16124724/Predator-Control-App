@@ -74,12 +74,14 @@ pub unsafe fn project_series(
     max: f64,
     out: *mut f32,
 ) -> i32 {
-    if (samples as usize) < 0x10000
-        || (out as usize) < 0x10000
-        || count <= 0
+    if count <= 0
         || count > 100_000
         || width <= 0.0
         || height <= 0.0
+        || !width.is_finite()
+        || !height.is_finite()
+        || !crate::is_valid_buffer_range(samples, count as usize)
+        || !crate::is_valid_mut_buffer_range(out, (count as usize).saturating_mul(2))
     {
         return 0;
     }

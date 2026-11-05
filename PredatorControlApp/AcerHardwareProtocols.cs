@@ -978,6 +978,31 @@ namespace PredatorControlApp
                 ? cpuModel.Trim()
                 : (OperatingSystem.IsWindows() ? HardwareIdentity.ReadCpuModel() : "Intel Core Processor");
 
+            if (PredatorNativeMigrations.TryDetectCpuSpec(rawModel, out var nativeSpec))
+            {
+                var fam = (CpuArchitectureFamily)nativeSpec.Family;
+                var modeLimits = new Dictionary<byte, (int, int)>
+                {
+                    { 0x06, (nativeSpec.Eco.Pl1Watts, nativeSpec.Eco.Pl2Watts) },
+                    { 0x00, (nativeSpec.Quiet.Pl1Watts, nativeSpec.Quiet.Pl2Watts) },
+                    { 0x01, (nativeSpec.Balanced.Pl1Watts, nativeSpec.Balanced.Pl2Watts) },
+                    { 0x04, (nativeSpec.Performance.Pl1Watts, nativeSpec.Performance.Pl2Watts) },
+                    { 0x05, (nativeSpec.Turbo.Pl1Watts, nativeSpec.Turbo.Pl2Watts) },
+                };
+                return new CpuHardwareSpec
+                {
+                    CpuModel = rawModel,
+                    Architecture = GetArchitectureDescription(fam),
+                    Family = fam,
+                    BaseTdpWatts = nativeSpec.BaseTdpWatts,
+                    MinPowerWatts = nativeSpec.MinPowerWatts,
+                    MaxPl1Watts = nativeSpec.MaxPl1Watts,
+                    MaxPl2Watts = nativeSpec.MaxPl2Watts,
+                    IsDynamicDetection = true,
+                    DefaultModePowerLimits = modeLimits,
+                };
+            }
+
             string upper = rawModel.ToUpperInvariant();
 
             // 1. AMD Ryzen architectures
@@ -1088,6 +1113,22 @@ namespace PredatorControlApp
             return CreateSpec(rawModel, "Intel Core Processor (Mobile)", CpuArchitectureFamily.GenericIntel, 45, 12, 95, 115);
         }
 
+        private static string GetArchitectureDescription(CpuArchitectureFamily family) => family switch
+        {
+            CpuArchitectureFamily.IntelCoreUltraSeries1 => "Intel Meteor Lake (Core Ultra Series 1)",
+            CpuArchitectureFamily.IntelCoreUltraSeries2 => "Intel Core Ultra Series 2 (Arrow Lake / Lunar Lake)",
+            CpuArchitectureFamily.IntelCoreHx => "Intel Raptor Lake / Alder Lake HX",
+            CpuArchitectureFamily.IntelCoreH => "Intel Core H-Series (High Performance Mobile)",
+            CpuArchitectureFamily.IntelCoreU => "Intel Core U-Series (Ultra Low Power Mobile)",
+            CpuArchitectureFamily.IntelCoreDesktop => "Intel Core Desktop (K / Enthusiast)",
+            CpuArchitectureFamily.AmdRyzenHx => "AMD Ryzen HX (High Performance Mobile)",
+            CpuArchitectureFamily.AmdRyzenHs => "AMD Ryzen HS (Slim & High Performance)",
+            CpuArchitectureFamily.AmdRyzenH => "AMD Ryzen H-Series (High Performance Mobile)",
+            CpuArchitectureFamily.AmdRyzenU => "AMD Ryzen U-Series (Ultra Low Power Mobile)",
+            CpuArchitectureFamily.GenericAmd => "AMD Ryzen Processor (Mobile)",
+            _ => "Intel Core Processor (Mobile)"
+        };
+
         private static CpuHardwareSpec CreateSpec(string model, string arch, CpuArchitectureFamily family, int baseTdp, int minPower, int maxPl1, int maxPl2)
         {
             var modeDefaults = ComputeModeDefaults(baseTdp, minPower, maxPl1, maxPl2);
@@ -1138,6 +1179,11 @@ namespace PredatorControlApp
 
         public static (int Pl1, int Pl2) EstimateProportionalLimits(int tdpWatts, byte mode)
         {
+            if (PredatorNativeMigrations.TryEstimateProportionalLimits(tdpWatts, mode, out int nativePl1, out int nativePl2))
+            {
+                return (nativePl1, nativePl2);
+            }
+
             int tdp = Math.Clamp(tdpWatts, 5, 250);
             int minP = Math.Max(5, (int)Math.Round(tdp * 0.20));
             int maxP2 = (int)Math.Round(tdp * 2.55);
@@ -1276,15 +1322,25 @@ namespace PredatorControlApp
                         try
                         {
                             dev = new EcHidDevice { _deviceHandle = handle, _globalLock = mtx, _reportLength = repLen, _wasEverOpened = true };
-                            if (dev.ReadVersion() != null) return dev;
-                            dev.Dispose();
-                            dev = null;
+                            if (dev.ReadVersion() != null)
+                            {
+                                var opened = dev;
+                                dev = null; // ownership transferred to caller
+                                return opened;
+                            }
                         }
-                        catch
+                        catch { }
+                        finally
                         {
-                            dev?.Dispose();
-                            mtx?.Dispose();
-                            handle.Dispose();
+                            if (dev != null)
+                            {
+                                dev.Dispose();
+                            }
+                            else
+                            {
+                                try { mtx?.Dispose(); } catch { }
+                                try { handle.Dispose(); } catch { }
+                            }
                         }
                     }
                     catch
@@ -1439,7 +1495,7 @@ namespace PredatorControlApp
                     {
                         if (_globalLock != null)
                         {
-                            try { lockTaken = _globalLock.WaitOne(500); }
+                            try { lockTaken = _globalLock.WaitOne(200); }
                             catch (AbandonedMutexException) { lockTaken = true; }
                         }
                         if (_globalLock != null && !lockTaken) continue;
@@ -1484,6 +1540,9 @@ namespace PredatorControlApp
 
                     if (needReopen)
                     {
+                        try { _deviceHandle?.Dispose(); } catch { }
+                        _deviceHandle = null;
+                        _lastReopenAttempt = DateTime.MinValue;
                         Reopen();
                     }
                 }

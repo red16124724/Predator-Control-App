@@ -175,7 +175,12 @@ fn interpolate_sorted_slice(pts: &[Point], temp: i32) -> i32 {
 
     // Division-by-zero guard for identical endpoints (x1 == x0)
     if pts[0].temp == pts[last].temp {
-        return pts.iter().map(|p| p.speed).max().unwrap_or(pts[0].speed).clamp(MIN_FAN_SPEED, MAX_FAN_SPEED);
+        return pts
+            .iter()
+            .map(|p| p.speed)
+            .max()
+            .unwrap_or(pts[0].speed)
+            .clamp(MIN_FAN_SPEED, MAX_FAN_SPEED);
     }
 
     for window in pts.windows(2) {
@@ -249,7 +254,12 @@ fn interpolate_sorted_slice_f64(pts: &[Point], temp: f64) -> i32 {
 
     // Division-by-zero guard for identical endpoints (x1 == x0)
     if (pts[last].temp as f64 - pts[0].temp as f64).abs() <= f64::EPSILON {
-        return pts.iter().map(|p| p.speed).max().unwrap_or(pts[0].speed).clamp(MIN_FAN_SPEED, MAX_FAN_SPEED);
+        return pts
+            .iter()
+            .map(|p| p.speed)
+            .max()
+            .unwrap_or(pts[0].speed)
+            .clamp(MIN_FAN_SPEED, MAX_FAN_SPEED);
     }
 
     for window in pts.windows(2) {
@@ -274,7 +284,6 @@ fn interpolate_sorted_slice_f64(pts: &[Point], temp: f64) -> i32 {
     }
     pts[last].speed.clamp(MIN_FAN_SPEED, MAX_FAN_SPEED)
 }
-
 
 /// Curve follower for a single fan channel tracking temperature hysteresis and deadband.
 #[derive(Debug, Clone, PartialEq)]
@@ -343,7 +352,11 @@ impl FanCurveFollower {
 
         // Filter invalid sensor readings
         if raw_temp <= 0 {
-            let safe = self.current_speed.unwrap_or(DEFAULT_FALLBACK_SPEED).max(clamped_floor).clamp(MIN_FAN_SPEED, MAX_FAN_SPEED);
+            let safe = self
+                .current_speed
+                .unwrap_or(DEFAULT_FALLBACK_SPEED)
+                .max(clamped_floor)
+                .clamp(MIN_FAN_SPEED, MAX_FAN_SPEED);
             self.current_speed = Some(safe);
             return safe;
         }
@@ -401,7 +414,9 @@ impl FanCurveFollower {
         }
 
         // Enforce safety floor: final speed cannot fall below active safety floor
-        let final_speed = calculated.max(clamped_floor).clamp(MIN_FAN_SPEED, MAX_FAN_SPEED);
+        let final_speed = calculated
+            .max(clamped_floor)
+            .clamp(MIN_FAN_SPEED, MAX_FAN_SPEED);
         self.current_speed = Some(final_speed);
         final_speed
     }
@@ -412,7 +427,11 @@ impl FanCurveFollower {
 
         // Filter invalid sensor readings (<= 0, NaN, Inf) matching integer update
         if temp.is_nan() || temp.is_infinite() || temp <= 0.0 {
-            let safe = self.current_speed.unwrap_or(DEFAULT_FALLBACK_SPEED).max(clamped_floor).clamp(MIN_FAN_SPEED, MAX_FAN_SPEED);
+            let safe = self
+                .current_speed
+                .unwrap_or(DEFAULT_FALLBACK_SPEED)
+                .max(clamped_floor)
+                .clamp(MIN_FAN_SPEED, MAX_FAN_SPEED);
             self.current_speed = Some(safe);
             return safe;
         }
@@ -462,7 +481,9 @@ impl FanCurveFollower {
             }
         }
 
-        let final_speed = calculated.max(clamped_floor).clamp(MIN_FAN_SPEED, MAX_FAN_SPEED);
+        let final_speed = calculated
+            .max(clamped_floor)
+            .clamp(MIN_FAN_SPEED, MAX_FAN_SPEED);
         self.current_speed = Some(final_speed);
         final_speed
     }
@@ -550,24 +571,270 @@ impl FanCurveManager {
     }
 }
 
+pub const CONTROL_POINT_COUNT: usize = 8;
+pub const DEFAULT_TEMPS: [i32; 8] = [30, 50, 60, 70, 77, 85, 90, 100];
+
+pub const DEFAULT_CPU_POINTS: [Point; 8] = [
+    Point { temp: 30, speed: 0 },
+    Point { temp: 50, speed: 10 },
+    Point { temp: 60, speed: 20 },
+    Point { temp: 70, speed: 25 },
+    Point { temp: 77, speed: 30 },
+    Point { temp: 85, speed: 45 },
+    Point { temp: 90, speed: 60 },
+    Point { temp: 100, speed: 100 },
+];
+
+fn interpolate_clamped_resample(clamped: &[Point], temp: i32) -> i32 {
+    if temp <= clamped[0].temp {
+        return clamped[0].speed;
+    }
+    if temp >= clamped[clamped.len() - 1].temp {
+        return clamped[clamped.len() - 1].speed;
+    }
+    for window in clamped.windows(2) {
+        let p1 = window[0];
+        let p2 = window[1];
+        if temp >= p1.temp && temp <= p2.temp {
+            let span = p2.temp - p1.temp;
+            if span <= 0 {
+                return p2.speed;
+            }
+            let t = (temp - p1.temp) as f64 / span as f64;
+            let s1 = p1.speed as f64;
+            let s2 = p2.speed as f64;
+            return (s1 + t * (s2 - s1)).round() as i32;
+        }
+    }
+    clamped[clamped.len() - 1].speed
+}
+
+/// 8-point fan curve normalizer ported from FanCurveGraph.Normalize.
+pub fn normalize_curve(points: &[Point]) -> [Point; 8] {
+    if points.len() < 2 {
+        return DEFAULT_CPU_POINTS;
+    }
+
+    let mut clamped: Vec<Point> = points
+        .iter()
+        .map(|p| Point {
+            temp: p.temp.clamp(30, 100),
+            speed: p.speed.clamp(0, 100),
+        })
+        .collect();
+    clamped.sort_by_key(|p| p.temp);
+
+    if clamped.len() == CONTROL_POINT_COUNT {
+        let mut pts: [Point; 8] = [
+            clamped[0], clamped[1], clamped[2], clamped[3], clamped[4], clamped[5], clamped[6],
+            clamped[7],
+        ];
+        pts[0].temp = 30;
+        pts[CONTROL_POINT_COUNT - 1].temp = 100;
+
+        for i in 1..CONTROL_POINT_COUNT - 1 {
+            let min_x = pts[i - 1].temp + 1;
+            if pts[i].temp < min_x {
+                pts[i].temp = min_x;
+            }
+        }
+        for i in (1..CONTROL_POINT_COUNT - 1).rev() {
+            let max_x = pts[i + 1].temp - 1;
+            if pts[i].temp > max_x {
+                pts[i].temp = max_x;
+            }
+        }
+        for i in 1..CONTROL_POINT_COUNT - 1 {
+            let min_x = pts[i - 1].temp + 1;
+            if pts[i].temp < min_x {
+                pts[i].temp = min_x;
+            }
+        }
+        pts
+    } else {
+        let mut res = [Point::default(); 8];
+        for (i, &t) in DEFAULT_TEMPS.iter().enumerate() {
+            let spd = interpolate_clamped_resample(&clamped, t).clamp(0, 100);
+            res[i] = Point {
+                temp: t,
+                speed: spd,
+            };
+        }
+        res
+    }
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn test_normalize_curve_8_points_spacing_and_clamping() {
+        let raw = [
+            Point { temp: 10, speed: 5 },
+            Point {
+                temp: 35,
+                speed: 20,
+            },
+            Point {
+                temp: 40,
+                speed: 30,
+            },
+            Point {
+                temp: 50,
+                speed: 40,
+            },
+            Point {
+                temp: 60,
+                speed: 50,
+            },
+            Point {
+                temp: 70,
+                speed: 60,
+            },
+            Point {
+                temp: 80,
+                speed: 70,
+            },
+            Point {
+                temp: 120,
+                speed: 150,
+            },
+        ];
+        let norm = normalize_curve(&raw);
+        assert_eq!(norm[0].temp, 30);
+        assert_eq!(norm[0].speed, 5);
+        assert_eq!(norm[7].temp, 100);
+        assert_eq!(norm[7].speed, 100);
+        for i in 0..7 {
+            assert!(norm[i].temp < norm[i + 1].temp);
+        }
+    }
+
+    #[test]
+    fn test_normalize_curve_empty_and_single_point() {
+        let empty_norm = normalize_curve(&[]);
+        assert_eq!(empty_norm.len(), 8);
+        assert_eq!(empty_norm[0].temp, 30);
+        assert_eq!(empty_norm[7].temp, 100);
+
+        let single = [Point {
+            temp: 50,
+            speed: 60,
+        }];
+        let single_norm = normalize_curve(&single);
+        assert_eq!(single_norm.len(), 8);
+        assert_eq!(single_norm[0].temp, 30);
+        assert_eq!(single_norm[7].temp, 100);
+    }
+
+    #[test]
+    fn test_normalize_curve_resampling_arbitrary_points() {
+        let three_pts = [
+            Point {
+                temp: 30,
+                speed: 20,
+            },
+            Point {
+                temp: 60,
+                speed: 50,
+            },
+            Point {
+                temp: 100,
+                speed: 100,
+            },
+        ];
+        let norm = normalize_curve(&three_pts);
+        assert_eq!(norm.len(), 8);
+        assert_eq!(norm[0].temp, 30);
+        assert_eq!(norm[0].speed, 20);
+        assert_eq!(norm[7].temp, 100);
+        assert_eq!(norm[7].speed, 100);
+        for i in 0..8 {
+            assert_eq!(norm[i].temp, DEFAULT_TEMPS[i]);
+            assert!(norm[i].speed <= 100);
+        }
+    }
+
+    #[test]
+    fn test_normalize_curve_identical_temperatures() {
+        let raw = [
+            Point {
+                temp: 50,
+                speed: 20,
+            },
+            Point {
+                temp: 50,
+                speed: 30,
+            },
+            Point {
+                temp: 50,
+                speed: 40,
+            },
+            Point {
+                temp: 50,
+                speed: 50,
+            },
+            Point {
+                temp: 50,
+                speed: 60,
+            },
+            Point {
+                temp: 50,
+                speed: 70,
+            },
+            Point {
+                temp: 50,
+                speed: 80,
+            },
+            Point {
+                temp: 50,
+                speed: 90,
+            },
+        ];
+        let norm = normalize_curve(&raw);
+        assert_eq!(norm[0].temp, 30);
+        assert_eq!(norm[7].temp, 100);
+        for i in 0..7 {
+            assert!(norm[i].temp < norm[i + 1].temp);
+        }
+    }
     use super::*;
 
     #[test]
     fn test_zero_allocation_interpolation() {
         let pts = [
-            Point { temp: 40, speed: 20 },
-            Point { temp: 60, speed: 50 },
-            Point { temp: 80, speed: 80 },
-            Point { temp: 95, speed: 100 },
+            Point {
+                temp: 40,
+                speed: 20,
+            },
+            Point {
+                temp: 60,
+                speed: 50,
+            },
+            Point {
+                temp: 80,
+                speed: 80,
+            },
+            Point {
+                temp: 95,
+                speed: 100,
+            },
         ];
 
         // Empty points fallback
         assert_eq!(interpolate_curve(&[], 50), 50);
 
         // Single point
-        assert_eq!(interpolate_curve(&[Point { temp: 50, speed: 45 }], 30), 45);
+        assert_eq!(
+            interpolate_curve(
+                &[Point {
+                    temp: 50,
+                    speed: 45
+                }],
+                30
+            ),
+            45
+        );
 
         // Below first point clamped
         assert_eq!(interpolate_curve(&pts, 20), 20);
@@ -589,10 +856,22 @@ mod tests {
     #[test]
     fn test_unsorted_slice_fallback() {
         let unsorted = [
-            Point { temp: 95, speed: 100 },
-            Point { temp: 40, speed: 20 },
-            Point { temp: 80, speed: 80 },
-            Point { temp: 60, speed: 50 },
+            Point {
+                temp: 95,
+                speed: 100,
+            },
+            Point {
+                temp: 40,
+                speed: 20,
+            },
+            Point {
+                temp: 80,
+                speed: 80,
+            },
+            Point {
+                temp: 60,
+                speed: 50,
+            },
         ];
         assert_eq!(interpolate_curve(&unsorted, 50), 35);
         assert_eq!(interpolate_curve(&unsorted, 30), 20);
@@ -629,10 +908,22 @@ mod tests {
     fn test_hysteresis_tracking_and_safety_floor() {
         let mut follower = FanCurveFollower::new(3);
         let pts = [
-            Point { temp: 40, speed: 20 },
-            Point { temp: 60, speed: 50 },
-            Point { temp: 80, speed: 80 },
-            Point { temp: 100, speed: 100 },
+            Point {
+                temp: 40,
+                speed: 20,
+            },
+            Point {
+                temp: 60,
+                speed: 50,
+            },
+            Point {
+                temp: 80,
+                speed: 80,
+            },
+            Point {
+                temp: 100,
+                speed: 100,
+            },
         ];
 
         // 1. Initial sample heating
@@ -664,7 +955,16 @@ mod tests {
     #[test]
     fn test_multi_channel_manager() {
         let mut mgr = FanCurveManager::new(3);
-        let pts = [Point { temp: 40, speed: 20 }, Point { temp: 80, speed: 80 }];
+        let pts = [
+            Point {
+                temp: 40,
+                speed: 20,
+            },
+            Point {
+                temp: 80,
+                speed: 80,
+            },
+        ];
 
         let cpu_speed = mgr.update_channel(FanChannel::Cpu, 60, &pts, 10);
         assert!(cpu_speed >= 20);
@@ -682,9 +982,15 @@ mod tests {
     #[test]
     fn test_extreme_integer_temperatures_and_speeds_do_not_overflow() {
         let pts = [
-            Point { temp: i32::MIN, speed: i32::MIN },
+            Point {
+                temp: i32::MIN,
+                speed: i32::MIN,
+            },
             Point { temp: 0, speed: 50 },
-            Point { temp: i32::MAX, speed: i32::MAX },
+            Point {
+                temp: i32::MAX,
+                speed: i32::MAX,
+            },
         ];
         // At midpoints, f64 arithmetic ensures no integer overflow in debug mode
         let s1 = interpolate_curve(&pts, -100);

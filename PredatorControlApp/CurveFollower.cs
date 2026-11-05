@@ -120,6 +120,27 @@ namespace PredatorControlApp
 
         public int Update(double temperature, List<Point> curvePoints, int safetyFloorPercent)
         {
+            // Snapshot curve points BEFORE acquiring _syncLock to prevent lock-order inversion deadlocks
+            Point[]? safePoints = null;
+            if (curvePoints != null)
+            {
+                for (int retry = 0; retry < 5; retry++)
+                {
+                    try
+                    {
+                        lock (curvePoints)
+                        {
+                            safePoints = curvePoints.ToArray();
+                        }
+                        break;
+                    }
+                    catch
+                    {
+                        System.Threading.Thread.SpinWait(10);
+                    }
+                }
+            }
+
             lock (_syncLock)
             {
                 safetyFloorPercent = Math.Clamp(safetyFloorPercent, 0, 100);
@@ -140,39 +161,17 @@ namespace PredatorControlApp
                 }
 
                 // Native Rust Acceleration path
-                if (PredatorNativeCore.IsNativeCoreAvailable && _nativeHandle != IntPtr.Zero && curvePoints != null)
+                if (PredatorNativeCore.IsNativeCoreAvailable && _nativeHandle != IntPtr.Zero && safePoints != null && safePoints.Length > 0)
                 {
-                    NativeControlPoint[]? nativePts = null;
-                    for (int retry = 0; retry < 5; retry++)
+                    var nativePts = new NativeControlPoint[safePoints.Length];
+                    for (int i = 0; i < safePoints.Length; i++)
                     {
-                        try
-                        {
-                            lock (curvePoints)
-                            {
-                                int len = curvePoints.Count;
-                                if (len > 0)
-                                {
-                                    nativePts = new NativeControlPoint[len];
-                                    for (int i = 0; i < len; i++)
-                                    {
-                                        nativePts[i] = new NativeControlPoint(curvePoints[i].X, curvePoints[i].Y);
-                                    }
-                                }
-                            }
-                            break;
-                        }
-                        catch
-                        {
-                            System.Threading.Thread.SpinWait(10);
-                        }
+                        nativePts[i] = new NativeControlPoint(safePoints[i].X, safePoints[i].Y);
                     }
 
-                    if (nativePts != null && nativePts.Length > 0)
-                    {
-                        int nativeSpeed = PredatorNativeCore.CurveUpdate(_nativeHandle, temperature, nativePts, safetyFloorPercent);
-                        _current = nativeSpeed;
-                        return nativeSpeed;
-                    }
+                    int nativeSpeed = PredatorNativeCore.CurveUpdate(_nativeHandle, temperature, nativePts, safetyFloorPercent);
+                    _current = nativeSpeed;
+                    return nativeSpeed;
                 }
 
                 // Managed Fallback:
@@ -192,25 +191,6 @@ namespace PredatorControlApp
 
                 double tempToUse = _peakTemperature ?? temperature;
 
-                Point[]? safePoints = null;
-                if (curvePoints != null)
-                {
-                    for (int retry = 0; retry < 5; retry++)
-                    {
-                        try
-                        {
-                            lock (curvePoints)
-                            {
-                                safePoints = curvePoints.ToArray();
-                            }
-                            break;
-                        }
-                        catch
-                        {
-                            System.Threading.Thread.SpinWait(10);
-                        }
-                    }
-                }
                 var pointsList = safePoints != null ? new List<Point>(safePoints) : curvePoints;
                 int calculatedPercent = Form1.InterpolateCurve(pointsList, (int)Math.Round(tempToUse));
                 calculatedPercent = Math.Clamp(calculatedPercent, 0, 100);

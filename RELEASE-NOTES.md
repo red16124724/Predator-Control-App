@@ -26,6 +26,12 @@ Version 1.5.5 brings a comprehensive codebase audit, bug fix, and stabilization 
 - **Settings & Background Resilience**: Added typed registry conversion fallbacks, non-blocking TCP reconnect cooldown in background service client, and cancellation token propagation.
 - **100% Full Test Pass Rate**: Full suite passes all 2,092 managed tests and 189 native Rust unit and FFI fuzz tests (0 failed, 0 skipped).
 
+### Predator Helios Neo 16 & 18 (PHN16/PHN18) RGB & Lid Logo Isolation (Update 2026-11-05)
+- **Direct Win32 HID Client (`EnekRgbClient`)**: Direct HID communication with ENEK5130 RGB controller (`HID\VID_...&ENEK5130`) via 11-byte report ID `0xA4` target `0x21`. Eliminates the periodic keyboard blinking and RGB setting failure on PHN16 and PHN18 models caused by EC bus contention and ACPI-WMI resets.
+- **Zero Lid Logo Queries**: Completely purged `GetGamingLED` and `GetGamingLEDBehavior` from application code. No queries are performed against the lid logo across the application lifetime.
+- **Permanent Laptop Lid Logo Shut-Off**: Implemented `TurnOffLogo()` across ENEK direct HID (Target `0x83`, Effect `0x01`, Brightness `0`) and WMI fallback (`SetGamingLEDBehavior` 0x06 | 0x0100, `SetGamingLEDColor` 0x01ul). Dispatched at app startup, hardware sync retries, zone color updates, and backlight shutdown, ensuring the exterior lid logo remains completely dark at all times.
+- **2,144 Managed Tests Passed**: Full solution test suite verified clean across 2,144 managed tests and 223 native Rust unit/stress tests.
+
 ### Keyboard Brightness Persistence & Lid Logo Detachment (Update 2026-11-04)
 - **Keyboard Brightness Persistence Across Reboot & Fast Startup**: Fully synchronized `KeyboardBrightnessLevel` and `RgbBrightness` settings across `AppSettings`, registry keys (`HKCU\SOFTWARE\PredatorControl`), and UI sliders. Configured immediate registry flush on slider commit (`ValueCommitted`) to eliminate race conditions and prevent brightness from reverting to 100% on cold boot, Windows Fast Startup, ACPI power transitions (sleep/resume), session unlock, or application restart.
 - **Complete Detachment of Laptop Lid Logo RGB**: Completely detached laptop lid logo RGB from application lighting routines by eliminating `SetGamingLEDColor` zone `0x01` logo payloads and OpenRGB device 0 triggers. The laptop lid logo is now fully decoupled from application lighting profiles, leaving it permanently under OEM hardware default/BIOS control without interference.

@@ -14,7 +14,7 @@ use std::slice;
 /// # Safety
 /// `input` must be valid for `input_len` bytes; `out` for `out_cap` bytes.
 pub unsafe fn copy_result(text: &str, out: *mut u8, out_cap: i32) -> i32 {
-    if (out as usize) < 0x10000 || out_cap <= 0 {
+    if !crate::is_valid_mut_buffer(out) || out_cap <= 0 {
         return -1;
     }
     let bytes = text.as_bytes();
@@ -30,7 +30,7 @@ pub unsafe fn copy_result(text: &str, out: *mut u8, out_cap: i32) -> i32 {
 /// # Safety
 /// `ptr` must be valid for `len` bytes when `len` is positive.
 pub unsafe fn read_str<'a>(ptr: *const u8, len: i32) -> &'a str {
-    if (ptr as usize) < 0x10000 || len <= 0 || len > 100_000 {
+    if !crate::is_valid_buffer(ptr) || len <= 0 || len > 100_000 {
         return "";
     }
     std::str::from_utf8(slice::from_raw_parts(ptr, len as usize)).unwrap_or("")
@@ -137,6 +137,133 @@ pub fn sanitize_profile(input: &ProfileValues) -> ProfileValues {
         rgb_r: clamp_or_unset(input.rgb_r, 0, 255),
         rgb_g: clamp_or_unset(input.rgb_g, 0, 255),
         rgb_b: clamp_or_unset(input.rgb_b, 0, 255),
+    }
+}
+
+#[repr(C)]
+struct ProcessEntry32W {
+    dw_size: u32,
+    cnt_usage: u32,
+    th32_process_id: u32,
+    th32_default_heap_id: usize,
+    th32_module_id: u32,
+    cnt_threads: u32,
+    th32_parent_process_id: u32,
+    pc_pri_class_base: i32,
+    dw_flags: u32,
+    sz_exe_file: [u16; 260],
+}
+
+#[link(name = "kernel32")]
+extern "system" {
+    fn CreateToolhelp32Snapshot(dw_flags: u32, th32_process_id: u32) -> *mut std::ffi::c_void;
+    fn Process32FirstW(h_snapshot: *mut std::ffi::c_void, lppe: *mut ProcessEntry32W) -> i32;
+    fn Process32NextW(h_snapshot: *mut std::ffi::c_void, lppe: *mut ProcessEntry32W) -> i32;
+    fn CloseHandle(h_object: *mut std::ffi::c_void) -> i32;
+    fn OpenProcess(
+        desired_access: u32,
+        inherit_handle: i32,
+        process_id: u32,
+    ) -> *mut std::ffi::c_void;
+    fn QueryFullProcessImageNameW(
+        h_process: *mut std::ffi::c_void,
+        flags: u32,
+        exe_name: *mut u16,
+        size: *mut u32,
+    ) -> i32;
+}
+
+#[link(name = "user32")]
+extern "system" {
+    fn GetForegroundWindow() -> *mut std::ffi::c_void;
+    fn GetWindowThreadProcessId(h_wnd: *mut std::ffi::c_void, lpdw_process_id: *mut u32) -> u32;
+}
+
+pub fn is_process_running(exe_name: &str) -> bool {
+    let trimmed = exe_name.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    let h_snap = unsafe { CreateToolhelp32Snapshot(0x00000002, 0) };
+    if h_snap.is_null() || h_snap as isize == -1 {
+        return false;
+    }
+
+    let mut pe = ProcessEntry32W {
+        dw_size: std::mem::size_of::<ProcessEntry32W>() as u32,
+        cnt_usage: 0,
+        th32_process_id: 0,
+        th32_default_heap_id: 0,
+        th32_module_id: 0,
+        cnt_threads: 0,
+        th32_parent_process_id: 0,
+        pc_pri_class_base: 0,
+        dw_flags: 0,
+        sz_exe_file: [0u16; 260],
+    };
+
+    let mut found = false;
+    if unsafe { Process32FirstW(h_snap, &mut pe) } != 0 {
+        loop {
+            let len = pe.sz_exe_file.iter().position(|&c| c == 0).unwrap_or(260);
+            let exe = String::from_utf16_lossy(&pe.sz_exe_file[..len]);
+            if matches_running(trimmed, &exe) {
+                found = true;
+                break;
+            }
+            if unsafe { Process32NextW(h_snap, &mut pe) } == 0 {
+                break;
+            }
+        }
+    }
+
+    unsafe { CloseHandle(h_snap) };
+    found
+}
+
+pub fn get_foreground_process_id() -> u32 {
+    let hwnd = unsafe { GetForegroundWindow() };
+    if hwnd.is_null() {
+        return 0;
+    }
+    let mut pid: u32 = 0;
+    unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+    pid
+}
+
+pub fn get_foreground_process_name() -> Option<String> {
+    let hwnd = unsafe { GetForegroundWindow() };
+    if hwnd.is_null() {
+        return None;
+    }
+    let mut pid: u32 = 0;
+    unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+    if pid == 0 {
+        return None;
+    }
+
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    let h_proc = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if h_proc.is_null() || h_proc as isize == -1 {
+        return None;
+    }
+
+    let mut buf = [0u16; 1024];
+    let mut size = buf.len() as u32;
+    let res = unsafe { QueryFullProcessImageNameW(h_proc, 0, buf.as_mut_ptr(), &mut size) };
+    unsafe { CloseHandle(h_proc) };
+
+    if res == 0 || size == 0 {
+        return None;
+    }
+
+    let full_path = String::from_utf16_lossy(&buf[..size as usize]);
+    let name = process_name(&full_path);
+    if name.is_empty() {
+        None
+    } else {
+        Some(name)
     }
 }
 
@@ -249,5 +376,31 @@ mod tests {
         assert_eq!(process_name("🎮.exe"), "🎮");
         assert_eq!(process_name("游戏.EXE"), "游戏");
         assert_eq!(process_name("a🎮b.exe"), "a🎮b");
+    }
+
+    #[test]
+    fn tests_native_process_running_on_current_exe() {
+        if let Ok(current) = std::env::current_exe() {
+            if let Some(name) = current.file_name().and_then(|n| n.to_str()) {
+                assert!(
+                    is_process_running(name),
+                    "Current test process {name} should be running"
+                );
+                let without_exe = process_name(name);
+                assert!(
+                    is_process_running(&without_exe),
+                    "Current test process without .exe should match"
+                );
+            }
+        }
+        assert!(!is_process_running("non_existent_fake_process_12345.exe"));
+        assert!(!is_process_running(""));
+    }
+
+    #[test]
+    fn tests_get_foreground_process_name_safe() {
+        // Calling get_foreground_process_name should never panic or crash
+        let _ = get_foreground_process_name();
+        let _ = get_foreground_process_id();
     }
 }

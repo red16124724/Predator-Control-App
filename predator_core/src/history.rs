@@ -146,10 +146,7 @@ pub fn create(capacity: i32) -> *mut HistoryHandle {
 /// # Safety
 /// `handle` must be a pointer returned by [`create`] and not already freed.
 pub unsafe fn destroy(handle: *mut HistoryHandle) {
-    if !handle.is_null()
-        && (handle as usize) >= 0x10000
-        && (handle as usize) % std::mem::align_of::<HistoryHandle>() == 0
-    {
+    if crate::is_valid_mut_ptr(handle) {
         drop(Box::from_raw(handle));
     }
 }
@@ -157,10 +154,7 @@ pub unsafe fn destroy(handle: *mut HistoryHandle) {
 /// # Safety
 /// `handle` must be a live pointer from [`create`].
 pub unsafe fn as_ref<'a>(handle: *const HistoryHandle) -> Option<&'a HistoryBuffer> {
-    if handle.is_null()
-        || (handle as usize) < 0x10000
-        || (handle as usize) % std::mem::align_of::<HistoryHandle>() != 0
-    {
+    if !crate::is_valid_ptr(handle) {
         return None;
     }
     handle.as_ref().map(|h| &h.buffer)
@@ -169,10 +163,7 @@ pub unsafe fn as_ref<'a>(handle: *const HistoryHandle) -> Option<&'a HistoryBuff
 /// # Safety
 /// `handle` must be a live pointer from [`create`].
 pub unsafe fn as_mut<'a>(handle: *mut HistoryHandle) -> Option<&'a mut HistoryBuffer> {
-    if handle.is_null()
-        || (handle as usize) < 0x10000
-        || (handle as usize) % std::mem::align_of::<HistoryHandle>() != 0
-    {
+    if !crate::is_valid_mut_ptr(handle) {
         return None;
     }
     handle.as_mut().map(|h| &mut h.buffer)
@@ -183,10 +174,13 @@ pub unsafe fn as_mut<'a>(handle: *mut HistoryHandle) -> Option<&'a mut HistoryBu
 /// # Safety
 /// `out` must be valid for `out_len` writes.
 pub unsafe fn write_snapshot(buffer: &HistoryBuffer, out: *mut f64, out_len: i32) -> i32 {
-    if out.is_null() || (out as usize) < 0x10000 || out_len <= 0 {
+    if out_len <= 0 {
         return 0;
     }
     let target_len = (out_len as usize).min(MAX_CAPACITY as usize);
+    if !crate::is_valid_mut_buffer_range(out, target_len) {
+        return 0;
+    }
     if (out as usize) % std::mem::align_of::<f64>() == 0 {
         let slice = slice::from_raw_parts_mut(out, target_len);
         buffer.snapshot_into(slice) as i32

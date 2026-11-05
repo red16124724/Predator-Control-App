@@ -110,6 +110,72 @@ namespace PredatorControlApp
             }
         }
 
+        /// <summary>
+        /// Unpins a callback delegate handle, releasing native root and allowing GC collection.
+        /// </summary>
+        public static void UnpinCallback(ref GCHandle handle)
+        {
+            if (!handle.IsAllocated) return;
+            var h = handle;
+            handle = default;
+            UnpinCallback(h);
+        }
+
+        public static void UnpinCallback(GCHandle handle)
+        {
+            if (!handle.IsAllocated) return;
+            lock (_syncLock)
+            {
+                if (_pinnedDelegateHandles.Remove(handle))
+                {
+                    try
+                    {
+                        object? target = handle.Target;
+                        if (target is Delegate del)
+                        {
+                            _pinnedDelegates.Remove(del);
+                        }
+                    }
+                    catch { }
+                    finally
+                    {
+                        if (handle.IsAllocated)
+                        {
+                            handle.Free();
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Unpins a callback delegate, releasing native root and allowing GC collection.
+        /// </summary>
+        public static void UnpinCallback(Delegate callback)
+        {
+            if (callback == null) return;
+            lock (_syncLock)
+            {
+                _pinnedDelegates.Remove(callback);
+                for (int i = _pinnedDelegateHandles.Count - 1; i >= 0; i--)
+                {
+                    var h = _pinnedDelegateHandles[i];
+                    if (h.IsAllocated)
+                    {
+                        try
+                        {
+                            if (ReferenceEquals(h.Target, callback))
+                            {
+                                _pinnedDelegateHandles.RemoveAt(i);
+                                h.Free();
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }
+        }
+
         private static void HandleNativeException(Exception ex)
         {
             if (ex is DllNotFoundException || ex is EntryPointNotFoundException || ex is BadImageFormatException)

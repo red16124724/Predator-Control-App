@@ -1,6 +1,8 @@
 pub mod acpi;
 pub mod audio;
+pub mod backlight;
 pub mod battery;
+pub mod cpu_spec;
 pub mod curve;
 pub mod ec_hid;
 pub mod graphproj;
@@ -18,6 +20,7 @@ pub mod shortcuts;
 pub mod smbios;
 pub mod telemetry;
 pub mod thermal;
+pub mod uefi;
 
 use acpi::{AcpiTable, PpccEntry, PpccSummary};
 use audio::SpectrumAnalyzer;
@@ -50,35 +53,69 @@ where
     }
 }
 
-/// Returns true when `ptr` is outside the Windows 64-bit NULL-pointer partition (>= 64 KiB)
-/// and satisfies natural alignment for `T`.
+pub(crate) const MIN_USER_ADDR: usize = 0x10000;
+pub(crate) const MAX_USER_ADDR: usize = 0x0000_7FFF_FFFF_0000;
+
+/// Returns true when `ptr` is within valid Windows 64-bit user-mode address space
+/// (outside NULL-pointer low partition and kernel partition) and satisfies natural alignment for `T`.
 #[inline]
 #[allow(dead_code)]
 pub(crate) fn is_valid_ptr<T>(ptr: *const T) -> bool {
     let addr = ptr as usize;
-    addr >= 0x10000 && (addr % std::mem::align_of::<T>() == 0)
+    addr >= MIN_USER_ADDR && addr <= MAX_USER_ADDR && (addr % std::mem::align_of::<T>() == 0)
 }
 
-/// Returns true when `ptr` is outside the Windows 64-bit NULL-pointer partition (>= 64 KiB)
-/// and satisfies natural alignment for `T`.
+/// Returns true when `ptr` is within valid Windows 64-bit user-mode address space
+/// (outside NULL-pointer low partition and kernel partition) and satisfies natural alignment for `T`.
 #[inline]
 pub(crate) fn is_valid_mut_ptr<T>(ptr: *mut T) -> bool {
     let addr = ptr as usize;
-    addr >= 0x10000 && (addr % std::mem::align_of::<T>() == 0)
+    addr >= MIN_USER_ADDR && addr <= MAX_USER_ADDR && (addr % std::mem::align_of::<T>() == 0)
 }
 
-/// Returns true when `ptr` is outside the Windows 64-bit NULL-pointer partition (>= 64 KiB).
+/// Returns true when `ptr` is within valid Windows 64-bit user-mode address space.
 /// Used for byte buffers or foreign buffers read via unaligned loads.
 #[inline]
 pub(crate) fn is_valid_buffer<T>(ptr: *const T) -> bool {
-    (ptr as usize) >= 0x10000
+    let addr = ptr as usize;
+    addr >= MIN_USER_ADDR && addr <= MAX_USER_ADDR
 }
 
-/// Returns true when `ptr` is outside the Windows 64-bit NULL-pointer partition (>= 64 KiB).
+/// Returns true when `ptr` is within valid Windows 64-bit user-mode address space.
 /// Used for byte buffers or foreign buffers written via unaligned stores.
 #[inline]
 pub(crate) fn is_valid_mut_buffer<T>(ptr: *mut T) -> bool {
-    (ptr as usize) >= 0x10000
+    let addr = ptr as usize;
+    addr >= MIN_USER_ADDR && addr <= MAX_USER_ADDR
+}
+
+/// Returns true when a buffer range of `count` elements of type `T` starting at `ptr`
+/// lies entirely within valid user-mode space without integer wrap-around.
+#[inline]
+#[allow(dead_code)]
+pub(crate) fn is_valid_buffer_range<T>(ptr: *const T, count: usize) -> bool {
+    let addr = ptr as usize;
+    if addr < MIN_USER_ADDR || addr > MAX_USER_ADDR {
+        return false;
+    }
+    match count.checked_mul(std::mem::size_of::<T>()) {
+        Some(byte_len) => {
+            if byte_len > isize::MAX as usize {
+                return false;
+            }
+            match addr.checked_add(byte_len) {
+                Some(end) => end <= MAX_USER_ADDR + 0x10000,
+                None => false,
+            }
+        }
+        None => false,
+    }
+}
+
+#[inline]
+#[allow(dead_code)]
+pub(crate) fn is_valid_mut_buffer_range<T>(ptr: *mut T, count: usize) -> bool {
+    is_valid_buffer_range(ptr as *const T, count)
 }
 
 /// Helper executing an operation on the global PawnIoDriver with poison recovery.
@@ -661,9 +698,13 @@ pub unsafe extern "C" fn predator_rgb_blend(
         if !is_valid_mut_buffer(current) || !is_valid_buffer(target) || zones == 0 {
             return -1;
         }
-        let cur = std::slice::from_raw_parts_mut(current as *mut Rgb8, zones.min(rgb::MAX_ZONES));
-        let tgt = std::slice::from_raw_parts(target as *const Rgb8, zones.min(rgb::MAX_ZONES));
-        rgb::blend_zones(cur, tgt, t);
+        let count = zones.min(rgb::MAX_ZONES);
+        let mut tgt_copy = [Rgb8::default(); rgb::MAX_ZONES];
+        let tgt_slice = std::slice::from_raw_parts(target as *const Rgb8, count);
+        tgt_copy[..count].copy_from_slice(tgt_slice);
+
+        let cur = std::slice::from_raw_parts_mut(current as *mut Rgb8, count);
+        rgb::blend_zones(cur, &tgt_copy[..count], t);
         0
     })
 }
@@ -931,7 +972,7 @@ pub unsafe extern "C" fn predator_acpi_scan_tables(
         }
         let slice = std::slice::from_raw_parts(blob, len);
         let tables = acpi::scan_acpi_tables(slice);
-        if out.is_null() || cap == 0 {
+        if !is_valid_mut_buffer(out) || cap == 0 {
             return tables.len() as i32;
         }
         let count = tables.len().min(cap);

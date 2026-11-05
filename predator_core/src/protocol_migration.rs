@@ -1,6 +1,6 @@
 //! Pure Acer packet encoding. These functions do not access hardware.
 
-fn encode(op: u32, a: u64, b: u64, c: u64, d: u64) -> Option<u64> {
+pub fn encode(op: u32, a: u64, b: u64, c: u64, d: u64) -> Option<u64> {
     let bool_value = a != 0;
     Some(match op {
         0 => 1 | ((a as u32 as u64) << 8),
@@ -56,7 +56,12 @@ fn encode(op: u32, a: u64, b: u64, c: u64, d: u64) -> Option<u64> {
             };
             value as u64 | ((ok as u64) << 8)
         }
-        18 => (1_u64 << (a as u32)) | ((b & 3).wrapping_shl(16 + 2 * a as u32)),
+        18 => {
+            if a >= 24 {
+                return None;
+            }
+            1_u64.wrapping_shl(a as u32) | ((b & 3).wrapping_shl(16 + 2 * a as u32))
+        }
         19 => {
             let value = (a >> 8) & 0xff;
             if (1..=3).contains(&value) {
@@ -109,7 +114,7 @@ pub unsafe extern "C" fn predator_protocol_encode(
     out: *mut u64,
 ) -> i32 {
     crate::safe_ffi(0, || {
-        if (out as usize) < 0x10000 || (op == 18 && a >= 24) {
+        if !crate::is_valid_mut_buffer(out) {
             return 0;
         }
         match encode(op, a, b, c, d) {

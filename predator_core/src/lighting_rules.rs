@@ -123,7 +123,7 @@ pub unsafe extern "C" fn predator_lighting_parse_hex(
     out: *mut u32,
 ) -> i32 {
     crate::safe_ffi(0, || {
-        if (ptr as usize) < 0x10000 || (out as usize) < 0x10000 || len == 0 || len > 8 {
+        if !crate::is_valid_buffer(ptr) || !crate::is_valid_mut_buffer(out) || len == 0 || len > 8 {
             return 0;
         }
         let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
@@ -145,7 +145,7 @@ pub unsafe extern "C" fn predator_lighting_blend(
     out: *mut u32,
 ) -> i32 {
     crate::safe_ffi(0, || {
-        if (out as usize) < 0x10000 {
+        if !crate::is_valid_mut_buffer(out) {
             return 0;
         }
         match blend(a, b, amount) {

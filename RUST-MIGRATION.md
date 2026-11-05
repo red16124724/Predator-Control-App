@@ -27,6 +27,25 @@ The newly migrated SMBIOS parser, selected protocol operations, and lighting rul
 
 ---
 
+## Local Tier 1 & Tier 2 Native Migration & Hardening (v1.5.5)
+
+The following Tier 1 (High ROI) and Tier 2 (Medium ROI) components were migrated to Rust predator_core and wired into managed callers with full backward compatibility:
+1. **Backlight State Machine Engine** (predator_core/src/backlight.rs + BacklightStateManager.cs): Atomic power/lid/idle state machine eliminating race conditions on resume/lid events.
+2. **CPU Architecture & TDP Matrix** (predator_core/src/cpu_spec.rs + AcerHardwareProtocols.cs): Zero-regex hardware SKU identification and default power envelope matrix for Intel Core Ultra, Raptor/Alder Lake, and AMD Ryzen.
+3. **8-Point Fan Curve Normalizer** (predator_core/src/curve.rs + FanCurveGraph.cs): Clamped monotonic curve enforcement, temperature sorting, and gap constraints.
+4. **Native Process Scanner** (predator_core/src/procsync.rs + GameSyncController.cs): Zero-allocation Toolhelp32 process snapshot scanner.
+5. **Battery Descriptor Parser** (predator_core/src/battery.rs + AcerHardwareProtocols.cs): 36-byte raw SetupAPI buffer decoding & wear level calculation.
+6. **UEFI Firmware Variable Scanner** (predator_core/src/uefi.rs + BiosUefiPowerScanner.cs): Native AML package parser & NVRAM power limit extractor.
+7. **Memory Hardening & C-ABI Protection**:
+   - 121/121 C-ABI exports wrapped in safe_ffi (std::panic::catch_unwind).
+   - 64-bit user address space boundary validation (MIN_USER_ADDR = 0x10000, MAX_USER_ADDR = 0x0000_7FFF_FFFF_0000) preventing STATUS_ACCESS_VIOLATION SEH faults.
+   - HistoryHandle Mutex wrapping for concurrent caller safety.
+   - Bit-shift overflow protection on Op 18 for fan indices >= 24.
+   - Unaligned buffer safety guards added to normalizer.
+   - Verification: 200 unit tests + 23 fuzz/stress tests passed in Rust; 2,136 unit and stress tests passed in .NET suite (0 failed, 0 skipped).
+
+---
+
 ## 1. Status at a glance
 
 | Metric | Value |

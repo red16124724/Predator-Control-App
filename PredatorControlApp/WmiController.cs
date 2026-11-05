@@ -55,8 +55,15 @@ namespace PredatorControlApp
         private byte _brightness = 100;
         private int _appliedKeyboardBrightness = -1;
 
-        /// <summary>Last lid-logo color chosen by the user, or null while the logo simply mirrors the keyboard.</summary>
-        private byte _speed = 5;       
+        private byte _speed = 5;
+
+        private readonly Lazy<EnekRgbClient> _enekRgbClient = new(() => new EnekRgbClient(), isThreadSafe: true);
+
+        /// <summary>Direct Win32 HID client for ENEK5130 keyboard and logo controller.</summary>
+        public EnekRgbClient EnekRgb => _enekRgbClient.Value;
+
+        /// <summary>True when the ENEK5130 direct HID controller is detected on the system.</summary>
+        public bool IsEnekRgbAvailable => _enekRgbClient.Value.IsAvailable;       
 
         private byte _direction = 0;   
 
@@ -159,6 +166,11 @@ namespace PredatorControlApp
             ThermalSafety = new ThermalSafetyService();
 
             InitializeChannels();
+
+            if (_enableHardware)
+            {
+                try { TurnOffLogo(); } catch { }
+            }
 
         }
 
@@ -1494,6 +1506,31 @@ namespace PredatorControlApp
             // Power mode changes must never turn on or recolor the lid logo RGB.
         }
 
+        /// <summary>
+        /// Completely turns off the laptop lid logo RGB and keeps it off at all times.
+        /// Zero logo queries are performed. On ENEK5130 hardware (PHN16/18), dispatches TargetCoverLogo (0x83) off report.
+        /// On non-ENEK hardware, dispatches SetGamingLEDBehavior (0x06) and SetGamingLEDColor (0) to zone 1.
+        /// </summary>
+        public void TurnOffLogo()
+        {
+            try
+            {
+                if (_enekRgbClient.IsValueCreated && _enekRgbClient.Value.IsAvailable)
+                {
+                    _enekRgbClient.Value.TurnOffLogo();
+                    return;
+                }
+
+                lock (_lock)
+                {
+                    if (_disposed) return;
+                    SendCommandUnderLock("SetGamingLEDBehavior", 0x06ul | (0x01ul << 8));
+                    SendCommandUnderLock("SetGamingLEDColor", 0x01ul);
+                }
+            }
+            catch { }
+        }
+
         private byte? _lastAppliedPowerMode;
 
         public byte? LastAppliedPowerMode { get { lock (_lock) { return _lastAppliedPowerMode; } } }
@@ -2126,6 +2163,15 @@ namespace PredatorControlApp
             {
 
                 _brightness = 0;
+                _appliedKeyboardBrightness = 0;
+
+                if (_enekRgbClient.Value.IsAvailable)
+                {
+                    _enekRgbClient.Value.TurnOffBacklight();
+                    _enekRgbClient.Value.TurnOffLogo();
+                    return;
+                }
+
                 if (_enableHardware) AcerServiceClient.SupersedeKeyboardLighting();
 
 
@@ -2136,8 +2182,8 @@ namespace PredatorControlApp
 
                     // Exterior LED off via WMI
 
-                    // Exterior LED off via WMI (excluding lid logo 0x01ul: all lid logo app control disconnected)
-                    ulong[] offZones = { 0x05ul, 0x06ul, 0x07ul, 0x0Ful, 0xF0ul };
+                    // Exterior LED off via WMI (actively turn off lid logo 0x01ul and exterior zones to keep logo completely off)
+                    ulong[] offZones = { 0x01ul, 0x05ul, 0x06ul, 0x07ul, 0x0Ful, 0xF0ul };
 
                     foreach (var z in offZones)
 
@@ -2311,6 +2357,11 @@ namespace PredatorControlApp
         private bool EnsureKeyboardBrightnessUnderLock(bool force = false)
         {
             if (!force && _appliedKeyboardBrightness == _brightness) return true;
+            if (_enekRgbClient.Value.IsAvailable)
+            {
+                _appliedKeyboardBrightness = _brightness;
+                return true;
+            }
             if (_enableHardware) AcerServiceClient.SupersedeKeyboardLighting();
             byte[] packet = new byte[16];
             packet[2] = _brightness;
@@ -2443,7 +2494,47 @@ namespace PredatorControlApp
 
                 if (_disposed) return false;
 
+                int effBrightness = brightness == -1 ? (int)_brightness : Math.Clamp(brightness, 0, 100);
+                _brightness = (byte)effBrightness;
+                _lastMode = 0;
+                _appliedHardwareMode = 0;
 
+                if (_enekRgbClient.Value.IsAvailable)
+                {
+                    // ENEK5130 hardware fast-path (PHN16 / PHN18 / modern Nitro)
+                    // Direct Win32 HID report 0xA4: bypasses WMI completely to prevent EC reset loops and keyboard blinking.
+                    Color[] fourZones;
+                    if (colors.Count >= 4)
+                    {
+                        fourZones = colors.Take(4).ToArray();
+                    }
+                    else if (colors.Count == 1)
+                    {
+                        fourZones = new[] { colors[0], colors[0], colors[0], colors[0] };
+                    }
+                    else if (colors.Count == 2)
+                    {
+                        fourZones = new[] { colors[0], colors[0], colors[1], colors[1] };
+                    }
+                    else if (colors.Count == 3)
+                    {
+                        fourZones = isNativeThreeZone
+                            ? new[] { colors[0], colors[1], colors[2], colors[2] }
+                            : new[] { colors[0], colors[1], colors[1], colors[2] };
+                    }
+                    else
+                    {
+                        fourZones = new[] { colors[0], colors[0], colors[0], colors[0] };
+                    }
+
+                    bool enekOk = _enekRgbClient.Value.SetZoneColors(fourZones, (byte)effBrightness);
+                    _enekRgbClient.Value.TurnOffLogo();
+                    if (enekOk)
+                    {
+                        _appliedKeyboardBrightness = effBrightness;
+                        return true;
+                    }
+                }
 
                 if (_enableHardware) AcerServiceClient.SupersedeKeyboardLighting();
 
@@ -2453,7 +2544,7 @@ namespace PredatorControlApp
 
                 _appliedHardwareMode = 0;
 
-                int effBrightness = brightness == -1 ? (int)_brightness : Math.Clamp(brightness, 0, 100);
+                effBrightness = brightness == -1 ? (int)_brightness : Math.Clamp(brightness, 0, 100);
                 _brightness = (byte)effBrightness;
 
 
@@ -2821,6 +2912,9 @@ namespace PredatorControlApp
                     _ = AcerServiceClient.SetKeyboardLightingAsync(1, "STATIC", leds, effBrightness, 0, true);
                 }
 
+                // Keep lid logo completely off at all times
+                TurnOffLogo();
+
                 return any;
 
             }
@@ -2853,6 +2947,23 @@ namespace PredatorControlApp
 
                     return;
 
+                }
+
+                if (_enekRgbClient.Value.IsAvailable)
+                {
+                    byte scaledBrightness = (byte)Math.Clamp((int)_brightness, 0, 100);
+                    byte scaledSpeed = (byte)Math.Clamp((int)_speed, 1, 10);
+                    byte rEnek = _lastR == 0 && _lastG == 0 && _lastB == 0 ? (byte)0 : _lastR;
+                    byte gEnek = _lastR == 0 && _lastG == 0 && _lastB == 0 ? (byte)150 : _lastG;
+                    byte bEnek = _lastR == 0 && _lastG == 0 && _lastB == 0 ? (byte)255 : _lastB;
+                    Color dynColor = Color.FromArgb(rEnek, gEnek, bEnek);
+                    bool enekOk = _enekRgbClient.Value.SetDynamicEffect(mode, dynColor, scaledBrightness, scaledSpeed, _direction);
+                    _enekRgbClient.Value.TurnOffLogo();
+                    if (enekOk)
+                    {
+                        _appliedHardwareMode = mode;
+                        return;
+                    }
                 }
 
 
@@ -3019,6 +3130,9 @@ namespace PredatorControlApp
                 SendLedCommandUnderLock(payload);
                 SendLedArrayCommandUnderLock("SetGamingLED", payload);
                 _appliedHardwareMode = mode;
+
+                // Keep lid logo completely off at all times
+                TurnOffLogo();
 
 
 
@@ -4468,6 +4582,11 @@ namespace PredatorControlApp
                     try { EcHid?.Dispose(); } catch { }
 
                     EcHid = null;
+
+                    if (_enekRgbClient.IsValueCreated)
+                    {
+                        try { _enekRgbClient.Value.Dispose(); } catch { }
+                    }
 
                 }
 

@@ -228,11 +228,12 @@ namespace PredatorControlApp.Tests
                 new(90, 100)
             };
 
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-            var token = cts.Token;
+            const int taskCount = 6;
+            const int iterationsPerTask = 200;
             int interpolations = 0;
             var exceptions = new System.Collections.Concurrent.ConcurrentBag<Exception>();
-            var tasks = new Task[6];
+            using var startGate = new ManualResetEventSlim(false);
+            var tasks = new Task[taskCount];
 
             for (int i = 0; i < tasks.Length; i++)
             {
@@ -241,8 +242,9 @@ namespace PredatorControlApp.Tests
                 {
                     try
                     {
+                        startGate.Wait();
                         int temp = baseTemp;
-                        while (!token.IsCancellationRequested)
+                        for (int iter = 0; iter < iterationsPerTask; iter++)
                         {
                             int speed = Form1.InterpolateCurve(curve, temp);
                             Assert.InRange(speed, 10, 100);
@@ -258,9 +260,10 @@ namespace PredatorControlApp.Tests
                 });
             }
 
+            startGate.Set();
             Task.WaitAll(tasks);
             Assert.Empty(exceptions);
-            Assert.True(interpolations > 500, $"Expected robust multi-threaded curve interpolation throughput, got {interpolations}");
+            Assert.Equal(taskCount * iterationsPerTask, interpolations);
         }
 
         [Fact]
