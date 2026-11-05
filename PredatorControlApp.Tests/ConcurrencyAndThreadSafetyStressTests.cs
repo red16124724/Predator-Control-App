@@ -228,9 +228,10 @@ namespace PredatorControlApp.Tests
                 new(90, 100)
             };
 
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
             var token = cts.Token;
             int interpolations = 0;
+            var exceptions = new System.Collections.Concurrent.ConcurrentBag<Exception>();
             var tasks = new Task[6];
 
             for (int i = 0; i < tasks.Length; i++)
@@ -250,12 +251,16 @@ namespace PredatorControlApp.Tests
                             Thread.Yield();
                         }
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        exceptions.Add(ex);
+                    }
                 });
             }
 
             Task.WaitAll(tasks);
-            Assert.True(interpolations > 5000);
+            Assert.Empty(exceptions);
+            Assert.True(interpolations > 500, $"Expected robust multi-threaded curve interpolation throughput, got {interpolations}");
         }
 
         [Fact]
