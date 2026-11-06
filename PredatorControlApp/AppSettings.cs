@@ -471,7 +471,10 @@ namespace PredatorControlApp
                 GpuMode = 0;
             }
         }
+        [Obsolete("BIOS modifying settings have been permanently removed.")]
         public bool BiosModificationsEnabled { get; set; } = false;
+
+        [Obsolete("BIOS modifying settings have been permanently removed.")]
         public bool BiosDangerousAllowed { get; set; } = false;
         public bool BatteryLimit { get; set; } = false;
         public long LastBatteryCalibrationUtcTicks { get; set; } = 0;

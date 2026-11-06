@@ -144,11 +144,6 @@ namespace PredatorControlApp
         {
             base.OnDpiChanged(e);
             _dpiScale = e.DeviceDpiNew / 96f;
-            float factor = e.DeviceDpiOld > 0 ? (float)e.DeviceDpiNew / e.DeviceDpiOld : 1.0f;
-            if (Math.Abs(factor - 1.0f) > 0.001f)
-            {
-                try { RescaleControlFonts(this, factor); } catch { }
-            }
             try
             {
                 _contentPanel?.SetDpiScale(_dpiScale);
@@ -158,23 +153,6 @@ namespace PredatorControlApp
                 ClientSize = new Size(_formW, formH);
             }
             catch { }
-        }
-
-        private static void RescaleControlFonts(Control root, float factor)
-        {
-            if (root == null || root.IsDisposed) return;
-            if (root.Font != null)
-            {
-                float newSize = Math.Max(6f, (float)Math.Round(root.Font.Size * factor, 2));
-                if (Math.Abs(newSize - root.Font.Size) > 0.05f)
-                {
-                    root.Font = new Font(root.Font.FontFamily, newSize, root.Font.Style);
-                }
-            }
-            foreach (Control child in root.Controls)
-            {
-                RescaleControlFonts(child, factor);
-            }
         }
 
         private void InitializeLayout()

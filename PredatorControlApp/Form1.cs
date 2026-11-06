@@ -625,9 +625,9 @@ namespace PredatorControlApp
         private Font _fontTitle = new("Segoe UI", 9.5f, FontStyle.Bold);
         private Font _fontSectionHeader = new("Segoe UI", 8.5f, FontStyle.Bold);
         private Font _fontHeaderLight = new("Segoe UI", 8.5f, FontStyle.Regular);
-        private Font _fontBody = new("Segoe UI", 9.5f, FontStyle.Regular);
-        private Font _fontBodyBold = new("Segoe UI", 9.5f, FontStyle.Bold);
-        private Font _fontCalibrationPercent = new("Segoe UI", 20f, FontStyle.Bold);
+        private Font _fontBody = new("Segoe UI", 9f, FontStyle.Regular);
+        private Font _fontBodyBold = new("Segoe UI", 9f, FontStyle.Bold);
+        private Font _fontCalibrationPercent = new("Segoe UI", 18f, FontStyle.Bold);
         private Font _fontRiskBadge = new("Segoe UI", 7.5f, FontStyle.Bold);
 
         private Font FontTitle => _fontTitle;
@@ -648,13 +648,13 @@ namespace PredatorControlApp
             var oldCalib = _fontCalibrationPercent;
             var oldRisk = _fontRiskBadge;
 
-            _fontTitle = new Font("Segoe UI", Math.Max(7f, 9.5f * _dpiScale), FontStyle.Bold);
-            _fontSectionHeader = new Font("Segoe UI", Math.Max(6.5f, 8.5f * _dpiScale), FontStyle.Bold);
-            _fontHeaderLight = new Font("Segoe UI", Math.Max(6.5f, 8.5f * _dpiScale), FontStyle.Regular);
-            _fontBody = new Font("Segoe UI", Math.Max(7f, 9.5f * _dpiScale), FontStyle.Regular);
-            _fontBodyBold = new Font("Segoe UI", Math.Max(7f, 9.5f * _dpiScale), FontStyle.Bold);
-            _fontCalibrationPercent = new Font("Segoe UI", Math.Max(14f, 20f * _dpiScale), FontStyle.Bold);
-            _fontRiskBadge = new Font("Segoe UI", Math.Max(6f, 7.5f * _dpiScale), FontStyle.Bold);
+            _fontTitle = new Font("Segoe UI", 9.5f, FontStyle.Bold);
+            _fontSectionHeader = new Font("Segoe UI", 8.5f, FontStyle.Bold);
+            _fontHeaderLight = new Font("Segoe UI", 8.5f, FontStyle.Regular);
+            _fontBody = new Font("Segoe UI", 9f, FontStyle.Regular);
+            _fontBodyBold = new Font("Segoe UI", 9f, FontStyle.Bold);
+            _fontCalibrationPercent = new Font("Segoe UI", 18f, FontStyle.Bold);
+            _fontRiskBadge = new Font("Segoe UI", 7.5f, FontStyle.Bold);
 
             try { oldTitle?.Dispose(); } catch { }
             try { oldSec?.Dispose(); } catch { }
@@ -667,7 +667,6 @@ namespace PredatorControlApp
 
         private bool _isUpdatingOverdrive;
         private bool _isUpdatingModeKeyAction;
-        private bool _isUpdatingBiosSafetyGates;
 
 
 
@@ -1145,15 +1144,7 @@ namespace PredatorControlApp
 
         private PredatorButton? _btnDiagnostics;
 
-        private Panel? _cardBios;
         private Label? _lblGpuStatusSys;
-        private CheckBox? _chkEnableBiosModsSys;
-        private CheckBox? _chkAllowDangerousBiosSys;
-        private Panel? _pnlBiosItemsContainerSys;
-        private PredatorButton? _btnBiosCatSys;
-        private PredatorButton? _btnBiosCatPower;
-        private PredatorButton? _btnBiosCatBoot;
-        private Bios.BiosCategory _currentBiosCategory = Bios.BiosCategory.System;
 
 
 
@@ -1167,7 +1158,6 @@ namespace PredatorControlApp
         private DarkScrollPanel _pnlFans = null!;
         private DarkScrollPanel _pnlLighting = null!;
         private DarkScrollPanel _pnlDisplay = null!;
-        private DarkScrollPanel _pnlBios = null!;
         private DarkScrollPanel _pnlGameSync = null!;
         private DarkScrollPanel _pnlSystem = null!;
         private DarkScrollPanel _pnlSettings = null!;
@@ -1180,7 +1170,6 @@ namespace PredatorControlApp
         private PredatorButton _btnNavFans = null!;
         private PredatorButton _btnNavLighting = null!;
         private PredatorButton _btnNavDisplay = null!;
-        private PredatorButton _btnNavBios = null!;
         private PredatorButton _btnNavGameSync = null!;
         private PredatorButton _btnNavSystem = null!;
         private PredatorButton _btnNavSettings = null!;
@@ -1540,7 +1529,6 @@ namespace PredatorControlApp
 
 
             _dpiScale = (this.DeviceDpi > 0) ? this.DeviceDpi / 96f : 1.0f;
-            if (Math.Abs(_dpiScale - 1.0f) > 0.001f) UpdateDpiFonts();
 
             try { int detectedHz = GetMaxRefreshRateCore(); if (detectedHz > 60) _maxHz = detectedHz; } catch { }
 
@@ -3679,21 +3667,14 @@ namespace PredatorControlApp
 
             _trayLcdOverdrive = new ToolStripMenuItem("LCD Overdrive (3ms)", null, (s, e) => ApplyLcdOverdrive(!_switchLcdOverdrive.Checked)) { CheckOnClick = true };
 
-            var trayDisplaySettings = new ToolStripMenuItem("Display & GPU Switching...", null, (s, e) =>
+            var trayDisplaySettings = new ToolStripMenuItem("Display Settings (Hardware MUX Switch)...", null, (s, e) =>
             {
                 if (!this.Visible) this.Show();
                 if (this.WindowState == FormWindowState.Minimized) this.WindowState = FormWindowState.Normal;
                 this.Activate();
                 SwitchPage(_pnlDisplay, _btnNavDisplay);
             });
-            var trayBiosSettings = new ToolStripMenuItem("BIOS & Firmware Settings...", null, (s, e) =>
-            {
-                if (!this.Visible) this.Show();
-                if (this.WindowState == FormWindowState.Minimized) this.WindowState = FormWindowState.Normal;
-                this.Activate();
-                SwitchPage(_pnlBios, _btnNavBios);
-            });
-            displayMenu.DropDownItems.AddRange([_trayDisplay60, _trayDisplayMax, new ToolStripSeparator(), _trayLcdOverdrive, new ToolStripSeparator(), trayDisplaySettings, trayBiosSettings]);
+            displayMenu.DropDownItems.AddRange([_trayDisplay60, _trayDisplayMax, new ToolStripSeparator(), _trayLcdOverdrive, new ToolStripSeparator(), trayDisplaySettings]);
 
 
 
@@ -3831,16 +3812,15 @@ namespace PredatorControlApp
                 try { BeginInvoke(new Action(() => NavigateToPanel(panelIndex))); } catch { }
                 return;
             }
-            switch (panelIndex % 8)
+            switch (panelIndex % 7)
             {
                 case 0: SwitchPage(_pnlDashboard, _btnNavDashboard); break;
                 case 1: SwitchPage(_pnlFans, _btnNavFans); break;
                 case 2: SwitchPage(_pnlLighting, _btnNavLighting); break;
                 case 3: SwitchPage(_pnlDisplay, _btnNavDisplay); break;
-                case 4: SwitchPage(_pnlBios, _btnNavBios); break;
-                case 5: SwitchPage(_pnlGameSync, _btnNavGameSync); break;
-                case 6: SwitchPage(_pnlSystem, _btnNavSystem); break;
-                case 7: SwitchPage(_pnlSettings, _btnNavSettings); break;
+                case 4: SwitchPage(_pnlGameSync, _btnNavGameSync); break;
+                case 5: SwitchPage(_pnlSystem, _btnNavSystem); break;
+                case 6: SwitchPage(_pnlSettings, _btnNavSettings); break;
             }
         }
 
@@ -3858,7 +3838,6 @@ namespace PredatorControlApp
             if (_pnlFans != null) _pnlFans.Visible = false;
             if (_pnlLighting != null) _pnlLighting.Visible = false;
             if (_pnlDisplay != null) _pnlDisplay.Visible = false;
-            if (_pnlBios != null) _pnlBios.Visible = false;
             if (_pnlGameSync != null) _pnlGameSync.Visible = false;
             if (_pnlSystem != null) _pnlSystem.Visible = false;
             if (_pnlSettings != null) _pnlSettings.Visible = false;
@@ -3870,7 +3849,6 @@ namespace PredatorControlApp
             if (_btnNavFans != null) _btnNavFans.IsActive = false;
             if (_btnNavLighting != null) _btnNavLighting.IsActive = false;
             if (_btnNavDisplay != null) _btnNavDisplay.IsActive = false;
-            if (_btnNavBios != null) _btnNavBios.IsActive = false;
             if (_btnNavGameSync != null) _btnNavGameSync.IsActive = false;
             if (_btnNavSystem != null) _btnNavSystem.IsActive = false;
             if (_btnNavSettings != null) _btnNavSettings.IsActive = false;
@@ -3905,7 +3883,6 @@ namespace PredatorControlApp
             else if (targetBtn == _btnNavFans) SwitchPage(_pnlFans, _btnNavFans);
             else if (targetBtn == _btnNavLighting) SwitchPage(_pnlLighting, _btnNavLighting);
             else if (targetBtn == _btnNavDisplay) SwitchPage(_pnlDisplay, _btnNavDisplay);
-            else if (targetBtn == _btnNavBios) SwitchPage(_pnlBios, _btnNavBios);
             else if (targetBtn == _btnNavGameSync) SwitchPage(_pnlGameSync, _btnNavGameSync);
             else if (targetBtn == _btnNavSystem) SwitchPage(_pnlSystem, _btnNavSystem);
             else if (targetBtn == _btnNavSettings) SwitchPage(_pnlSettings, _btnNavSettings);
@@ -4410,10 +4387,6 @@ namespace PredatorControlApp
             _btnNavDisplay.Click += (s, e) => SwitchPage(_pnlDisplay, _btnNavDisplay);
             y += navBtnH + navGap;
 
-            _btnNavBios = CreateNavButton("🔧  BIOS Settings", navPad, y, navBtnW, navBtnH);
-            _btnNavBios.Click += (s, e) => SwitchPage(_pnlBios, _btnNavBios);
-            y += navBtnH + navGap;
-
             _btnNavGameSync = CreateNavButton("🎮  Game Sync", navPad, y, navBtnW, navBtnH);
             _btnNavGameSync.Click += (s, e) => SwitchPage(_pnlGameSync, _btnNavGameSync);
             y += navBtnH + navGap;
@@ -4429,7 +4402,6 @@ namespace PredatorControlApp
             _sidebarPanel.Controls.Add(_btnNavFans);
             _sidebarPanel.Controls.Add(_btnNavLighting);
             _sidebarPanel.Controls.Add(_btnNavDisplay);
-            _sidebarPanel.Controls.Add(_btnNavBios);
             _sidebarPanel.Controls.Add(_btnNavGameSync);
             _sidebarPanel.Controls.Add(_btnNavSystem);
             _sidebarPanel.Controls.Add(_btnNavSettings);
@@ -4524,7 +4496,6 @@ namespace PredatorControlApp
             _pnlFans = CreatePagePanel(containerW, containerH);
             _pnlLighting = CreatePagePanel(containerW, containerH);
             _pnlDisplay = CreatePagePanel(containerW, containerH);
-            _pnlBios = CreatePagePanel(containerW, containerH);
             _pnlGameSync = CreatePagePanel(containerW, containerH);
             _pnlSystem = CreatePagePanel(containerW, containerH);
             _pnlSettings = CreatePagePanel(containerW, containerH);
@@ -4535,7 +4506,6 @@ namespace PredatorControlApp
             BuildFansPage();
             BuildLightingPage();
             BuildDisplayPage();
-            BuildBiosPage();
             BuildGameSyncPage();
             BuildSystemPage();
             BuildSettingsPage();
@@ -4544,7 +4514,6 @@ namespace PredatorControlApp
             _pageContainer.Controls.Add(_pnlFans);
             _pageContainer.Controls.Add(_pnlLighting);
             _pageContainer.Controls.Add(_pnlDisplay);
-            _pageContainer.Controls.Add(_pnlBios);
             _pageContainer.Controls.Add(_pnlGameSync);
             _pageContainer.Controls.Add(_pnlSystem);
             _pageContainer.Controls.Add(_pnlSettings);
@@ -4621,7 +4590,7 @@ namespace PredatorControlApp
 
             _lblGpuTemp = MakeLabel(cardSensors, "39°C", lblGpuTitle.Right + S(8), S(44), FontBodyBold, ThemeManager.TextPrimary);
 
-            _lblGpuSleepBadge = MakeLabel(cardSensors, "[ 💤 Low Power Standby ]", _lblGpuTemp.Right + S(8), S(44), FontSectionHeader, ThemeManager.StatusD3Cold, "d3cold");
+            _lblGpuSleepBadge = MakeLabel(cardSensors, "[ 💤 Low Power Standby ]", _lblGpuTemp.Right + S(8), S(44), FontHeaderLight, ThemeManager.StatusD3Cold, "d3cold");
 
             _lblGpuSleepBadge.Visible = false;
 
@@ -4787,7 +4756,7 @@ namespace PredatorControlApp
 
 
 
-            MakeLabel(cardPower, "MODE KEY ACTION:", cPad, S(86), FontSectionHeader, SubHeaderColor);
+            MakeLabel(cardPower, "MODE KEY ACTION:", cPad, S(86), FontBody, SubHeaderColor);
 
             int mkaDropW = cInnerW - S(108);
 
@@ -4969,7 +4938,7 @@ namespace PredatorControlApp
 
             Color modeColor = ThemeManager.GetPowerModeColor(_currentPowerMode);
 
-            _lblPowerLimitModeContext = MakeLabel(card, $"ACTIVE MODE: {modeName.ToUpperInvariant()}", cPad, S(38), FontSectionHeader, modeColor, "custom_color");
+            _lblPowerLimitModeContext = MakeLabel(card, $"ACTIVE MODE: {modeName.ToUpperInvariant()}", cPad, S(38), FontBody, modeColor, "custom_color");
 
 
 
@@ -6633,9 +6602,9 @@ namespace PredatorControlApp
 
             int dropW = (cInnerW - S(10)) / 2;
 
-            _lblAcFanHdr = MakeLabel(cardFanModes, "ON AC POWER:", cPad, S(116), FontSectionHeader, SubHeaderColor);
+            _lblAcFanHdr = MakeLabel(cardFanModes, "ON AC POWER:", cPad, S(116), FontBody, SubHeaderColor);
 
-            _lblBatteryFanHdr = MakeLabel(cardFanModes, "ON BATTERY:", cPad + dropW + S(10), S(116), FontSectionHeader, SubHeaderColor);
+            _lblBatteryFanHdr = MakeLabel(cardFanModes, "ON BATTERY:", cPad + dropW + S(10), S(116), FontBody, SubHeaderColor);
 
 
 
@@ -6861,7 +6830,7 @@ namespace PredatorControlApp
 
             int sldW = cInnerW - S(110);
 
-            _lblCpuFanSpeedHdr = MakeLabel(cardCustomFans, "CPU FAN: 50%", cPad, S(88), FontSectionHeader, SubHeaderColor);
+            _lblCpuFanSpeedHdr = MakeLabel(cardCustomFans, "CPU FAN: 50%", cPad, S(88), FontBody, SubHeaderColor);
 
             _cpuFanSlider = new PredatorSlider
 
@@ -6917,7 +6886,7 @@ namespace PredatorControlApp
 
 
 
-            _lblGpuFanSpeedHdr = MakeLabel(cardCustomFans, "GPU FAN: 50%", cPad, S(148), FontSectionHeader, SubHeaderColor);
+            _lblGpuFanSpeedHdr = MakeLabel(cardCustomFans, "GPU FAN: 50%", cPad, S(148), FontBody, SubHeaderColor);
 
             _gpuFanSlider = new PredatorSlider
 
@@ -6977,7 +6946,7 @@ namespace PredatorControlApp
 
             {
 
-                _lblSysFanSpeedHdr = MakeLabel(cardCustomFans, "SYSTEM FAN: 50%", cPad, S(208), FontSectionHeader, SubHeaderColor);
+                _lblSysFanSpeedHdr = MakeLabel(cardCustomFans, "SYSTEM FAN: 50%", cPad, S(208), FontBody, SubHeaderColor);
 
                 _sysFanSlider = new PredatorSlider
 
@@ -7053,7 +7022,7 @@ namespace PredatorControlApp
 
             var cardCoolingTech = MakeCard(_pnlFans, "FACTORY COOLING PRESETS", col1X, techCardY, cardW, S(116));
 
-            MakeLabel(cardCoolingTech, "FACTORY FAN PRESET (SPEED TABLE):", cPad, S(40), FontSectionHeader, SubHeaderColor);
+            MakeLabel(cardCoolingTech, "FACTORY FAN PRESET (SPEED TABLE):", cPad, S(40), FontBody, SubHeaderColor);
 
             _cboFanTable = new PredatorDropDown { Location = new Point(cPad, S(64)), Size = new Size(cInnerW, S(30)) };
 
@@ -7087,7 +7056,7 @@ namespace PredatorControlApp
 
             var cardThermal = MakeCard(_pnlFans, "THERMAL GUARD", col1X, thermalCardY, cardW, thermalCardH);
 
-            MakeLabel(cardThermal, "STAGED FAN FLOOR + CPU WATT CAP", cPad, S(40), FontSectionHeader, SubHeaderColor);
+            MakeLabel(cardThermal, "STAGED FAN FLOOR + CPU WATT CAP", cPad, S(40), FontHeaderLight, SubHeaderColor);
 
 
 
@@ -7113,7 +7082,7 @@ namespace PredatorControlApp
 
 
 
-            _lblThermalStage = MakeLabel(cardThermal, "STAGE: NORMAL", cPad, S(96), FontSectionHeader, SubHeaderColor);
+            _lblThermalStage = MakeLabel(cardThermal, "STAGE: NORMAL", cPad, S(96), FontBodyBold, SubHeaderColor);
 
             _lblThermalDetail = MakeLabel(cardThermal, string.Empty, cPad, S(118), FontHeaderLight, SubHeaderColor);
 
@@ -7225,7 +7194,7 @@ namespace PredatorControlApp
 
 
 
-            _lblEmbeddedHysteresis = MakeLabel(cardCurves, UiLabelFormatter.FormatHysteresisLabel(_appSettings.FanHysteresisDegrees), cPad, S(460), FontSectionHeader, AccentColor, "accent");
+            _lblEmbeddedHysteresis = MakeLabel(cardCurves, UiLabelFormatter.FormatHysteresisLabel(_appSettings.FanHysteresisDegrees), cPad, S(460), FontBodyBold, AccentColor, "accent");
 
             _sliderEmbeddedHysteresis = new PredatorSlider
 
@@ -7517,7 +7486,7 @@ namespace PredatorControlApp
 
             // Capability banner: filled by the BIOS/service probe, never assumed.
 
-            _lblLightingCapability = MakeLabel(_pnlLighting, "KEYBOARD: detecting capabilities...", pad, pad, FontSectionHeader, SubHeaderColor);
+            _lblLightingCapability = MakeLabel(_pnlLighting, "KEYBOARD: detecting capabilities...", pad, pad, FontBody, SubHeaderColor);
 
             _lblLightingCapability.AutoSize = false;
 
@@ -7535,7 +7504,7 @@ namespace PredatorControlApp
 
             // Card 1: dynamic animated effects and dynamic color tint (static lighting is in Zone Studio below).
             var cardRgb = MakeCard(_pnlLighting, "LIGHTING EFFECTS", col1X, topY, cardW, topH);
-            MakeLabel(cardRgb, "DYNAMIC EFFECT:", cPad, S(44), FontSectionHeader, SubHeaderColor);
+            MakeLabel(cardRgb, "DYNAMIC EFFECT:", cPad, S(44), FontBody, SubHeaderColor);
 
             _rgbDropDown = new PredatorDropDown { Location = new Point(cPad, S(66)), Size = new Size(cInnerW, S(34)) };
             _rgbDropDown.Items.Add("Off");
@@ -7574,7 +7543,7 @@ namespace PredatorControlApp
             };
             cardRgb.Controls.Add(_rgbDropDown);
 
-            MakeLabel(cardRgb, "DYNAMIC COLOR / TINT:", cPad, S(108), FontSectionHeader, SubHeaderColor);
+            MakeLabel(cardRgb, "DYNAMIC COLOR / TINT:", cPad, S(108), FontBody, SubHeaderColor);
 
             int tintSwatchSize = S(24);
             int tintSwatchGap = S(6);
@@ -7676,7 +7645,7 @@ namespace PredatorControlApp
 
             var cardParams = MakeCard(_pnlLighting, "LIGHTING SETTINGS", col2X, topY, cardW, topH);
 
-            _lblBrightHdr = MakeLabel(cardParams, $"BRIGHTNESS: {_appSettings.KeyboardBrightnessLevel}%", cPad, S(44), FontSectionHeader, SubHeaderColor);
+            _lblBrightHdr = MakeLabel(cardParams, $"BRIGHTNESS: {_appSettings.KeyboardBrightnessLevel}%", cPad, S(44), FontBody, SubHeaderColor);
 
             _brightnessSlider = new PredatorSlider { Location = new Point(cPad, S(66)), Size = new Size(cInnerW, S(28)), Minimum = 0, Maximum = 100, Value = _appSettings.KeyboardBrightnessLevel };
 
@@ -7793,7 +7762,7 @@ namespace PredatorControlApp
 
 
 
-            _lblSpeedHdr = MakeLabel(cardParams, "EFFECT SPEED: 50%", cPad, S(102), FontSectionHeader, SubHeaderColor);
+            _lblSpeedHdr = MakeLabel(cardParams, "EFFECT SPEED: 50%", cPad, S(102), FontBody, SubHeaderColor);
 
             _speedSlider = new PredatorSlider { Location = new Point(cPad, S(124)), Size = new Size(cInnerW, S(28)), Minimum = 1, Maximum = 100, Value = 50 };
 
@@ -7972,7 +7941,7 @@ namespace PredatorControlApp
 
             _lblPerKeyPrompt = MakeLabel(cardZones, "⌨️  PER-KEY MATRIX MODE: Click or drag across individual keys on the map below. Quick Palette swatches set the active paint color.",
 
-                cPad, S(118), FontSectionHeader, AccentColor, "accent");
+                cPad, S(118), FontHeaderLight, AccentColor, "accent");
 
             _lblPerKeyPrompt.Visible = false;
 
@@ -8038,7 +8007,7 @@ namespace PredatorControlApp
 
             // Quick Color Palette
 
-            MakeLabel(cardZones, "QUICK COLOR PALETTE (CLICK SWATCH TO APPLY):", cPad, S(194), FontSectionHeader, SubHeaderColor);
+            MakeLabel(cardZones, "QUICK COLOR PALETTE (CLICK SWATCH TO APPLY):", cPad, S(194), FontBody, SubHeaderColor);
 
 
 
@@ -8145,7 +8114,7 @@ namespace PredatorControlApp
 
             // Theme Presets & Action Bar
 
-            MakeLabel(cardZones, "THEME PRESETS & QUICK TOOLS:", cPad, S(256), FontSectionHeader, SubHeaderColor);
+            MakeLabel(cardZones, "THEME PRESETS & QUICK TOOLS:", cPad, S(256), FontBody, SubHeaderColor);
 
 
 
@@ -8352,7 +8321,7 @@ namespace PredatorControlApp
 
 
 
-            MakeLabel(cardKeys, "PAINT COLOR:", cPad, S(284), FontSectionHeader, SubHeaderColor);
+            MakeLabel(cardKeys, "PAINT COLOR:", cPad, S(284), FontBody, SubHeaderColor);
 
             Color[] palette =
 
@@ -10341,7 +10310,7 @@ namespace PredatorControlApp
             var cardGpu = MakeCard(_pnlDisplay, "HARDWARE MUX SWITCH (BIOS REBOOT REQUIRED)", col1X, pad, cardW, S(300));
             MakeLabel(cardGpu, "Physical hardware display multiplexer (MUX) routing in BIOS", cPad, S(40), FontHeaderLight, SubHeaderColor);
 
-            _lblGpuStatusSys = MakeLabel(cardGpu, "Status: Querying BIOS hardware MUX switch...", cPad, S(68), FontSectionHeader, ThemeManager.Accent);
+            _lblGpuStatusSys = MakeLabel(cardGpu, "Status: Querying BIOS hardware MUX switch...", cPad, S(68), FontBodyBold, ThemeManager.Accent);
             UpdateGpuModeStatusLabel();
 
             int muxBtnW = (cInnerW - 2 * S(8)) / 3;
@@ -10391,129 +10360,6 @@ namespace PredatorControlApp
             _pnlDisplay.AutoScrollMinSize = new Size(0, S(440));
         }
 
-        private void BuildBiosPage()
-        {
-            int pad = S(16);
-            int gap = S(16);
-            int usableW = _pageContainer.Width - pad * 2 - DarkScrollPanel.NativeBarWidth;
-            int cPad = S(14);
-            int cInnerW = usableW - cPad * 2;
-
-            // ==========================================
-            // CARD 1: DYNAMIC BIOS & HARDWARE ARCHITECTURE & SAFETY
-            // ==========================================
-            var cardBiosHeader = MakeCard(_pnlBios, "ACER BIOS & HARDWARE ARCHITECTURE", pad, pad, usableW, S(136));
-
-            string badgeText = HardwareIdentity.GetBiosHardwareBadge();
-            MakeLabel(cardBiosHeader, badgeText, cPad, S(40), FontSectionHeader, ThemeManager.Accent);
-
-            // Safety Interlocks CheckBoxes
-            _chkEnableBiosModsSys = new CheckBox
-            {
-                Text = "Enable BIOS Modifications",
-                Font = FontBodyBold,
-                ForeColor = ThemeManager.TextPrimary,
-                Location = new Point(cPad, S(74)),
-                AutoSize = true,
-                Checked = Bios.BiosManager.Instance.ModificationsEnabled
-            };
-            cardBiosHeader.Controls.Add(_chkEnableBiosModsSys);
-
-            _chkAllowDangerousBiosSys = new CheckBox
-            {
-                Text = "Allow Dangerous Settings",
-                Font = FontBody,
-                ForeColor = ThemeManager.RedStatus,
-                Location = new Point(cPad + S(260), S(74)),
-                AutoSize = true,
-                Enabled = _chkEnableBiosModsSys.Checked,
-                Checked = Bios.BiosManager.Instance.DangerousAllowed
-            };
-            cardBiosHeader.Controls.Add(_chkAllowDangerousBiosSys);
-
-            _chkEnableBiosModsSys.CheckedChanged += (s, e) =>
-            {
-                if (_isUpdatingBiosSafetyGates) return;
-                try
-                {
-                    _isUpdatingBiosSafetyGates = true;
-                    Bios.BiosManager.Instance.ModificationsEnabled = _chkEnableBiosModsSys.Checked;
-                    _appSettings.BiosModificationsEnabled = _chkEnableBiosModsSys.Checked;
-                    _chkAllowDangerousBiosSys.Enabled = _chkEnableBiosModsSys.Checked;
-                    if (!_chkEnableBiosModsSys.Checked)
-                    {
-                        _chkAllowDangerousBiosSys.Checked = false;
-                        Bios.BiosManager.Instance.DangerousAllowed = false;
-                        _appSettings.BiosDangerousAllowed = false;
-                    }
-                    _appSettings.Save();
-                    PopulateEmbeddedBiosRows();
-                }
-                finally
-                {
-                    _isUpdatingBiosSafetyGates = false;
-                }
-            };
-
-            _chkAllowDangerousBiosSys.CheckedChanged += (s, e) =>
-            {
-                if (_isUpdatingBiosSafetyGates) return;
-                try
-                {
-                    _isUpdatingBiosSafetyGates = true;
-                    Bios.BiosManager.Instance.DangerousAllowed = _chkAllowDangerousBiosSys.Checked;
-                    _appSettings.BiosDangerousAllowed = _chkAllowDangerousBiosSys.Checked;
-                    _appSettings.Save();
-                    PopulateEmbeddedBiosRows();
-                }
-                finally
-                {
-                    _isUpdatingBiosSafetyGates = false;
-                }
-            };
-
-            MakeLabel(cardBiosHeader, "Modifications unlock low-level ACPI/WMI hardware registers; dangerous settings can affect system stability.", cPad, S(106), FontHeaderLight, SubHeaderColor);
-
-            // ==========================================
-            // CARD 2: BIOS CONFIGURATION SETTINGS
-            // ==========================================
-            int cardSettingsTop = pad + S(136) + gap;
-            int cardSettingsH = S(560);
-            _cardBios = MakeCard(_pnlBios, "FIRMWARE CONFIGURATION SETTINGS", pad, cardSettingsTop, usableW, cardSettingsH);
-
-            // Category Selector Tabs/Buttons
-            int catBtnW = S(160);
-            int catBtnH = S(32);
-            _btnBiosCatSys = MakeButton(_cardBios, "System", cPad, S(40), catBtnW, catBtnH);
-            _btnBiosCatPower = MakeButton(_cardBios, "Power & Battery", cPad + catBtnW + S(8), S(40), catBtnW, catBtnH);
-            _btnBiosCatBoot = MakeButton(_cardBios, "Boot & Setup", cPad + 2 * (catBtnW + S(8)), S(40), catBtnW, catBtnH);
-
-            _btnBiosCatSys.IsActive = true;
-            _btnBiosCatSys.Click += (s, e) => SwitchBiosCategory(Bios.BiosCategory.System, _btnBiosCatSys);
-            _btnBiosCatPower.Click += (s, e) => SwitchBiosCategory(Bios.BiosCategory.PowerBattery, _btnBiosCatPower);
-            _btnBiosCatBoot.Click += (s, e) => SwitchBiosCategory(Bios.BiosCategory.BootSetup, _btnBiosCatBoot);
-
-            // Container Panel for setting rows
-            int containerY = S(82);
-            int containerH = cardSettingsH - containerY - S(56);
-            _pnlBiosItemsContainerSys = new Panel
-            {
-                Location = new Point(cPad, containerY),
-                Size = new Size(cInnerW, containerH),
-                BackColor = Color.Transparent,
-                AutoScroll = true
-            };
-            _cardBios.Controls.Add(_pnlBiosItemsContainerSys);
-
-            // Bottom action button: Restore Defaults (NO Supervisor Password button!)
-            var btnBiosRestore = MakeButton(_cardBios, "↺  Restore Factory Defaults", cPad, cardSettingsH - S(44), S(220), S(32));
-            btnBiosRestore.Click += (s, e) => RestoreBiosDefaults();
-
-            PopulateEmbeddedBiosRows();
-
-            _pnlBios.AutoScrollMinSize = new Size(0, cardSettingsTop + cardSettingsH + pad * 2);
-        }
-
         private void BuildGameSyncPage()
         {
             if (_gameSync == null)
@@ -10533,7 +10379,7 @@ namespace PredatorControlApp
             var cardStatus = MakeCard(_pnlGameSync, "GAME SYNC ENGINE & AUTOMATION", pad, pad, usableW, S(120));
             MakeLabel(cardStatus, "Automatically triggers custom Acer power modes, fan curves, refresh rates & RGB keyboard profiles when gaming.", cPad, S(40), FontHeaderLight, SubHeaderColor);
 
-            _lblGameSyncStatus = MakeLabel(cardStatus, GetGameSyncStatusText(), cPad, S(74), FontSectionHeader, _gameSync.IsEnabled ? ThemeManager.SuccessGreen : SubHeaderColor);
+            _lblGameSyncStatus = MakeLabel(cardStatus, GetGameSyncStatusText(), cPad, S(74), FontBodyBold, _gameSync.IsEnabled ? ThemeManager.SuccessGreen : SubHeaderColor);
 
             _switchGameSync = new PredatorToggle
             {
@@ -10795,8 +10641,8 @@ namespace PredatorControlApp
             // ==========================================
             var cardPowerAuto = MakeCard(_pnlSystem, "AUTOMATIC POWER PROFILES & MODE KEY", col1X, pad, cardW, S(250));
             int pDropW = (cInnerW - S(10)) / 2;
-            _lblAcProfileHdr = MakeLabel(cardPowerAuto, "ON AC POWER:", cPad, S(44), FontSectionHeader, SubHeaderColor);
-            _lblBatteryProfileHdr = MakeLabel(cardPowerAuto, "ON BATTERY:", cPad + pDropW + S(10), S(44), FontSectionHeader, SubHeaderColor);
+            _lblAcProfileHdr = MakeLabel(cardPowerAuto, "ON AC POWER:", cPad, S(44), FontBody, SubHeaderColor);
+            _lblBatteryProfileHdr = MakeLabel(cardPowerAuto, "ON BATTERY:", cPad + pDropW + S(10), S(44), FontBody, SubHeaderColor);
 
             _cboAcProfile = new PredatorDropDown { Location = new Point(cPad, S(68)), Size = new Size(pDropW, S(30)) };
             _cboAcProfile.Items.AddRange(new[] { "Don't Change", "Quiet", "Balanced", "Performance", "Turbo" });
@@ -10839,7 +10685,7 @@ namespace PredatorControlApp
                 Task.Run(() => EnsureBootPowerTaskRegistered());
             };
 
-            MakeLabel(cardPowerAuto, "PHYSICAL MODE KEY ACTION:", cPad, S(112), FontSectionHeader, SubHeaderColor);
+            MakeLabel(cardPowerAuto, "PHYSICAL MODE KEY ACTION:", cPad, S(112), FontBody, SubHeaderColor);
             _cboModeKeyActionSys = new PredatorDropDown
             {
                 Location = new Point(cPad, S(136)),
@@ -10877,7 +10723,7 @@ namespace PredatorControlApp
             _switchUsbCharging.Checked = curUsb?.Enabled ?? true;
             cardUsb.Controls.Add(_switchUsbCharging);
 
-            MakeLabel(cardUsb, "STOP CHARGING WHEN BATTERY REACHES:", cPad, S(80), FontSectionHeader, SubHeaderColor);
+            MakeLabel(cardUsb, "STOP CHARGING WHEN BATTERY REACHES:", cPad, S(80), FontBody, SubHeaderColor);
             _cboUsbFloor = new PredatorDropDown { Location = new Point(cPad, S(104)), Size = new Size(cInnerW, S(30)) };
             _cboUsbFloor.Items.AddRange(new[] { "Stop at 10% Battery", "Stop at 20% Battery", "Stop at 30% Battery" });
             int floorIdx = curUsb?.FloorPercent switch { 10 => 0, 20 => 1, _ => 2 };
@@ -10932,7 +10778,7 @@ namespace PredatorControlApp
 
             var cardApp = MakeCard(_pnlSettings, "APPEARANCE & THEME", col1X, pad, cardW, S(170));
 
-            MakeLabel(cardApp, "APPLICATION THEME:", cPad, S(44), FontSectionHeader, SubHeaderColor);
+            MakeLabel(cardApp, "APPLICATION THEME:", cPad, S(44), FontBody, SubHeaderColor);
 
             _cboTheme = new PredatorDropDown { Location = new Point(cPad, S(68)), Size = new Size(cInnerW, S(30)) };
 
@@ -11030,7 +10876,7 @@ namespace PredatorControlApp
 
             // Card 3: Hardware Diagnostics & Capabilities
 
-            var cardDiag = MakeCard(_pnlSettings, "HARDWARE DIAGNOSTICS & CAPABILITIES", col2X, pad, cardW, S(140));
+            var cardDiag = MakeCard(_pnlSettings, "HARDWARE DIAGNOSTICS & CAPABILITIES", col2X, pad, cardW, S(156));
 
             _btnDiagnostics = MakeButton(cardDiag, "Compatibility report", cPad, S(44), (cInnerW - S(8)) / 2, S(36));
             _btnDiagnostics.Click += (s, e) =>
@@ -11058,23 +10904,20 @@ namespace PredatorControlApp
                     "Detailed diagnostics", MessageBoxButtons.OK, copied ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
             };
 
-            var btnDisplaySettings = MakeButton(cardDiag, "Display Settings", cPad, S(88), (cInnerW - S(8)) / 2, S(36));
+            string biosHardwareBadge = HardwareIdentity.GetBiosHardwareBadge();
+            MakeLabel(cardDiag, biosHardwareBadge, cPad, S(86), FontHeaderLight, ThemeManager.Accent);
+
+            var btnDisplaySettings = MakeButton(cardDiag, "Display Settings (Hardware MUX)", cPad, S(110), cInnerW, S(32));
             btnDisplaySettings.Click += (s, e) =>
             {
                 SwitchPage(_pnlDisplay, _btnNavDisplay);
-            };
-
-            var btnBiosSettings = MakeButton(cardDiag, "BIOS & Firmware", cPad + (cInnerW + S(8)) / 2, S(88), (cInnerW - S(8)) / 2, S(36));
-            btnBiosSettings.Click += (s, e) =>
-            {
-                SwitchPage(_pnlBios, _btnNavBios);
             };
 
 
 
             // Card 4: Application Updates & About
 
-            var cardUpdates = MakeCard(_pnlSettings, "APPLICATION UPDATES & ABOUT", col2X, pad + S(132), cardW, S(160));
+            var cardUpdates = MakeCard(_pnlSettings, "APPLICATION UPDATES & ABOUT", col2X, pad + S(172), cardW, S(160));
 
             MakeLabel(cardUpdates, $"Version v.{Updater.CurrentText}", cPad, S(48), FontBodyBold, ThemeManager.TextPrimary);
 
@@ -11090,7 +10933,7 @@ namespace PredatorControlApp
 
             // Card 5: Custom Mode Shortcuts (Embedded)
             int shortcutsCardH = S(325);
-            var cardShortcuts = MakeCard(_pnlSettings, "CUSTOM MODE SHORTCUTS", col2X, pad + S(304), cardW, shortcutsCardH);
+            var cardShortcuts = MakeCard(_pnlSettings, "CUSTOM MODE SHORTCUTS", col2X, pad + S(344), cardW, shortcutsCardH);
 
             MakeLabel(cardShortcuts, "Configure custom shortcuts to switch Eco, Quiet, Balanced, Performance, Turbo.", cPad, S(40), FontHeaderLight, SubHeaderColor);
 
@@ -12330,195 +12173,6 @@ namespace PredatorControlApp
             {
                 _lblGpuStatusSys.Text = "Status: Hardware MUX Switch Active (BIOS)";
                 _lblGpuStatusSys.ForeColor = ThemeManager.Accent;
-            }
-        }
-
-        private void SwitchBiosCategory(Bios.BiosCategory cat, PredatorButton activeBtn)
-        {
-            _currentBiosCategory = cat;
-            if (_btnBiosCatSys != null) _btnBiosCatSys.IsActive = (activeBtn == _btnBiosCatSys);
-            if (_btnBiosCatPower != null) _btnBiosCatPower.IsActive = (activeBtn == _btnBiosCatPower);
-            if (_btnBiosCatBoot != null) _btnBiosCatBoot.IsActive = (activeBtn == _btnBiosCatBoot);
-            PopulateEmbeddedBiosRows();
-        }
-
-        private void PopulateEmbeddedBiosRows()
-        {
-            if (_pnlBiosItemsContainerSys == null) return;
-            _pnlBiosItemsContainerSys.SuspendLayout();
-            _pnlBiosItemsContainerSys.Controls.Clear();
-
-            var items = Bios.BiosManager.Instance.Settings.Where(s => s.Category == _currentBiosCategory).ToList();
-            if (items.Count == 0)
-            {
-                var lblEmpty = new Label
-                {
-                    Text = "No settings available in this category for this laptop model.",
-                    Font = FontHeaderLight,
-                    ForeColor = SubHeaderColor,
-                    Location = new Point(S(10), S(20)),
-                    AutoSize = true
-                };
-                _pnlBiosItemsContainerSys.Controls.Add(lblEmpty);
-            }
-            else
-            {
-                int rowY = 0;
-                int rowW = _pnlBiosItemsContainerSys.Width - S(16);
-                int rowH = S(72);
-                foreach (var item in items)
-                {
-                    // Synchronize with remembered settings from AppSettings
-                    string remembered = _appSettings.GetBiosSettingValue(item.Name, item.CurrentValue);
-                    if (!string.IsNullOrEmpty(remembered) && (item.Options == null || item.Options.Count == 0 || item.Options.Contains(remembered)))
-                    {
-                        item.CurrentValue = remembered;
-                        item.PendingValue = remembered;
-                    }
-
-                    var rowPanel = new Panel
-                    {
-                        Location = new Point(0, rowY),
-                        Size = new Size(rowW, rowH),
-                        BackColor = ThemeManager.CardBg
-                    };
-                    rowPanel.Paint += (s, e) =>
-                    {
-                        using var pen = new Pen(ThemeManager.CardBorder, 1);
-                        e.Graphics.DrawRectangle(pen, 0, 0, rowPanel.Width - 1, rowPanel.Height - 1);
-                    };
-
-                    // Setting Name
-                    var lblItemName = new Label
-                    {
-                        Text = item.Name,
-                        Font = FontBodyBold,
-                        ForeColor = ThemeManager.TextPrimary,
-                        Location = new Point(S(10), S(8)),
-                        AutoSize = true
-                    };
-                    rowPanel.Controls.Add(lblItemName);
-
-                    // Risk Badge
-                    var lblRisk = new Label
-                    {
-                        Text = item.Risk == Bios.BiosSettingRisk.Dangerous ? "[DANGEROUS]" : "[SAFE]",
-                        Font = FontRiskBadge,
-                        ForeColor = item.Risk == Bios.BiosSettingRisk.Dangerous ? ThemeManager.RedStatus : ThemeManager.SuccessGreen,
-                        Location = new Point(lblItemName.Right + S(8), S(10)),
-                        AutoSize = true
-                    };
-                    rowPanel.Controls.Add(lblRisk);
-
-                    // DropDown for options
-                    int dropW = S(240);
-                    var cboOpt = new PredatorDropDown
-                    {
-                        Location = new Point(S(10), S(34)),
-                        Size = new Size(dropW, S(28))
-                    };
-                    if (item.Options != null)
-                    {
-                        foreach (var opt in item.Options) cboOpt.Items.Add(opt);
-                    }
-                    int selIdx = item.Options?.IndexOf(item.CurrentValue) ?? -1;
-                    if (selIdx >= 0) cboOpt.SelectedIndex = selIdx;
-                    else if (cboOpt.Items.Count > 0) cboOpt.SelectedIndex = 0;
-                    rowPanel.Controls.Add(cboOpt);
-
-                    // Current Value Label
-                    var lblCurrentVal = new Label
-                    {
-                        Text = $"Current: {item.CurrentValue}",
-                        Font = FontHeaderLight,
-                        ForeColor = ThemeManager.TextSecondary,
-                        Location = new Point(S(10) + dropW + S(16), S(38)),
-                        AutoSize = true
-                    };
-                    rowPanel.Controls.Add(lblCurrentVal);
-
-                    // Apply Button
-                    bool canApply = Bios.BiosManager.Instance.ModificationsEnabled &&
-                                   (item.Risk != Bios.BiosSettingRisk.Dangerous || Bios.BiosManager.Instance.DangerousAllowed);
-                    var btnApply = MakeButton(rowPanel, "Apply", rowW - S(95), S(34), S(85), S(28));
-                    btnApply.Enabled = canApply;
-                    btnApply.Click += (s, e) =>
-                    {
-                        string sel = cboOpt.SelectedText;
-                        if (string.IsNullOrEmpty(sel)) return;
-                        item.PendingValue = sel;
-                        if (Bios.BiosManager.Instance.ApplySetting(item, out string err))
-                        {
-                            lblCurrentVal.Text = $"Current: {item.CurrentValue}";
-                            _appSettings.SetBiosSettingValue(item.Name, item.CurrentValue);
-                            _appSettings.Save();
-
-                            bool requiresRestart = item.Name.Contains("MUX", StringComparison.OrdinalIgnoreCase) ||
-                                                   item.Name.Contains("Boot", StringComparison.OrdinalIgnoreCase) ||
-                                                   item.Category == Bios.BiosCategory.BootSetup ||
-                                                   err.Contains("restart", StringComparison.OrdinalIgnoreCase) ||
-                                                   err.Contains("reboot", StringComparison.OrdinalIgnoreCase);
-
-                            if (requiresRestart)
-                            {
-                                var dr = MessageBox.Show(this,
-                                    $"BIOS setting '{item.Name}' was successfully applied to '{item.CurrentValue}'.\r\n\r\nA system restart is required for this firmware setting to take full effect. Would you like to restart now?",
-                                    "BIOS Setting Applied - Restart Required",
-                                    MessageBoxButtons.YesNo,
-                                    MessageBoxIcon.Question);
-
-                                if (dr == DialogResult.Yes)
-                                {
-                                    try
-                                    {
-                                        Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 5") { CreateNoWindow = true, UseShellExecute = false });
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        Program.Report(ex, false);
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                MessageBox.Show(this,
-                                    string.IsNullOrEmpty(err) ? $"BIOS setting '{item.Name}' applied successfully to '{item.CurrentValue}'." : err,
-                                    "BIOS Setting Updated", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                            }
-                        }
-                        else
-                        {
-                            MessageBox.Show(this, $"Failed to apply BIOS setting '{item.Name}':\n{err}",
-                                "BIOS Setting Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                        }
-                    };
-
-                    _pnlBiosItemsContainerSys.Controls.Add(rowPanel);
-                    rowY += rowH + S(6);
-                }
-            }
-            _pnlBiosItemsContainerSys.ResumeLayout();
-        }
-
-        private void RestoreBiosDefaults()
-        {
-            var res = MessageBox.Show(this,
-                "Are you sure you want to restore all Acer BIOS and Firmware settings to factory defaults?\r\n\r\nThis will re-initialize firmware settings safely.",
-                "Restore BIOS Defaults", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
-            if (res == DialogResult.Yes)
-            {
-                if (Bios.BiosManager.Instance.RestoreDefaults(false, out string msg))
-                {
-                    _appSettings.BiosSettingsValues.Clear();
-                    _appSettings.Save();
-                    MessageBox.Show(this, string.IsNullOrEmpty(msg) ? "Factory defaults restored successfully." : msg,
-                        "BIOS Defaults Restored", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    PopulateEmbeddedBiosRows();
-                }
-                else
-                {
-                    MessageBox.Show(this, msg, "Restore Defaults Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
             }
         }
 
@@ -18062,7 +17716,6 @@ namespace PredatorControlApp
                 {
                     UpdateDpiFonts();
                     RescaleAllPagesAndChrome(factor);
-                    RescaleControlFonts(this, factor);
                 }
                 catch { }
             }
@@ -18098,13 +17751,6 @@ namespace PredatorControlApp
                     (int)(_pnlDisplay.AutoScrollMinSize.Width * factor),
                     (int)(_pnlDisplay.AutoScrollMinSize.Height * factor));
             }
-            if (_pnlBios != null)
-            {
-                _pnlBios.SetDpiScale(_dpiScale);
-                _pnlBios.AutoScrollMinSize = new Size(
-                    (int)(_pnlBios.AutoScrollMinSize.Width * factor),
-                    (int)(_pnlBios.AutoScrollMinSize.Height * factor));
-            }
             if (_pnlGameSync != null)
             {
                 _pnlGameSync.SetDpiScale(_dpiScale);
@@ -18127,23 +17773,6 @@ namespace PredatorControlApp
                     (int)(_pnlSettings.AutoScrollMinSize.Height * factor));
             }
             Invalidate(true);
-        }
-
-        private static void RescaleControlFonts(Control root, float factor)
-        {
-            if (root == null || root.IsDisposed) return;
-            if (root.Font != null)
-            {
-                float newSize = Math.Max(6f, (float)Math.Round(root.Font.Size * factor, 2));
-                if (Math.Abs(newSize - root.Font.Size) > 0.05f)
-                {
-                    root.Font = new Font(root.Font.FontFamily, newSize, root.Font.Style);
-                }
-            }
-            foreach (Control child in root.Controls)
-            {
-                RescaleControlFonts(child, factor);
-            }
         }
 
 

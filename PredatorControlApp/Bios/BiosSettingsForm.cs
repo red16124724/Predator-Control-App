@@ -7,6 +7,7 @@ using System.Windows.Forms;
 namespace PredatorControlApp.Bios
 {
     [SupportedOSPlatform("windows")]
+    [Obsolete("BIOS modifying settings have been permanently removed from the application.")]
     public class BiosSettingsForm : Form
     {
         public static Func<IWin32Window?, string, string, MessageBoxButtons, MessageBoxIcon, DialogResult> MessageBoxHandler { get; set; } =
@@ -20,12 +21,12 @@ namespace PredatorControlApp.Bios
         private readonly BiosManager _biosManager;
         private readonly AppSettings _settings;
 
-        private static readonly Font s_fontMain = new("Segoe UI", 9.5f, FontStyle.Regular);
+        private static readonly Font s_fontMain = new("Segoe UI", 9f, FontStyle.Regular);
         private static readonly Font s_fontTitle = new("Segoe UI", 15f, FontStyle.Bold);
         private static readonly Font s_fontModelBadge = new("Segoe UI", 9f, FontStyle.Bold);
         private static readonly Font s_fontModeBadge = new("Segoe UI", 8.5f, FontStyle.Italic);
         private static readonly Font s_fontSafetyTitle = new("Segoe UI", 9f, FontStyle.Bold);
-        private static readonly Font s_fontSettingName = new("Segoe UI", 9.5f, FontStyle.Bold);
+        private static readonly Font s_fontSettingName = new("Segoe UI", 9f, FontStyle.Bold);
         private static readonly Font s_fontRiskBadge = new("Segoe UI", 7.5f, FontStyle.Bold);
         private static readonly Font s_fontCurrentVal = new("Segoe UI", 8.5f);
 
@@ -559,26 +560,9 @@ namespace PredatorControlApp.Bios
                 try
                 {
                     this.Scale(new SizeF(factor, factor));
-                    RescaleControlFonts(this, factor);
                     PopulateCategories();
                 }
                 catch { }
-            }
-        }
-
-        private static void RescaleControlFonts(Control root, float factor)
-        {
-            if (root.Font != null)
-            {
-                float newSize = Math.Max(6f, (float)Math.Round(root.Font.Size * factor, 2));
-                if (Math.Abs(newSize - root.Font.Size) > 0.05f)
-                {
-                    root.Font = new Font(root.Font.FontFamily, newSize, root.Font.Style);
-                }
-            }
-            foreach (Control child in root.Controls)
-            {
-                RescaleControlFonts(child, factor);
             }
         }
 

@@ -1,4 +1,4 @@
-﻿# Changelog
+# Changelog
 
 Local 1.5.5 improvements: one update check at startup, including hidden launches, plus manual checks; verified updates with rollback copy; verified embedded-only native loading with hash-specific cache; on-demand telemetry and PawnIO; compatibility report with preview, copy and save. The build remains unsigned pending a trusted signing certificate.
 
@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+
+## [1.5.5 Typography Normalization & BIOS Modification Settings Removal] - 2026-11-06
+
+- **UI Typography Normalization & Font Explosion Resolution**:
+  - Eliminated font size explosion and unreadable bold text across all cards and forms.
+  - Removed manual font point size DPI multiplication from `UpdateDpiFonts()`; GDI per-monitor DPI handles font point-to-pixel scaling automatically under PerMonitorV2, preventing double-scaling.
+  - Completely eliminated `RescaleControlFonts()` recursive loops across all forms (`Form1`, `DisplaySettingsForm`, `BiosSettingsForm`, `FanCurveForm`, `GameSyncForm`, `HardwareCapabilitiesForm`) so font sizes never compound on DPI transitions or form activation.
+  - Re-balanced typography hierarchy: crisp 8.5pt Bold card headers, legible 9pt Regular body text for descriptions and labels, with 9pt Bold strictly reserved for real-time telemetry numbers and active statuses.
+- **100% Removal of BIOS Modifying Settings (Retaining Hardware MUX Switch)**:
+  - Completely removed the "BIOS Settings" sidebar tab, navigation button (`_btnNavBios`), and panel (`_pnlBios`).
+  - Completely removed all BIOS modifying controls and methods: `BuildBiosPage()`, `PopulateEmbeddedBiosRows()`, `SwitchBiosCategory()`, `RestoreBiosDefaults()`, `_chkEnableBiosModsSys`, `_chkAllowDangerousBiosSys`, and `trayBiosSettings`.
+  - Streamlined sidebar navigation to 7 clean tabs: Dashboard, Fans & Cooling, RGB Lighting, Display Settings, Game Sync, System & Power, Settings & Info.
+  - Preserved live hardware architecture identity: BIOS version, model name, SMBIOS version, and architecture badge (`HardwareIdentity.GetBiosHardwareBadge()`) displayed clearly under Settings & Info (`_pnlSettings`) for system visibility without modification controls.
+- **Hardware BIOS MUX Switch 100% Retained**:
+  - Full hardware MUX switch controls retained intact in Display Settings (`_pnlDisplay` and `DisplaySettingsForm`): Automatic (Optimus MUX), Integrated Only (iGPU MUX), and Discrete Only (dGPU MUX).
+  - Mandatory system reboot prompt and confirmation (`shutdown.exe /r /t 5`) preserved for ACPI/WMI hardware display switching.
+
+---
 
 ## [1.5.5 Comprehensive Stress Testing, Chaos Fuzzing & Bug Remediation] - 2026-11-06
 

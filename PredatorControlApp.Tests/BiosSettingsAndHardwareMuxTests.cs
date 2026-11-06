@@ -11,6 +11,7 @@ using Xunit;
 
 namespace PredatorControlApp.Tests
 {
+    [Collection("NoParallel")]
     public class BiosSettingsAndHardwareMuxTests
     {
         [Fact]
@@ -58,40 +59,43 @@ namespace PredatorControlApp.Tests
         }
 
         [Fact]
-        public void BiosManager_RememberedSettings_LoadsAndAppliesWithAppSettings()
+        public void BiosManager_RememberedSettings_LoadsAndAppliesHardwareMuxSwitch_RejectsNonMux()
         {
             var tempSettingsPath = Path.Combine(Path.GetTempPath(), $"predator_test_settings_{Guid.NewGuid():N}.json");
             AppSettings.CustomFilePath = tempSettingsPath;
             try
             {
                 var settings = AppSettings.Load();
-                settings.BiosModificationsEnabled = true;
-                settings.BiosDangerousAllowed = true;
-                settings.SetBiosSettingValue("Keyboard backlight timeout", "Disabled");
-                settings.SetBiosSettingValue("Power-off USB Charge", "Enabled (20%)");
+                settings.SetBiosSettingValue("Display MUX (Advanced Optimus / dGPU)", "Discrete GPU only");
                 settings.Save();
 
                 var manager = BiosManager.Instance;
-                manager.ModificationsEnabled = true;
-                manager.DangerousAllowed = true;
                 manager.ProbeAndLoad();
 
-                var kbItem = manager.Settings.FirstOrDefault(s => s.Name.Equals("Keyboard backlight timeout", StringComparison.OrdinalIgnoreCase));
-                Assert.NotNull(kbItem);
-                Assert.Equal("Disabled", kbItem.CurrentValue);
+                // 1. Hardware MUX switch item is loaded and active
+                var muxItem = manager.GetMuxSetting();
+                Assert.NotNull(muxItem);
 
-                var usbItem = manager.Settings.FirstOrDefault(s => s.Name.Equals("Power-off USB Charge", StringComparison.OrdinalIgnoreCase));
-                Assert.NotNull(usbItem);
-                Assert.Equal("Enabled (20%)", usbItem.CurrentValue);
-
-                // Now apply a new setting and verify it persists immediately
-                usbItem.PendingValue = "Enabled (10%)";
-                bool applied = manager.ApplySetting(usbItem, out string error);
+                // 2. Applying Hardware MUX switch persists and updates value
+                muxItem.PendingValue = "Optimus";
+                bool applied = manager.ApplySetting(muxItem, out string error);
                 Assert.True(applied, error);
-                Assert.Equal("Enabled (10%)", usbItem.CurrentValue);
+                Assert.Equal("Optimus", muxItem.CurrentValue);
 
                 var reloadedSettings = AppSettings.Load();
-                Assert.Equal("Enabled (10%)", reloadedSettings.GetBiosSettingValue("Power-off USB Charge", ""));
+                Assert.Equal("Optimus", reloadedSettings.GetBiosSettingValue(muxItem.Name, ""));
+
+                // 3. Applying arbitrary BIOS modifying settings is rejected
+                var nonMuxItem = new BiosSettingItem
+                {
+                    Name = "Keyboard backlight timeout",
+                    CurrentValue = "30 Seconds",
+                    PendingValue = "Disabled",
+                    Options = new() { "Disabled", "10 Seconds", "30 Seconds" }
+                };
+                bool nonMuxApplied = manager.ApplySetting(nonMuxItem, out string nonMuxErr);
+                Assert.False(nonMuxApplied);
+                Assert.Contains("permanently removed", nonMuxErr, StringComparison.OrdinalIgnoreCase);
             }
             finally
             {
@@ -130,7 +134,7 @@ namespace PredatorControlApp.Tests
         }
 
         [Fact]
-        public void BiosSettingsForm_RowCurrentLabelAndPersistence()
+        public void BiosSettingsForm_LoadsHardwareMuxSettingOnly()
         {
             StaTestRunner.Run(() =>
             {
@@ -139,23 +143,58 @@ namespace PredatorControlApp.Tests
                 try
                 {
                     var settings = AppSettings.Load();
-                    settings.BiosModificationsEnabled = true;
-                    settings.SetBiosSettingValue("Keyboard backlight timeout", "Disabled");
+                    settings.SetBiosSettingValue("Display MUX (Advanced Optimus / dGPU)", "Optimus");
                     settings.Save();
 
                     using var form = new BiosSettingsForm(BiosManager.Instance, settings);
                     form.CreateControl();
 
-                    // Verify settings populated with remembered value
+                    var muxItem = BiosManager.Instance.GetMuxSetting();
+                    Assert.NotNull(muxItem);
+                    Assert.Equal("Optimus", muxItem.CurrentValue);
+
+                    // Non-MUX settings are absent from active manager settings
                     var kbItem = BiosManager.Instance.Settings.FirstOrDefault(s => s.Name.Contains("backlight timeout", StringComparison.OrdinalIgnoreCase));
-                    Assert.NotNull(kbItem);
-                    Assert.Equal("Disabled", kbItem.CurrentValue);
+                    Assert.Null(kbItem);
                 }
                 finally
                 {
                     AppSettings.CustomFilePath = null;
                     try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
                 }
+            });
+        }
+
+        [Fact]
+        public void Form1_BiosModifyingSettingsUI_Removed_And_HardwareMuxActiveInDisplaySettings()
+        {
+            StaTestRunner.Run(() =>
+            {
+                using var form = new Form1();
+                form.CreateControl();
+
+                // 1. Verify _pnlBios and _btnNavBios are removed from Form1
+                var pnlBiosField = typeof(Form1).GetField("_pnlBios", BindingFlags.NonPublic | BindingFlags.Instance);
+                var btnNavBiosField = typeof(Form1).GetField("_btnNavBios", BindingFlags.NonPublic | BindingFlags.Instance);
+                var cardBiosField = typeof(Form1).GetField("_cardBios", BindingFlags.NonPublic | BindingFlags.Instance);
+
+                Assert.Null(pnlBiosField);
+                Assert.Null(btnNavBiosField);
+                Assert.Null(cardBiosField);
+
+                // 2. Verify Display panel exists and contains the Hardware MUX Switch UI controls
+                var pnlDisplayField = typeof(Form1).GetField("_pnlDisplay", BindingFlags.NonPublic | BindingFlags.Instance);
+                Assert.NotNull(pnlDisplayField);
+                var pnlDisplay = pnlDisplayField.GetValue(form) as Control;
+                Assert.NotNull(pnlDisplay);
+
+                // 3. Verify Display Settings standalone form still contains active MUX controls
+                using var displayForm = new DisplaySettingsForm();
+                displayForm.CreateControl();
+                var btnAuto = typeof(DisplaySettingsForm).GetField("_btnMuxAuto", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(displayForm) as PredatorButton;
+                var btnDiscrete = typeof(DisplaySettingsForm).GetField("_btnMuxDiscrete", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(displayForm) as PredatorButton;
+                Assert.NotNull(btnAuto);
+                Assert.NotNull(btnDiscrete);
             });
         }
     }

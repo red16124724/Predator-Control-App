@@ -1,4 +1,4 @@
-﻿# Predator Control App v1.5.5 Release Notes & Audit Summary
+# Predator Control App v1.5.5 Release Notes & Audit Summary
 
 The sidebar version label displays â€œMade by RED4724â€. This local build is unsigned; trusted signing requires a suitable code-signing certificate and signing tool.
 
@@ -9,6 +9,18 @@ Current local 1.5.5 improvements: one update check on startup, including hidden 
 ## Executive Overview
 Version 1.5.5 brings a comprehensive codebase audit, bug fix, and stabilization overhaul across the C# .NET 10 WinForms UI, native Rust Core (predator_core.dll), Ring-0 PawnIO hardware drivers, and the complete 2,460-test suite (285 Rust + 2,175 .NET).
 
+
+### UI Typography Normalization & BIOS Modification Settings Removal (Update 2026-11-06)
+- **UI Typography Normalization & Font Scaling Resolution**:
+  - Eliminated text size blow-up and excessive bold formatting across all cards and views.
+  - Removed manual font point size DPI multiplication from `UpdateDpiFonts()`; points are automatically scaled by GDI under Windows PerMonitorV2, preventing double-scaling.
+  - Completely removed recursive control font rescaling (`RescaleControlFonts()`) across all forms so fonts never compound on DPI events.
+  - Restored clean typography hierarchy: 8.5pt Bold card headers, 9pt Regular readable body text, and 9pt Bold strictly reserved for telemetry values and active states.
+- **100% Removal of BIOS Modifying Settings (Retaining Hardware MUX Switch)**:
+  - Completely removed BIOS Settings sidebar navigation button (`_btnNavBios`), panel (`_pnlBios`), and all BIOS modifying controls (`BuildBiosPage()`, `PopulateEmbeddedBiosRows()`, `RestoreBiosDefaults()`).
+  - Streamlined sidebar navigation to 7 tabs: Dashboard, Fans & Cooling, RGB Lighting, Display Settings, Game Sync, System & Power, Settings & Info.
+  - Live BIOS hardware architecture identity (`HardwareIdentity.GetBiosHardwareBadge()`) displayed under Settings & Info for full system visibility without modification controls.
+  - Hardware MUX switch in Display Settings (`_pnlDisplay` and `DisplaySettingsForm`) is 100% retained with reboot prompts and ACPI/WMI backend querying.
 
 ### Comprehensive Stress Testing, Chaos Fuzzing & Bug Remediation (Update 2026-11-06)
 - **App-Wide Chaos, Fuzzing & Concurrency Stress Verification**:

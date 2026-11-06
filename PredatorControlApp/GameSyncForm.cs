@@ -18,7 +18,7 @@ namespace PredatorControlApp
 
         private static readonly Font FontTitle = new("Segoe UI", 11f, FontStyle.Bold);
         private static readonly Font FontSection = new("Segoe UI", 8.5f, FontStyle.Bold);
-        private static readonly Font FontBody = new("Segoe UI", 9.5f, FontStyle.Regular);
+        private static readonly Font FontBody = new("Segoe UI", 9f, FontStyle.Regular);
         private static readonly Font FontClose = new("Arial", 12f);
 
         #endregion
@@ -467,25 +467,8 @@ namespace PredatorControlApp
                 try
                 {
                     this.Scale(new SizeF(factor, factor));
-                    RescaleControlFonts(this, factor);
                 }
                 catch { }
-            }
-        }
-
-        private static void RescaleControlFonts(Control root, float factor)
-        {
-            if (root.Font != null)
-            {
-                float newSize = Math.Max(6f, (float)Math.Round(root.Font.Size * factor, 2));
-                if (Math.Abs(newSize - root.Font.Size) > 0.05f)
-                {
-                    root.Font = new Font(root.Font.FontFamily, newSize, root.Font.Style);
-                }
-            }
-            foreach (Control child in root.Controls)
-            {
-                RescaleControlFonts(child, factor);
             }
         }
 

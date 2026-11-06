@@ -21,12 +21,12 @@ namespace PredatorControlApp.Display
         private readonly AppSettings _settings;
         private readonly WmiController _wmi = new();
 
-        private static readonly Font s_fontMain = new("Segoe UI", 9.5f, FontStyle.Regular);
+        private static readonly Font s_fontMain = new("Segoe UI", 9f, FontStyle.Regular);
         private static readonly Font s_fontTitle = new("Segoe UI", 16f, FontStyle.Bold);
         private static readonly Font s_fontSubtitle = new("Segoe UI", 8.5f, FontStyle.Regular);
         private static readonly Font s_fontCardTitle = new("Segoe UI", 9.5f, FontStyle.Bold);
         private static readonly Font s_fontCurrentHz = new("Segoe UI", 10f, FontStyle.Bold);
-        private static readonly Font s_fontDdsStatus = new("Segoe UI", 9.5f, FontStyle.Regular);
+        private static readonly Font s_fontDdsStatus = new("Segoe UI", 9f, FontStyle.Regular);
         private static readonly Font s_fontDdsNotice = new("Segoe UI", 8.25f, FontStyle.Italic);
 
         private Label _lblCurrentHz = null!;
@@ -414,25 +414,8 @@ namespace PredatorControlApp.Display
                 try
                 {
                     this.Scale(new SizeF(factor, factor));
-                    RescaleControlFonts(this, factor);
                 }
                 catch { }
-            }
-        }
-
-        private static void RescaleControlFonts(Control root, float factor)
-        {
-            if (root.Font != null)
-            {
-                float newSize = Math.Max(6f, (float)Math.Round(root.Font.Size * factor, 2));
-                if (Math.Abs(newSize - root.Font.Size) > 0.05f)
-                {
-                    root.Font = new Font(root.Font.FontFamily, newSize, root.Font.Style);
-                }
-            }
-            foreach (Control child in root.Controls)
-            {
-                RescaleControlFonts(child, factor);
             }
         }
 
