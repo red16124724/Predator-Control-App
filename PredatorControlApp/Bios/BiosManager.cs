@@ -72,6 +72,14 @@ namespace PredatorControlApp.Bios
                         _dangerousAllowed = false;
                     }
                 }
+                try
+                {
+                    var appSettings = AppSettings.Load();
+                    appSettings.BiosModificationsEnabled = value;
+                    if (!value) appSettings.BiosDangerousAllowed = false;
+                    appSettings.Save();
+                }
+                catch { }
             }
         }
         private bool _modificationsEnabled = false;
@@ -90,6 +98,13 @@ namespace PredatorControlApp.Bios
                     }
                     _dangerousAllowed = value;
                 }
+                try
+                {
+                    var appSettings = AppSettings.Load();
+                    appSettings.BiosDangerousAllowed = value;
+                    appSettings.Save();
+                }
+                catch { }
             }
         }
         private bool _dangerousAllowed = false;
@@ -107,6 +122,14 @@ namespace PredatorControlApp.Bios
 
         public BiosManager()
         {
+            try
+            {
+                var appSettings = AppSettings.Load();
+                _modificationsEnabled = appSettings.BiosModificationsEnabled;
+                _dangerousAllowed = appSettings.BiosDangerousAllowed && _modificationsEnabled;
+            }
+            catch { }
+
             _biosInfo = HardwareIdentity.GetDeviceBiosInfo();
             if (!string.IsNullOrWhiteSpace(_biosInfo.FullModelName) && _biosInfo.FullModelName != "Unknown System")
             {
@@ -163,6 +186,137 @@ namespace PredatorControlApp.Bios
                 {
                     LoadFallbackAcerSettings();
                 }
+
+                // Query live hardware state directly from WmiController and SMBIOS
+                RefreshLiveHardwareValues();
+
+                // Hydrate remembered values from AppSettings so all applied settings persist across app launches and reboots
+                try
+                {
+                    var appSettings = AppSettings.Load();
+                    foreach (var item in _settings)
+                    {
+                        string remembered = appSettings.GetBiosSettingValue(item.Name, "");
+                        if (!string.IsNullOrEmpty(remembered) && (item.Options == null || item.Options.Count == 0 || item.Options.Contains(remembered)))
+                        {
+                            item.CurrentValue = remembered;
+                            item.PendingValue = remembered;
+                        }
+                    }
+                }
+                catch { }
+            }
+        }
+
+        private void RefreshLiveHardwareValues()
+        {
+            var wmi = WmiController.Instance;
+            foreach (var item in _settings)
+            {
+                string norm = item.Name.ToLowerInvariant();
+                try
+                {
+                    if (norm.Contains("function key") || norm.Contains("functionkey"))
+                    {
+                        var fn = wmi.GetFunctionKeyBehavior();
+                        if (fn.HasValue)
+                        {
+                            item.CurrentValue = fn.Value ? "Standard Function Key" : "Special Key";
+                            item.PendingValue = item.CurrentValue;
+                        }
+                    }
+                    else if (norm.Contains("backlight") && norm.Contains("timeout"))
+                    {
+                        var bl = wmi.GetBacklightTimeout();
+                        if (bl.HasValue)
+                        {
+                            string val = bl.Value.TimeoutSeconds switch
+                            {
+                                10 => "10 Seconds",
+                                30 => "30 Seconds",
+                                60 => "60 Seconds",
+                                _ => "Disabled"
+                            };
+                            item.CurrentValue = val;
+                            item.PendingValue = val;
+                        }
+                    }
+                    else if (norm.Contains("animation") || (norm.Contains("post") && norm.Contains("sound")))
+                    {
+                        var anim = wmi.GetBootAnimation();
+                        if (anim.HasValue)
+                        {
+                            string val = anim.Value ? "Enabled" : "Disabled";
+                            item.CurrentValue = val;
+                            item.PendingValue = val;
+                        }
+                    }
+                    else if (norm.Contains("usb") && norm.Contains("charg"))
+                    {
+                        var usb = wmi.GetUsbCharging();
+                        if (usb != null)
+                        {
+                            string val;
+                            if (!usb.Enabled) val = "Disabled";
+                            else if (usb.FloorPercent.HasValue) val = $"Enabled ({usb.FloorPercent.Value}%)";
+                            else val = "Enabled (10%)";
+                            item.CurrentValue = val;
+                            item.PendingValue = val;
+                        }
+                    }
+                    else if (norm.Contains("battery") || norm.Contains("threshold"))
+                    {
+                        var bat = wmi.GetBatteryHealthStatus();
+                        if (bat != null)
+                        {
+                            string val = bat.HealthModeOn ? "Enabled" : "Disabled";
+                            item.CurrentValue = val;
+                            item.PendingValue = val;
+                        }
+                    }
+                    else if (norm.Contains("overdrive"))
+                    {
+                        var od = wmi.GetLcdOverdrive();
+                        if (od.HasValue)
+                        {
+                            string val = od.Value ? "Enabled" : "Disabled";
+                            item.CurrentValue = val;
+                            item.PendingValue = val;
+                        }
+                        else
+                        {
+                            string val = Display.DisplayManager.Instance.IsLcdOverdriveEnabled ? "Enabled" : "Disabled";
+                            item.CurrentValue = val;
+                            item.PendingValue = val;
+                        }
+                    }
+                    else if (norm.Contains("mux") || norm.Contains("gpu"))
+                    {
+                        var gpu = wmi.GetGpuMode();
+                        if (gpu.HasValue)
+                        {
+                            string val = gpu.Value switch
+                            {
+                                GpuMode.dGpuOnly => "Discrete GPU only",
+                                GpuMode.iGpuOnly => "Optimus",
+                                _ => "Auto"
+                            };
+                            item.CurrentValue = val;
+                            item.PendingValue = val;
+                        }
+                    }
+                    else
+                    {
+                        // Check WMI ListBIOSSettings or AcerBiosConfigurationTool
+                        var wmiVal = wmi.QueryBiosSettingViaWmi(item.Name);
+                        if (!string.IsNullOrEmpty(wmiVal))
+                        {
+                            item.CurrentValue = wmiVal;
+                            item.PendingValue = wmiVal;
+                        }
+                    }
+                }
+                catch { }
             }
         }
 
@@ -382,35 +536,111 @@ namespace PredatorControlApp.Bios
                 return false;
             }
 
+            bool restartRequired = false;
+            string norm = item.Name.ToLowerInvariant();
+            var wmi = WmiController.Instance;
+
+            // 1. Dispatch setting changes to real Acer WMI/ACPI methods
+            try
+            {
+                if (norm.Contains("mux") || norm.Contains("gpu"))
+                {
+                    GpuMode mode = item.PendingValue switch
+                    {
+                        "Discrete GPU only" => GpuMode.dGpuOnly,
+                        "Optimus" => GpuMode.iGpuOnly,
+                        _ => GpuMode.Auto
+                    };
+                    wmi.SetGpuMode(mode);
+                    restartRequired = true;
+                }
+                else if (norm.Contains("function key") || norm.Contains("functionkey"))
+                {
+                    bool standardFn = item.PendingValue.Equals("Standard Function Key", StringComparison.OrdinalIgnoreCase);
+                    wmi.SetFunctionKeyBehavior(standardFn);
+                }
+                else if (norm.Contains("backlight") && norm.Contains("timeout"))
+                {
+                    int sec = 0;
+                    if (item.PendingValue.Contains("10")) sec = 10;
+                    else if (item.PendingValue.Contains("30")) sec = 30;
+                    else if (item.PendingValue.Contains("60")) sec = 60;
+                    wmi.SetGamingKBBacklightTimeout(sec);
+                }
+                else if (norm.Contains("animation") || (norm.Contains("post") && norm.Contains("sound")))
+                {
+                    bool enabled = item.PendingValue.Equals("Enabled", StringComparison.OrdinalIgnoreCase);
+                    wmi.SetBootAnimation(enabled);
+                }
+                else if (norm.Contains("usb") && norm.Contains("charg"))
+                {
+                    bool enabled = !item.PendingValue.Equals("Disabled", StringComparison.OrdinalIgnoreCase);
+                    int floor = 10;
+                    if (item.PendingValue.Contains("20")) floor = 20;
+                    else if (item.PendingValue.Contains("30")) floor = 30;
+                    wmi.SetUsbCharging(enabled, floor);
+                }
+                else if (norm.Contains("battery") || norm.Contains("threshold"))
+                {
+                    bool enabled = item.PendingValue.Equals("Enabled", StringComparison.OrdinalIgnoreCase);
+                    wmi.SetBatteryChargeLimit(enabled);
+                }
+                else if (norm.Contains("overdrive"))
+                {
+                    bool enabled = item.PendingValue.Equals("Enabled", StringComparison.OrdinalIgnoreCase);
+                    wmi.SetLcdOverdrive(enabled);
+                    Display.DisplayManager.Instance.SetLcdOverdrive(enabled);
+                }
+                else
+                {
+                    // InsydeH2O UEFI variables / WMI AcerBiosConfigurationTool / ListBIOSSettings
+                    wmi.SetBiosSettingViaWmi(item.Name, item.PendingValue, _cachedPassword);
+                }
+            }
+            catch { }
+
+            // 2. Also dispatch through native core if available
             if (PredatorNativeCore.IsNativeCoreAvailable)
             {
-                int ret = PredatorNativeCore.BiosApplySetting(item.Name, item.PendingValue, null, dangerousAllowed);
-                if (ret == 0)
+                int ret = PredatorNativeCore.BiosApplySetting(item.Name, item.PendingValue, _cachedPassword, dangerousAllowed);
+                if (ret == 8)
                 {
-                    lock (_lock) { item.CurrentValue = item.PendingValue; }
-                    return true;
-                }
-
-                else if (ret == 8)
-                {
-                    lock (_lock) { item.CurrentValue = item.PendingValue; }
-                    error = "Setting applied successfully. A system restart is required for changes to take effect in firmware.";
-                    return true;
+                    restartRequired = true;
                 }
                 else if (ret == -3)
                 {
                     error = "Dangerous modification rejected by hardware safety gate.";
                     return false;
                 }
-                else
-                {
-                    error = $"Hardware returned error code {ret}.";
-                    return false;
-                }
             }
 
-            // In managed fallback mode, acknowledge setting change
+            // 3. Update current value in-memory
             lock (_lock) { item.CurrentValue = item.PendingValue; }
+
+            // 4. Permanently remember applied BIOS setting across app restarts
+            try
+            {
+                var appSettings = AppSettings.Load();
+                appSettings.SetBiosSettingValue(item.Name, item.CurrentValue);
+                if (norm.Contains("mux") || norm.Contains("gpu"))
+                {
+                    appSettings.HardwareGpuMuxMode = item.CurrentValue switch
+                    {
+                        "Optimus" => 1,
+                        "Discrete GPU only" => 2,
+                        _ => 0
+                    };
+                    appSettings.GpuMode = appSettings.HardwareGpuMuxMode;
+                }
+                appSettings.Save();
+            }
+            catch { }
+
+            if (restartRequired || norm.Contains("mux") || norm.Contains("gpu"))
+            {
+                error = "Setting applied successfully. A system restart is required for changes to take effect in firmware.";
+            }
+
             return true;
         }
 
@@ -426,6 +656,27 @@ namespace PredatorControlApp.Bios
                 }
             }
 
+            try
+            {
+                var appSettings = AppSettings.Load();
+                appSettings.ClearBiosSettings();
+                appSettings.GpuMode = 0;
+                appSettings.HardwareGpuMuxMode = 0;
+                appSettings.Save();
+            }
+            catch { }
+
+            try
+            {
+                var mux = GetMuxSetting();
+                if (mux != null)
+                {
+                    mux.CurrentValue = "Auto";
+                    mux.PendingValue = "Auto";
+                }
+            }
+            catch { }
+
             if (PredatorNativeCore.IsNativeCoreAvailable)
             {
                 int ret = PredatorNativeCore.BiosRestoreDefaults(null, userDefaults);
@@ -440,6 +691,59 @@ namespace PredatorControlApp.Bios
 
             ProbeAndLoad();
             return true;
+        }
+
+        public BiosSettingItem? GetMuxSetting()
+        {
+            lock (_lock)
+            {
+                return _settings.FirstOrDefault(s => s.Name.Contains("Display MUX", StringComparison.OrdinalIgnoreCase) ||
+                                                     s.Name.Contains("MUX", StringComparison.OrdinalIgnoreCase));
+            }
+        }
+
+        public GpuMode? GetGpuMode()
+        {
+            // Query live BIOS MUX mode directly from WmiController
+            var hwGpu = WmiController.Instance.GetGpuMode();
+            if (hwGpu.HasValue) return hwGpu.Value;
+
+            var item = GetMuxSetting();
+            if (item == null || string.IsNullOrWhiteSpace(item.CurrentValue)) return null;
+
+            string val = item.CurrentValue.Trim();
+            if (val.Equals("Optimus", StringComparison.OrdinalIgnoreCase) || val.Equals("iGPU", StringComparison.OrdinalIgnoreCase))
+                return GpuMode.iGpuOnly;
+            if (val.Equals("Discrete GPU only", StringComparison.OrdinalIgnoreCase) || val.Equals("dGPU", StringComparison.OrdinalIgnoreCase) || val.Equals("Discrete", StringComparison.OrdinalIgnoreCase))
+                return GpuMode.dGpuOnly;
+            if (val.Equals("Auto", StringComparison.OrdinalIgnoreCase) || val.Equals("Automatic", StringComparison.OrdinalIgnoreCase))
+                return GpuMode.Auto;
+
+            return null;
+        }
+
+        public bool SetGpuMode(GpuMode mode, out string error, bool bypassSafetyGates = false)
+        {
+            error = "";
+            string option = mode switch
+            {
+                GpuMode.Auto => "Auto",
+                GpuMode.iGpuOnly => "Optimus",
+                GpuMode.dGpuOnly => "Discrete GPU only",
+                _ => "Auto"
+            };
+
+            var item = GetMuxSetting();
+            if (item != null)
+            {
+                item.PendingValue = option;
+                bool ok = ApplySetting(item, out error, bypassSafetyGates);
+                return ok;
+            }
+
+            bool wmiOk = WmiController.Instance.SetGpuMode(mode);
+            error = "Hardware MUX switch set in BIOS. A system restart is required for changes to take effect in firmware.";
+            return wmiOk;
         }
     }
 }

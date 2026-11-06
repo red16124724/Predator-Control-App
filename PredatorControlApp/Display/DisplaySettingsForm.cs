@@ -19,6 +19,7 @@ namespace PredatorControlApp.Display
 
         private readonly DisplayManager _displayManager;
         private readonly AppSettings _settings;
+        private readonly WmiController _wmi = new();
 
         private static readonly Font s_fontMain = new("Segoe UI", 9.5f, FontStyle.Regular);
         private static readonly Font s_fontTitle = new("Segoe UI", 16f, FontStyle.Bold);
@@ -29,11 +30,12 @@ namespace PredatorControlApp.Display
         private static readonly Font s_fontDdsNotice = new("Segoe UI", 8.25f, FontStyle.Italic);
 
         private Label _lblCurrentHz = null!;
-        private ComboBox _cboDdsMode = null!;
-        private Label _lblDdsStatus = null!;
-        private Label _lblDdsBlocking = null!;
+        private Label _lblMuxStatus = null!;
+        private Label _lblMuxNotice = null!;
+        private PredatorButton _btnMuxAuto = null!;
+        private PredatorButton _btnMuxIntegrated = null!;
+        private PredatorButton _btnMuxDiscrete = null!;
         private PredatorSwitch _switchOverdrive = null!;
-        private PredatorButton _btnApplyDds = null!;
 
         private readonly Action _themeHandler;
 
@@ -110,7 +112,7 @@ namespace PredatorControlApp.Display
 
             var lblSubtitle = new Label
             {
-                Text = "Advanced Optimus (DDS), Refresh Rate & Overdrive",
+                Text = "Hardware MUX Switch (BIOS Restart Required), Refresh Rate & Overdrive",
                 Font = s_fontSubtitle,
                 Location = new Point(22, y),
                 AutoSize = true,
@@ -154,60 +156,56 @@ namespace PredatorControlApp.Display
 
             y += 125;
 
-            // Card 2: NVIDIA Advanced Optimus / DDS
-            var cardDds = CreateCard(20, y, 660, 150, "NVIDIA Advanced Optimus (Dynamic Display Switch)");
-            mainPanel.Controls.Add(cardDds);
+            // Card 2: Hardware MUX Switch (BIOS Reboot Required)
+            var cardMux = CreateCard(20, y, 660, 150, "HARDWARE MUX SWITCH (BIOS REBOOT REQUIRED)");
+            mainPanel.Controls.Add(cardMux);
 
-            _lblDdsStatus = new Label
+            _lblMuxStatus = new Label
             {
-                Text = "Status: Detecting DDS hardware...",
+                Text = "Status: Querying BIOS hardware MUX switch...",
                 Location = new Point(16, 32),
                 AutoSize = true,
-                ForeColor = ThemeManager.TextPrimary,
+                ForeColor = ThemeManager.Accent,
                 Font = s_fontDdsStatus
             };
-            cardDds.Controls.Add(_lblDdsStatus);
+            cardMux.Controls.Add(_lblMuxStatus);
 
-            var lblDdsMode = new Label
+            _btnMuxAuto = new PredatorButton
             {
-                Text = "GPU Mode:",
-                Location = new Point(16, 68),
-                AutoSize = true
+                Text = "Automatic (Optimus MUX)",
+                Location = new Point(16, 64),
+                Size = new Size(195, 34)
             };
-            cardDds.Controls.Add(lblDdsMode);
+            _btnMuxAuto.Click += (s, e) => ApplyMuxMode(GpuMode.Auto);
+            cardMux.Controls.Add(_btnMuxAuto);
 
-            _cboDdsMode = new ComboBox
+            _btnMuxIntegrated = new PredatorButton
             {
-                Location = new Point(110, 64),
-                Size = new Size(350, 28),
-                DropDownStyle = ComboBoxStyle.DropDownList
+                Text = "Integrated Only (iGPU MUX)",
+                Location = new Point(220, 64),
+                Size = new Size(205, 34)
             };
-            _cboDdsMode.Items.AddRange(new object[]
-            {
-                "Optimus (iGPU - Battery Saver)",
-                "Automatic (Advanced Optimus - Seamless)",
-                "NVIDIA GPU Only (Discrete dGPU - Max Performance)"
-            });
-            cardDds.Controls.Add(_cboDdsMode);
+            _btnMuxIntegrated.Click += (s, e) => ApplyMuxMode(GpuMode.iGpuOnly);
+            cardMux.Controls.Add(_btnMuxIntegrated);
 
-            _btnApplyDds = new PredatorButton
+            _btnMuxDiscrete = new PredatorButton
             {
-                Text = "Switch Mode",
-                Location = new Point(480, 63),
-                Size = new Size(145, 30)
+                Text = "Discrete Only (dGPU MUX)",
+                Location = new Point(435, 64),
+                Size = new Size(195, 34)
             };
-            _btnApplyDds.Click += OnApplyDdsClicked;
-            cardDds.Controls.Add(_btnApplyDds);
+            _btnMuxDiscrete.Click += (s, e) => ApplyMuxMode(GpuMode.dGpuOnly);
+            cardMux.Controls.Add(_btnMuxDiscrete);
 
-            _lblDdsBlocking = new Label
+            _lblMuxNotice = new Label
             {
-                Text = "Note: Switching GPU mode takes effect immediately without reboot.",
-                Location = new Point(16, 108),
-                Size = new Size(610, 34),
+                Text = "Note: Hardware MUX switch changes configure UEFI/BIOS routing and require a system restart to take effect.",
+                Location = new Point(16, 112),
+                Size = new Size(620, 32),
                 ForeColor = ThemeManager.TextSecondary,
                 Font = s_fontDdsNotice
             };
-            cardDds.Controls.Add(_lblDdsBlocking);
+            cardMux.Controls.Add(_lblMuxNotice);
 
             y += 165;
 
@@ -284,49 +282,25 @@ namespace PredatorControlApp.Display
         {
             _lblCurrentHz.Text = $"Current: {_displayManager.CurrentRefreshRate} Hz";
 
-            // Populate DDS Mode
-            var ddsStatus = _displayManager.GetDdsStatus();
-            if (ddsStatus.IsSupported)
+            // Query active BIOS MUX switch mode directly
+            GpuMode? curGpu = _wmi.GetGpuMode();
+            var biosItem = Bios.BiosManager.Instance.Settings.FirstOrDefault(s => s.Name.Contains("Display MUX", StringComparison.OrdinalIgnoreCase));
+            if (!curGpu.HasValue && biosItem != null && !string.IsNullOrEmpty(biosItem.CurrentValue))
             {
-                _cboDdsMode.Enabled = true;
-                _btnApplyDds.Enabled = true;
-
-                string activeMuxStr = ddsStatus.ActiveMux switch
-                {
-                    1 => "Integrated (Optimus)",
-                    2 => "Discrete (NVIDIA GPU)",
-                    _ => "Unknown"
-                };
-                _lblDdsStatus.Text = $"Status: Supported | Active Display MUX: {activeMuxStr}";
-                _lblDdsStatus.ForeColor = ThemeManager.SuccessGreen;
-
-                int modeIdx = _displayManager.CurrentDdsMode;
-                if (modeIdx >= 0 && modeIdx < _cboDdsMode.Items.Count)
-                    _cboDdsMode.SelectedIndex = modeIdx;
-                else
-                    _cboDdsMode.SelectedIndex = 1;
-
-                if (ddsStatus.HasBlockingApps)
-                {
-                    _lblDdsBlocking.Text = "Warning: Some active applications may block instant display switching.";
-                    _lblDdsBlocking.ForeColor = ThemeManager.YellowStatus;
-                }
-                else
-                {
-                    _lblDdsBlocking.Text = "Note: Switching GPU mode takes effect immediately without reboot.";
-                    _lblDdsBlocking.ForeColor = ThemeManager.TextSecondary;
-                }
+                if (biosItem.CurrentValue.Contains("Discrete", StringComparison.OrdinalIgnoreCase)) curGpu = GpuMode.dGpuOnly;
+                else if (biosItem.CurrentValue.Contains("Optimus", StringComparison.OrdinalIgnoreCase)) curGpu = GpuMode.iGpuOnly;
+                else curGpu = GpuMode.Auto;
             }
-            else
+            curGpu ??= (GpuMode)Math.Clamp(_settings.GpuMode, 0, 2);
+
+            string activeMuxStr = curGpu switch
             {
-                _lblDdsStatus.Text = "Status: Advanced Optimus / DDS not detected or unsupported on current display.";
-                _lblDdsStatus.ForeColor = ThemeManager.TextSecondary;
-                _cboDdsMode.Enabled = false;
-                _btnApplyDds.Enabled = false;
-                _cboDdsMode.SelectedIndex = 1;
-                _lblDdsBlocking.Text = "Note: DDS switching requires hardware Dynamic Display Switch support and active NVIDIA drivers.";
-                _lblDdsBlocking.ForeColor = ThemeManager.TextSecondary;
-            }
+                GpuMode.dGpuOnly => "Discrete Only (dGPU MUX Active - BIOS)",
+                GpuMode.iGpuOnly => "Integrated Only (iGPU MUX Active - BIOS)",
+                _ => "Automatic (Optimus MUX Active - BIOS)"
+            };
+            _lblMuxStatus.Text = $"Status: Active BIOS MUX Mode: {activeMuxStr}";
+            _lblMuxStatus.ForeColor = ThemeManager.SuccessGreen;
 
             // LCD Overdrive
             _switchOverdrive.Checked = _displayManager.IsLcdOverdriveEnabled;
@@ -347,28 +321,71 @@ namespace PredatorControlApp.Display
             }
         }
 
-        private void OnApplyDdsClicked(object? sender, EventArgs e)
+        private void ApplyMuxMode(GpuMode mode)
         {
-            var status = _displayManager.GetDdsStatus();
-            if (!status.IsSupported)
+            string modeName = mode switch
             {
-                ShowMessage("NVIDIA Advanced Optimus (DDS) is not supported or NVIDIA drivers are unavailable on this display.", "GPU Switch Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                GpuMode.Auto => "Automatic (Optimus MUX)",
+                GpuMode.iGpuOnly => "Integrated Only (iGPU MUX)",
+                GpuMode.dGpuOnly => "Discrete Only (dGPU MUX)",
+                _ => mode.ToString()
+            };
+
+            GpuMode? curGpu = _wmi.GetGpuMode();
+            var biosItem = Bios.BiosManager.Instance.Settings.FirstOrDefault(s => s.Name.Contains("Display MUX", StringComparison.OrdinalIgnoreCase));
+            if (!curGpu.HasValue && biosItem != null && !string.IsNullOrEmpty(biosItem.CurrentValue))
+            {
+                if (biosItem.CurrentValue.Contains("Discrete", StringComparison.OrdinalIgnoreCase)) curGpu = GpuMode.dGpuOnly;
+                else if (biosItem.CurrentValue.Contains("Optimus", StringComparison.OrdinalIgnoreCase)) curGpu = GpuMode.iGpuOnly;
+                else curGpu = GpuMode.Auto;
+            }
+
+            if (curGpu.HasValue && curGpu.Value == mode)
+            {
+                _lblMuxStatus.Text = $"Status: Already set to {modeName} (Active in BIOS)";
+                _lblMuxStatus.ForeColor = ThemeManager.SuccessGreen;
                 return;
             }
 
-            int mode = _cboDdsMode.SelectedIndex;
-            if (mode < 0 || mode > 2) return;
+            string biosOption = mode switch
+            {
+                GpuMode.Auto => "Auto",
+                GpuMode.iGpuOnly => "Optimus",
+                GpuMode.dGpuOnly => "Discrete GPU only",
+                _ => "Auto"
+            };
 
-            bool ok = _displayManager.SetDdsMode(mode);
-            if (ok)
+            if (biosItem != null)
             {
-                _settings.DdsMode = mode;
-                _settings.Save();
-                LoadCurrentValues();
+                biosItem.PendingValue = biosOption;
+                Bios.BiosManager.Instance.ApplySetting(biosItem, out _, bypassSafetyGates: true);
             }
-            else
+
+            _wmi.SetGpuMode(mode);
+
+            _settings.GpuMode = (int)mode;
+            _settings.SetBiosSettingValue("Display MUX (Advanced Optimus / dGPU)", biosOption);
+            _settings.Save();
+
+            _lblMuxStatus.Text = $"Status: Hardware MUX set to {modeName} (Reboot Required)";
+            _lblMuxStatus.ForeColor = ThemeManager.YellowStatus;
+
+            var res = ShowMessage(
+                $"Hardware MUX switch set to {modeName} in BIOS.\r\n\r\nA system restart is required for the display multiplexer to re-route the internal display in firmware. Would you like to restart now?",
+                "Hardware MUX Restart Required",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (res == DialogResult.Yes)
             {
-                ShowMessage("Failed to switch GPU display mode. Ensure NVIDIA drivers are active.", "GPU Switch Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("shutdown.exe", "/r /t 5") { CreateNoWindow = true, UseShellExecute = false });
+                }
+                catch (Exception ex)
+                {
+                    Program.Report(ex, false);
+                }
             }
         }
 

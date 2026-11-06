@@ -1,6 +1,6 @@
-# Predator Control App v1.5.5 Release Notes & Audit Summary
+﻿# Predator Control App v1.5.5 Release Notes & Audit Summary
 
-The sidebar version label displays “Made by RED4724”. This local build is unsigned; trusted signing requires a suitable code-signing certificate and signing tool.
+The sidebar version label displays â€œMade by RED4724â€. This local build is unsigned; trusted signing requires a suitable code-signing certificate and signing tool.
 
 Startup-check update verification: the Release publish succeeded and 13 focused .NET tests passed, including one-shot scheduling and cancellation. A live GitHub check, hidden-startup UI, and hardware behavior were not exercised in this verification.
 
@@ -10,6 +10,17 @@ Current local 1.5.5 improvements: one update check on startup, including hidden 
 Version 1.5.5 brings a comprehensive codebase audit, bug fix, and stabilization overhaul across the C# .NET 10 WinForms UI, native Rust Core (predator_core.dll), Ring-0 PawnIO hardware drivers, and the complete 2,460-test suite (285 Rust + 2,175 .NET).
 
 
+### Hardware BIOS MUX Switch & BIOS Settings Full Persistence (Update 2026-11-06)
+- **Hardware BIOS MUX Switch Overhaul (Device Reboot Required)**:
+  - Replaced dynamic display switching (Advanced Optimus / DDS) with dedicated Hardware BIOS MUX Switch in the Display section.
+  - Queries live BIOS MUX state directly from hardware via WmiController.GetGpuMode() (AcerGamingFunction, AcerSmbios Type 172, APGeAction Function 2, ListBIOSSettings).
+  - Added dedicated MUX modes: Automatic (Optimus MUX), Integrated Only (iGPU MUX), and Discrete Only (dGPU MUX).
+  - Mode switches write to BIOS firmware and prompt with mandatory system restart confirmation dialog (shutdown.exe /r /t 5).
+- **BIOS Settings Full Persistence & Real ACPI/WMI Hardware Dispatch**:
+  - Full persistence of all BIOS settings via AppSettings.BiosSettingsValues with automatic Registry synchronization at HKCU\Software\PredatorControl\BiosSettings.
+  - Dispatches setting changes to Acer ACPI/WMI hardware endpoints (Function Key, Keyboard Backlight Timeout, POST Animation & Sound, Power-off USB Charge, Battery Threshold, LCD Overdrive, and InsydeH2O UEFI variables).
+  - Added RefreshLiveHardwareValues() to query live hardware state on app launch.
+  - Setting rows display live values, update immediately on Apply, and persist across reboots.
 ### Dedicated Embedded Menus, Dynamic Hardware Architecture Badge & Complete Pruning (Update 2026-11-06)
 - **Dedicated Embedded Menus ("BIOS Settings", "Display Settings", "Game Sync")**:
   - Re-architected sidebar navigation with 8 dedicated page tabs: Dashboard, Fans & Cooling, RGB Lighting, Display Settings, BIOS Settings, Game Sync, System & Power, and Settings & Info.
@@ -22,7 +33,7 @@ Version 1.5.5 brings a comprehensive codebase audit, bug fix, and stabilization 
   - Zero hardcoded values: dynamically queries `Win32_BIOS`, `Win32_ComputerSystem`, `Win32_Processor`, system registry (`HKLM\HARDWARE\DESCRIPTION\System\BIOS`, `CentralProcessor\0`), and runtime architecture.
   - Live queried values reflect the exact host device (e.g., `Acer Predator PHN14-51 | BIOS: V1.08 (06/13/2025) | SMBIOS v3.6 | x64`).
 - **Complete 100% Feature Pruning**:
-  - Pruned Acer BlueLight Shield™ across UI, backend, settings, registry, and tests.
+  - Pruned Acer BlueLight Shieldâ„¢ across UI, backend, settings, registry, and tests.
   - Pruned GPU overclocking controls.
   - Pruned Supervisor Password prompts and state.
   - Pruned dynamic refresh rate dropdown (retained 60 Hz and Max Hz).
@@ -132,3 +143,4 @@ Local audit update: see AUDIT.md at the source root for fixes, exact verificatio
 Zone restoration update (2026-11-03): restores missing legacy zone colors, preserves selected layout after capability detection, and prevents queued lighting requests from sending stale snapshots. 92 selected managed tests and 174 Rust unit tests passed. Physical restart verification and full hardware-writing suite remain outstanding.
 
 Brightness persistence & lid logo detachment update (2026-11-04): synchronizes KeyboardBrightnessLevel and RgbBrightness, forces immediate registry flush on slider commit to eliminate 100% brightness reversion across reboots, fast startup, and app restarts; completely detaches laptop lid logo RGB by removing SetGamingLEDColor zone 0x01 payloads and OpenRGB device 0 triggers, leaving exterior lid lighting under OEM hardware default.
+

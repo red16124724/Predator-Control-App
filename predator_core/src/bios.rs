@@ -443,6 +443,35 @@ pub fn extract_smbios_product_name(table: &[u8]) -> Option<String> {
     None
 }
 
+/// Parses Acer SMBIOS Type 172 structure to extract specific gaming record value (e.g. record 2 = MUX).
+pub fn extract_smbios_gaming_record(table: &[u8], record_id: u8) -> Option<u16> {
+    let mut i = 0usize;
+    while table.len().saturating_sub(i) >= 4 {
+        let kind = table[i];
+        let length = table[i + 1] as usize;
+        if length < 4 || length > table.len() - i {
+            break;
+        }
+        let data = &table[i..i + length];
+        if kind == 172 && length >= 6 {
+            for chunk in data[6..].chunks_exact(3) {
+                if chunk[0] == record_id {
+                    return Some(u16::from_le_bytes([chunk[1], chunk[2]]));
+                }
+            }
+        }
+        let mut next = i + length;
+        while next + 1 < table.len() && (table[next] != 0 || table[next + 1] != 0) {
+            next += 1;
+        }
+        i = next + 2;
+        if kind == 127 {
+            break;
+        }
+    }
+    None
+}
+
 // ============================================================================
 // BiosBackend Trait & Implementations
 // ============================================================================
@@ -586,12 +615,47 @@ impl BiosBackend for NativeWindowsBiosBackend {
         }
     }
 
-    fn read_acpi_register(&self, _action_id: u32) -> Result<u64, i32> {
-        Err(E_UNSUPPORTED)
+    fn read_acpi_register(&self, action_id: u32) -> Result<u64, i32> {
+        #[cfg(windows)]
+        {
+            let rsmb_provider = 0x52534D42; // 'RSMB'
+            let size = unsafe { GetSystemFirmwareTable(rsmb_provider, 0, std::ptr::null_mut(), 0) };
+            if size >= 8 && size <= 16 * 1024 * 1024 {
+                let mut buf = vec![0u8; size as usize];
+                let bytes_read =
+                    unsafe { GetSystemFirmwareTable(rsmb_provider, 0, buf.as_mut_ptr(), size) };
+                if bytes_read >= 8 && bytes_read <= size {
+                    let declared_len =
+                        u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]) as usize;
+                    let len = declared_len.min((bytes_read as usize).saturating_sub(8));
+                    if len > 0 {
+                        if let Some(val) = extract_smbios_gaming_record(&buf[8..8 + len], action_id as u8) {
+                            return Ok(val as u64);
+                        }
+                    }
+                }
+            }
+            Err(E_UNSUPPORTED)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = action_id;
+            Err(E_UNSUPPORTED)
+        }
     }
 
-    fn write_acpi_register(&self, _action_id: u32, _value: u64) -> Result<(), i32> {
-        Err(E_UNSUPPORTED)
+    fn write_acpi_register(&self, action_id: u32, value: u64) -> Result<(), i32> {
+        #[cfg(windows)]
+        {
+            crate::display::dispatch_acer_wmi_action(action_id as u8, value)
+                .map(|_| ())
+                .map_err(|_| E_GENERAL)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (action_id, value);
+            Err(E_UNSUPPORTED)
+        }
     }
 
     fn detect_model_name(&self) -> Option<String> {
@@ -842,11 +906,70 @@ impl BiosSubsystem {
 
     /// Generates the standard 2020-2024 ACPI-WMI and InsydeH2O NVRAM fallback settings.
     fn build_mode2_fallback_settings(&self) -> Vec<BiosSetting> {
+        let fn_key_current = match self.backend.read_acpi_register(0x1F) {
+            Ok(1) => "Standard Function Key".to_string(),
+            _ => "Special Key".to_string(),
+        };
+
+        let usb_charge_current = match self.backend.read_acpi_register(0x15) {
+            Ok(0x0A) => "Enabled (10%)".to_string(),
+            Ok(0x14) => "Enabled (20%)".to_string(),
+            Ok(0x1E) => "Enabled (30%)".to_string(),
+            Ok(v) if v > 0 => "Enabled (10%)".to_string(),
+            _ => "Disabled".to_string(),
+        };
+
+        let kb_timeout_current = match self.backend.read_acpi_register(0x84) {
+            Ok(10) => "10 Seconds".to_string(),
+            Ok(30) => "30 Seconds".to_string(),
+            Ok(60) => "60 Seconds".to_string(),
+            Ok(0) => "Disabled".to_string(),
+            _ => "30 Seconds".to_string(),
+        };
+
+        let anim_current = match self.backend.read_acpi_register(0x06) {
+            Ok(1) => "Enabled".to_string(),
+            Ok(0) => "Disabled".to_string(),
+            _ => "Enabled".to_string(),
+        };
+
+        let od_current = match self.backend.read_acpi_register(0x0F) {
+            Ok(1) => "Enabled".to_string(),
+            Ok(0) => "Disabled".to_string(),
+            _ => "Enabled".to_string(),
+        };
+
+        let mux_current = match self.backend.read_acpi_register(0x02) {
+            Ok(2) => "Discrete GPU only".to_string(),
+            Ok(1) => "Optimus".to_string(),
+            _ => "Auto".to_string(),
+        };
+
+        let threshold_current = match self.backend.read_acpi_register(0x50) {
+            Ok(1) => "Enabled".to_string(),
+            _ => "Disabled".to_string(),
+        };
+
+        let read_uefi_bool = |var_name: &str, def_val: &str| -> String {
+            if let Some(buf) = self.backend.read_uefi_variable(var_name, GUID_INSYDE_SETUP) {
+                if let Some(&first) = buf.first() {
+                    return if first == 1 { "Enabled".to_string() } else { "Disabled".to_string() };
+                }
+            }
+            def_val.to_string()
+        };
+
+        let fast_boot_cur = read_uefi_bool("FastBoot", "Enabled");
+        let f12_boot_cur = read_uefi_bool("F12BootMenu", "Enabled");
+        let quiet_boot_cur = read_uefi_bool("QuietBoot", "Enabled");
+        let net_boot_cur = read_uefi_bool("NetworkBoot", "Disabled");
+        let d2d_cur = read_uefi_bool("D2DRecovery", "Enabled");
+
         vec![
             BiosSetting {
                 name: "Function Key behavior".to_string(),
-                current: "Special Key".to_string(),
-                current_value: "Special Key".to_string(),
+                current: fn_key_current.clone(),
+                current_value: fn_key_current,
                 options: vec![
                     "Special Key".to_string(),
                     "Standard Function Key".to_string(),
@@ -856,8 +979,8 @@ impl BiosSubsystem {
             },
             BiosSetting {
                 name: "Power-off USB Charge".to_string(),
-                current: "Disabled".to_string(),
-                current_value: "Disabled".to_string(),
+                current: usb_charge_current.clone(),
+                current_value: usb_charge_current,
                 options: vec![
                     "Disabled".to_string(),
                     "Enabled (10%)".to_string(),
@@ -869,8 +992,8 @@ impl BiosSubsystem {
             },
             BiosSetting {
                 name: "Keyboard backlight timeout".to_string(),
-                current: "30 Seconds".to_string(),
-                current_value: "30 Seconds".to_string(),
+                current: kb_timeout_current.clone(),
+                current_value: kb_timeout_current,
                 options: vec![
                     "Disabled".to_string(),
                     "10 Seconds".to_string(),
@@ -882,24 +1005,24 @@ impl BiosSubsystem {
             },
             BiosSetting {
                 name: "POST Animation & Sound".to_string(),
-                current: "Enabled".to_string(),
-                current_value: "Enabled".to_string(),
+                current: anim_current.clone(),
+                current_value: anim_current,
                 options: vec!["Enabled".to_string(), "Disabled".to_string()],
                 risk: SettingRisk::Normal,
                 kind: SettingKind::AcpiFallback,
             },
             BiosSetting {
                 name: "LCD Overdrive".to_string(),
-                current: "Enabled".to_string(),
-                current_value: "Enabled".to_string(),
+                current: od_current.clone(),
+                current_value: od_current,
                 options: vec!["Enabled".to_string(), "Disabled".to_string()],
                 risk: SettingRisk::Normal,
                 kind: SettingKind::AcpiFallback,
             },
             BiosSetting {
                 name: "Display MUX".to_string(),
-                current: "Auto".to_string(),
-                current_value: "Auto".to_string(),
+                current: mux_current.clone(),
+                current_value: mux_current,
                 options: vec![
                     "Auto".to_string(),
                     "Optimus".to_string(),
@@ -910,8 +1033,8 @@ impl BiosSubsystem {
             },
             BiosSetting {
                 name: "Battery Threshold".to_string(),
-                current: "Disabled".to_string(),
-                current_value: "Disabled".to_string(),
+                current: threshold_current.clone(),
+                current_value: threshold_current,
                 options: vec!["Enabled".to_string(), "Disabled".to_string()],
                 risk: SettingRisk::Normal,
                 kind: SettingKind::AcpiFallback,
@@ -919,40 +1042,40 @@ impl BiosSubsystem {
             // InsydeH2O UEFI NVRAM variables
             BiosSetting {
                 name: "Fast Boot".to_string(),
-                current: "Enabled".to_string(),
-                current_value: "Enabled".to_string(),
+                current: fast_boot_cur.clone(),
+                current_value: fast_boot_cur,
                 options: vec!["Enabled".to_string(), "Disabled".to_string()],
                 risk: SettingRisk::Normal,
                 kind: SettingKind::UefiNvram,
             },
             BiosSetting {
                 name: "F12 Boot Menu".to_string(),
-                current: "Enabled".to_string(),
-                current_value: "Enabled".to_string(),
+                current: f12_boot_cur.clone(),
+                current_value: f12_boot_cur,
                 options: vec!["Enabled".to_string(), "Disabled".to_string()],
                 risk: SettingRisk::Normal,
                 kind: SettingKind::UefiNvram,
             },
             BiosSetting {
                 name: "QuietBoot".to_string(),
-                current: "Enabled".to_string(),
-                current_value: "Enabled".to_string(),
+                current: quiet_boot_cur.clone(),
+                current_value: quiet_boot_cur,
                 options: vec!["Enabled".to_string(), "Disabled".to_string()],
                 risk: SettingRisk::Dangerous,
                 kind: SettingKind::UefiNvram,
             },
             BiosSetting {
                 name: "Network Boot".to_string(),
-                current: "Disabled".to_string(),
-                current_value: "Disabled".to_string(),
+                current: net_boot_cur.clone(),
+                current_value: net_boot_cur,
                 options: vec!["Enabled".to_string(), "Disabled".to_string()],
                 risk: SettingRisk::Normal,
                 kind: SettingKind::UefiNvram,
             },
             BiosSetting {
                 name: "D2D Recovery".to_string(),
-                current: "Enabled".to_string(),
-                current_value: "Enabled".to_string(),
+                current: d2d_cur.clone(),
+                current_value: d2d_cur,
                 options: vec!["Enabled".to_string(), "Disabled".to_string()],
                 risk: SettingRisk::Normal,
                 kind: SettingKind::UefiNvram,

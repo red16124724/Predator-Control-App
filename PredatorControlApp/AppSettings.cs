@@ -416,6 +416,44 @@ namespace PredatorControlApp
         public int RefreshRate { get; set; } = 0;
         public bool LcdOverdrive { get; set; } = true;
         public int DdsMode { get; set; } = 1; // 0 = Optimus, 1 = Auto, 2 = dGPU
+        public int HardwareGpuMuxMode
+        {
+            get => GpuMode;
+            set => GpuMode = value;
+        }
+        public Dictionary<string, string> BiosSettingsValues { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public string GetBiosSettingValue(string name, string defaultValue = "")
+        {
+            if (string.IsNullOrWhiteSpace(name)) return defaultValue;
+            lock (this)
+            {
+                if (BiosSettingsValues != null && BiosSettingsValues.TryGetValue(name, out var val) && !string.IsNullOrEmpty(val))
+                {
+                    return val;
+                }
+            }
+            return defaultValue;
+        }
+
+        public void SetBiosSettingValue(string name, string value)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return;
+            lock (this)
+            {
+                BiosSettingsValues ??= new(StringComparer.OrdinalIgnoreCase);
+                BiosSettingsValues[name] = value ?? string.Empty;
+            }
+        }
+
+        public void ClearBiosSettings()
+        {
+            lock (this)
+            {
+                BiosSettingsValues?.Clear();
+                GpuMode = 0;
+            }
+        }
         public bool BiosModificationsEnabled { get; set; } = false;
         public bool BiosDangerousAllowed { get; set; } = false;
         public bool BatteryLimit { get; set; } = false;
@@ -1226,6 +1264,12 @@ namespace PredatorControlApp
             snap.CpuCurve = SafeCopyCurve(cpu);
             snap.GpuCurve = SafeCopyCurve(gpu);
             snap.CustomModeShortcuts = SafeCopyShortcuts(shortcuts);
+            lock (this)
+            {
+                snap.BiosSettingsValues = this.BiosSettingsValues != null
+                    ? new Dictionary<string, string>(this.BiosSettingsValues, StringComparer.OrdinalIgnoreCase)
+                    : new(StringComparer.OrdinalIgnoreCase);
+            }
             return snap;
         }
 
@@ -1551,6 +1595,14 @@ namespace PredatorControlApp
             CalibrationLastKnownPercent = CalibrationLastKnownPercent < 0 ? -1 : Math.Clamp(CalibrationLastKnownPercent, 0, 100);
 
             if (!BiosModificationsEnabled) BiosDangerousAllowed = false;
+                if (BiosSettingsValues == null)
+                {
+                    BiosSettingsValues = new(StringComparer.OrdinalIgnoreCase);
+                }
+                else if (BiosSettingsValues.Comparer != StringComparer.OrdinalIgnoreCase)
+                {
+                    BiosSettingsValues = new Dictionary<string, string>(BiosSettingsValues, StringComparer.OrdinalIgnoreCase);
+                }
             }
 
             var cpu = _cpuCurve;
@@ -1721,6 +1773,14 @@ namespace PredatorControlApp
                                     var parsed = JsonSerializer.Deserialize<AppSettings>(json, s_jsonOptions);
                                     if (parsed != null)
                                     {
+                                        if (parsed.BiosSettingsValues != null)
+                                        {
+                                            parsed.BiosSettingsValues = new Dictionary<string, string>(parsed.BiosSettingsValues, StringComparer.OrdinalIgnoreCase);
+                                        }
+                                        else
+                                        {
+                                            parsed.BiosSettingsValues = new(StringComparer.OrdinalIgnoreCase);
+                                        }
                                         parsed.RestoreMissingStaticZoneColorsFromJson(json);
                                         parsed.Sanitize();
                                         settings = parsed;
@@ -1776,6 +1836,14 @@ namespace PredatorControlApp
                                     var parsed = JsonSerializer.Deserialize<AppSettings>(bakJson, s_jsonOptions);
                                     if (parsed != null)
                                     {
+                                        if (parsed.BiosSettingsValues != null)
+                                        {
+                                            parsed.BiosSettingsValues = new Dictionary<string, string>(parsed.BiosSettingsValues, StringComparer.OrdinalIgnoreCase);
+                                        }
+                                        else
+                                        {
+                                            parsed.BiosSettingsValues = new(StringComparer.OrdinalIgnoreCase);
+                                        }
                                         parsed.RestoreMissingStaticZoneColorsFromJson(bakJson);
                                         parsed.Sanitize();
                                         settings = parsed;
@@ -2044,6 +2112,34 @@ namespace PredatorControlApp
                     RegistrySafety.LoadCpuPowerLimits(settings);
                     RegistrySafety.LoadCalibrationState(settings);
                 }
+
+                // Hydrate persistent BIOS settings from Registry HKCU\SOFTWARE\PredatorControl\BiosSettings
+                try
+                {
+                    using var biosKey = RegistrySafety.OpenSafeSubKey(Registry.CurrentUser, @"SOFTWARE\PredatorControl\BiosSettings");
+                    if (biosKey != null)
+                    {
+                        foreach (var valName in biosKey.GetValueNames())
+                        {
+                            if (!string.IsNullOrWhiteSpace(valName))
+                            {
+                                var valObj = biosKey.GetValue(valName);
+                                if (valObj != null)
+                                {
+                                    string strVal = valObj.ToString() ?? "";
+                                    if (!string.IsNullOrEmpty(strVal))
+                                    {
+                                        if (!settings.BiosSettingsValues.ContainsKey(valName))
+                                        {
+                                            settings.BiosSettingsValues[valName] = strVal;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                catch { }
             }
             }
 
@@ -2333,6 +2429,24 @@ namespace PredatorControlApp
                         key.SetValue("CustomPerformancePl2Watts", snapshot.CustomPerformancePl2Watts);
                         key.SetValue("CustomTurboPl1Watts", snapshot.CustomTurboPl1Watts);
                         key.SetValue("CustomTurboPl2Watts", snapshot.CustomTurboPl2Watts);
+
+                        // Persist all BIOS settings to Registry HKCU\SOFTWARE\PredatorControl\BiosSettings
+                        try
+                        {
+                            using var biosKey = RegistrySafety.CreateSafeSubKey(Registry.CurrentUser, @"SOFTWARE\PredatorControl\BiosSettings");
+                            if (biosKey != null && snapshot.BiosSettingsValues != null)
+                            {
+                                foreach (var kvp in snapshot.BiosSettingsValues)
+                                {
+                                    if (!string.IsNullOrWhiteSpace(kvp.Key) && kvp.Value != null)
+                                    {
+                                        biosKey.SetValue(kvp.Key, kvp.Value, RegistryValueKind.String);
+                                    }
+                                }
+                                biosKey.Flush();
+                            }
+                        }
+                        catch { }
 
                         key.Flush();
                     }

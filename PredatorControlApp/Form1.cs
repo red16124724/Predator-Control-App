@@ -10267,21 +10267,27 @@ namespace PredatorControlApp
             int cInnerW = cardW - cPad * 2;
 
             // ==========================================
-            // CARD 1: GRAPHICS WORKING MODE (ADVANCED OPTIMUS)
+            // CARD 1: HARDWARE MUX SWITCH (BIOS REBOOT REQUIRED)
             // ==========================================
-            var cardGpu = MakeCard(_pnlDisplay, "GRAPHICS WORKING MODE (ADVANCED OPTIMUS)", col1X, pad, cardW, S(300));
-            MakeLabel(cardGpu, "Display routing, MUX switch & discrete GPU architecture control", cPad, S(40), FontHeaderLight, SubHeaderColor);
+            var cardGpu = MakeCard(_pnlDisplay, "HARDWARE MUX SWITCH (BIOS REBOOT REQUIRED)", col1X, pad, cardW, S(300));
+            MakeLabel(cardGpu, "Physical hardware display multiplexer (MUX) routing in BIOS", cPad, S(40), FontHeaderLight, SubHeaderColor);
 
-            _lblGpuStatusSys = MakeLabel(cardGpu, "Status: Detecting GPU display routing...", cPad, S(68), FontSectionHeader, ThemeManager.Accent);
+            _lblGpuStatusSys = MakeLabel(cardGpu, "Status: Querying BIOS hardware MUX switch...", cPad, S(68), FontSectionHeader, ThemeManager.Accent);
             UpdateGpuModeStatusLabel();
 
             int muxBtnW = (cInnerW - 2 * S(8)) / 3;
             int btnH = S(36);
-            _btnGpuAuto = MakeButton(cardGpu, "🔄  Automatic", cPad, S(104), muxBtnW, btnH);
-            _btnGpuHybrid = MakeButton(cardGpu, "🔋  Integrated Only", cPad + muxBtnW + S(8), S(104), muxBtnW, btnH);
-            _btnGpuDiscrete = MakeButton(cardGpu, "⚡  Dedicated Only", cPad + 2 * (muxBtnW + S(8)), S(104), muxBtnW, btnH);
+            _btnGpuAuto = MakeButton(cardGpu, "🔄  Automatic (Optimus MUX)", cPad, S(104), muxBtnW, btnH);
+            _btnGpuHybrid = MakeButton(cardGpu, "🔋  Integrated Only (iGPU MUX)", cPad + muxBtnW + S(8), S(104), muxBtnW, btnH);
+            _btnGpuDiscrete = MakeButton(cardGpu, "⚡  Discrete Only (dGPU MUX)", cPad + 2 * (muxBtnW + S(8)), S(104), muxBtnW, btnH);
 
             var curGpuMode = _wmi.GetGpuMode() ?? GpuMode.Auto;
+            var muxItem = Bios.BiosManager.Instance.Settings.FirstOrDefault(s => s.Name.Contains("Display MUX", StringComparison.OrdinalIgnoreCase));
+            if (muxItem != null && !string.IsNullOrEmpty(muxItem.CurrentValue))
+            {
+                if (muxItem.CurrentValue.Contains("Discrete", StringComparison.OrdinalIgnoreCase)) curGpuMode = GpuMode.dGpuOnly;
+                else if (muxItem.CurrentValue.Contains("Optimus", StringComparison.OrdinalIgnoreCase)) curGpuMode = GpuMode.iGpuOnly;
+            }
             if (curGpuMode == GpuMode.dGpuOnly) HighlightBtn(_btnGpuDiscrete, ref _activeGpuModeBtn);
             else if (curGpuMode == GpuMode.iGpuOnly) HighlightBtn(_btnGpuHybrid, ref _activeGpuModeBtn);
             else HighlightBtn(_btnGpuAuto, ref _activeGpuModeBtn);
@@ -10290,7 +10296,7 @@ namespace PredatorControlApp
             _btnGpuHybrid.Click += (s, e) => ApplyGpuMode(GpuMode.iGpuOnly, _btnGpuHybrid);
             _btnGpuDiscrete.Click += (s, e) => ApplyGpuMode(GpuMode.dGpuOnly, _btnGpuDiscrete);
 
-            MakeLabel(cardGpu, "Dynamic Display Switch (DDS) applies instantly; hardware MUX switch changes require a system restart.", cPad, S(164), FontHeaderLight, SubHeaderColor);
+            MakeLabel(cardGpu, "Hardware MUX switch changes configure UEFI/BIOS routing and require a system restart to take effect.", cPad, S(164), FontHeaderLight, SubHeaderColor);
 
             // ==========================================
             // CARD 2: DISPLAY REFRESH RATE & OVERDRIVE
@@ -10359,18 +10365,23 @@ namespace PredatorControlApp
             _chkEnableBiosModsSys.CheckedChanged += (s, e) =>
             {
                 Bios.BiosManager.Instance.ModificationsEnabled = _chkEnableBiosModsSys.Checked;
+                _appSettings.BiosModificationsEnabled = _chkEnableBiosModsSys.Checked;
                 _chkAllowDangerousBiosSys.Enabled = _chkEnableBiosModsSys.Checked;
                 if (!_chkEnableBiosModsSys.Checked)
                 {
                     _chkAllowDangerousBiosSys.Checked = false;
                     Bios.BiosManager.Instance.DangerousAllowed = false;
+                    _appSettings.BiosDangerousAllowed = false;
                 }
+                _appSettings.Save();
                 PopulateEmbeddedBiosRows();
             };
 
             _chkAllowDangerousBiosSys.CheckedChanged += (s, e) =>
             {
                 Bios.BiosManager.Instance.DangerousAllowed = _chkAllowDangerousBiosSys.Checked;
+                _appSettings.BiosDangerousAllowed = _chkAllowDangerousBiosSys.Checked;
+                _appSettings.Save();
                 PopulateEmbeddedBiosRows();
             };
 
@@ -12116,109 +12127,72 @@ namespace PredatorControlApp
             {
                 HighlightBtn(btn, ref _activeGpuModeBtn);
 
-                // Map to DDS mode
-                int targetDds = mode switch
-                {
-                    GpuMode.Auto => 1,
-                    GpuMode.iGpuOnly => 0,
-                    GpuMode.dGpuOnly => 2,
-                    _ => 1
-                };
-
-                // Check if already in requested mode
-                var curDds = Display.DisplayManager.Instance.GetDdsStatus();
-                bool alreadyInMode = false;
-                if (curDds.IsSupported)
-                {
-                    if (targetDds == 1 && curDds.IsAutomatic) alreadyInMode = true;
-                    else if (targetDds == 0 && !curDds.IsAutomatic && curDds.ActiveMux != 2) alreadyInMode = true;
-                    else if (targetDds == 2 && !curDds.IsAutomatic && curDds.ActiveMux == 2) alreadyInMode = true;
-                }
-                else
-                {
-                    var curGpu = _wmi.GetGpuMode();
-                    if (curGpu.HasValue && curGpu.Value == mode) alreadyInMode = true;
-                }
-
-                if (alreadyInMode)
-                {
-                    UpdateGpuModeStatusLabel();
-                    return;
-                }
-
-                bool applied = false;
-                bool requiresRestart = false;
-
-                // Tier 1: NVIDIA Advanced Optimus (Dynamic Display Switch / DDS) - Instant, no reboot!
-                if (curDds.IsSupported)
-                {
-                    applied = await Task.Run(() => Display.DisplayManager.Instance.SwitchDdsMode(targetDds));
-                }
-
-                // Tier 2: BIOS Display MUX via BiosManager
-                if (!applied)
-                {
-                    string biosOption = mode switch
-                    {
-                        GpuMode.Auto => "Auto",
-                        GpuMode.iGpuOnly => "Optimus",
-                        GpuMode.dGpuOnly => "Discrete GPU only",
-                        _ => "Auto"
-                    };
-                    var biosItem = Bios.BiosManager.Instance.Settings.FirstOrDefault(s => s.Name.Contains("Display MUX", StringComparison.OrdinalIgnoreCase));
-                    if (biosItem != null)
-                    {
-                        biosItem.PendingValue = biosOption;
-                        applied = await Task.Run(() => Bios.BiosManager.Instance.ApplySetting(biosItem, out _, bypassSafetyGates: true));
-                        if (applied) requiresRestart = true;
-                    }
-                }
-
-                // Tier 3: Legacy ACPI/WMI
-                if (!applied)
-                {
-                    applied = await Task.Run(() => _wmi.SetGpuMode(mode));
-                    if (applied) requiresRestart = true;
-                }
-
                 string modeName = mode switch
                 {
-                    GpuMode.Auto => "Automatic (Dynamic)",
-                    GpuMode.iGpuOnly => "Integrated Only",
-                    GpuMode.dGpuOnly => "Dedicated Only",
+                    GpuMode.Auto => "Automatic (Optimus MUX)",
+                    GpuMode.iGpuOnly => "Integrated Only (iGPU MUX)",
+                    GpuMode.dGpuOnly => "Discrete Only (dGPU MUX)",
                     _ => mode.ToString()
                 };
 
-                UpdateGpuModeStatusLabel();
-
-                if (!applied && !curDds.IsSupported)
+                // Check if already in requested active BIOS MUX mode
+                GpuMode? curGpu = _wmi.GetGpuMode();
+                var biosItem = Bios.BiosManager.Instance.Settings.FirstOrDefault(s => s.Name.Contains("Display MUX", StringComparison.OrdinalIgnoreCase));
+                if (!curGpu.HasValue && biosItem != null && !string.IsNullOrEmpty(biosItem.CurrentValue))
                 {
-                    MessageBox.Show(this,
-                        $"GPU mode switching is not directly controllable via ACPI on this model.\r\nYour system may be configured directly in BIOS or Windows Graphics Settings.",
-                        "GPU Switching Notice", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    if (biosItem.CurrentValue.Contains("Discrete", StringComparison.OrdinalIgnoreCase)) curGpu = GpuMode.dGpuOnly;
+                    else if (biosItem.CurrentValue.Contains("Optimus", StringComparison.OrdinalIgnoreCase)) curGpu = GpuMode.iGpuOnly;
+                    else curGpu = GpuMode.Auto;
+                }
+
+                if (curGpu.HasValue && curGpu.Value == mode)
+                {
+                    UpdateGpuModeStatusLabel($"Status: Already set to {modeName} (Active in BIOS)");
                     return;
                 }
 
-                if (requiresRestart)
+                // Apply to BIOS via BiosManager & _wmi
+                string biosOption = mode switch
                 {
-                    var res = MessageBox.Show(this,
-                        $"Graphics Working Mode switched to {modeName}.\r\n\r\nA system restart is required for the display switch to take effect. Would you like to restart now?",
-                        "Graphics Mode Restart Required", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                    GpuMode.Auto => "Auto",
+                    GpuMode.iGpuOnly => "Optimus",
+                    GpuMode.dGpuOnly => "Discrete GPU only",
+                    _ => "Auto"
+                };
 
-                    if (res == DialogResult.Yes)
+                if (biosItem != null)
+                {
+                    biosItem.PendingValue = biosOption;
+                    await Task.Run(() => Bios.BiosManager.Instance.ApplySetting(biosItem, out _, bypassSafetyGates: true));
+                }
+
+                await Task.Run(() => _wmi.SetGpuMode(mode));
+
+                _appSettings.GpuMode = (int)mode;
+                _appSettings.SetBiosSettingValue("Display MUX (Advanced Optimus / dGPU)", biosOption);
+                _appSettings.Save();
+
+                UpdateGpuModeStatusLabel($"Status: Hardware MUX set to {modeName} (Reboot Required)");
+
+                var res = MessageBox.Show(this,
+                    $"Hardware MUX switch set to {modeName} in BIOS.\r\n\r\nA system restart is required for the display multiplexer to re-route the internal display in firmware. Would you like to restart now?",
+                    "Hardware MUX Restart Required",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+
+                if (res == DialogResult.Yes)
+                {
+                    await Task.Run(() =>
                     {
-                        await Task.Run(() =>
+                        try
                         {
-                            try
-                            {
-                                Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 5") { CreateNoWindow = true, UseShellExecute = false });
-                            }
-                            catch (Exception ex)
-                            {
-                                Program.Report(ex, false);
-                            }
-                        });
-                    }
+                            Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 5") { CreateNoWindow = true, UseShellExecute = false });
+                        }
+                        catch (Exception ex)
+                        {
+                            Program.Report(ex, false);
+                        }
+                    });
                 }
             }
             catch (Exception ex)
@@ -12227,35 +12201,40 @@ namespace PredatorControlApp
             }
         }
 
-        private void UpdateGpuModeStatusLabel()
+        private void UpdateGpuModeStatusLabel(string? pendingNotice = null)
         {
             if (_lblGpuStatusSys == null) return;
             try
             {
-                var ddsStatus = Display.DisplayManager.Instance.GetDdsStatus();
-                if (ddsStatus.IsSupported)
+                if (!string.IsNullOrEmpty(pendingNotice))
                 {
-                    if (ddsStatus.IsAutomatic)
-                        _lblGpuStatusSys.Text = "Status: NVIDIA Advanced Optimus Active (Seamless Dynamic Switching)";
-                    else if (ddsStatus.ActiveMux == 2)
-                        _lblGpuStatusSys.Text = "Status: Dedicated GPU Direct (dGPU MUX Active)";
-                    else
-                        _lblGpuStatusSys.Text = "Status: Integrated Graphics (iGPU Optimus Active)";
+                    _lblGpuStatusSys.Text = pendingNotice;
+                    _lblGpuStatusSys.ForeColor = ThemeManager.YellowStatus;
+                    return;
                 }
-                else
+
+                GpuMode? curGpu = _wmi.GetGpuMode();
+                var biosItem = Bios.BiosManager.Instance.Settings.FirstOrDefault(s => s.Name.Contains("Display MUX", StringComparison.OrdinalIgnoreCase));
+                if (!curGpu.HasValue && biosItem != null && !string.IsNullOrEmpty(biosItem.CurrentValue))
                 {
-                    var curGpu = _wmi.GetGpuMode() ?? GpuMode.Auto;
-                    _lblGpuStatusSys.Text = curGpu switch
-                    {
-                        GpuMode.dGpuOnly => "Status: Dedicated GPU Mode (ACPI MUX Active)",
-                        GpuMode.iGpuOnly => "Status: Integrated Graphics Mode (Optimus Active)",
-                        _ => "Status: Automatic GPU Mode"
-                    };
+                    if (biosItem.CurrentValue.Contains("Discrete", StringComparison.OrdinalIgnoreCase)) curGpu = GpuMode.dGpuOnly;
+                    else if (biosItem.CurrentValue.Contains("Optimus", StringComparison.OrdinalIgnoreCase)) curGpu = GpuMode.iGpuOnly;
+                    else curGpu = GpuMode.Auto;
                 }
+                curGpu ??= (GpuMode)Math.Clamp(_appSettings.GpuMode, 0, 2);
+
+                _lblGpuStatusSys.Text = curGpu switch
+                {
+                    GpuMode.dGpuOnly => "Status: Discrete Only (dGPU MUX Active - BIOS)",
+                    GpuMode.iGpuOnly => "Status: Integrated Only (iGPU MUX Active - BIOS)",
+                    _ => "Status: Automatic (Optimus MUX Active - BIOS)"
+                };
+                _lblGpuStatusSys.ForeColor = ThemeManager.SuccessGreen;
             }
             catch
             {
-                _lblGpuStatusSys.Text = "Status: GPU Display Routing Active";
+                _lblGpuStatusSys.Text = "Status: Hardware MUX Switch Active (BIOS)";
+                _lblGpuStatusSys.ForeColor = ThemeManager.Accent;
             }
         }
 
@@ -12291,9 +12270,17 @@ namespace PredatorControlApp
             {
                 int rowY = 0;
                 int rowW = _pnlBiosItemsContainerSys.Width - S(16);
-                int rowH = S(68);
+                int rowH = S(72);
                 foreach (var item in items)
                 {
+                    // Synchronize with remembered settings from AppSettings
+                    string remembered = _appSettings.GetBiosSettingValue(item.Name, item.CurrentValue);
+                    if (!string.IsNullOrEmpty(remembered) && (item.Options == null || item.Options.Count == 0 || item.Options.Contains(remembered)))
+                    {
+                        item.CurrentValue = remembered;
+                        item.PendingValue = remembered;
+                    }
+
                     var rowPanel = new Panel
                     {
                         Location = new Point(0, rowY),
@@ -12329,21 +12316,36 @@ namespace PredatorControlApp
                     rowPanel.Controls.Add(lblRisk);
 
                     // DropDown for options
+                    int dropW = S(240);
                     var cboOpt = new PredatorDropDown
                     {
-                        Location = new Point(S(10), S(32)),
-                        Size = new Size(rowW - S(110), S(28))
+                        Location = new Point(S(10), S(34)),
+                        Size = new Size(dropW, S(28))
                     };
-                    foreach (var opt in item.Options) cboOpt.Items.Add(opt);
-                    int selIdx = item.Options.IndexOf(item.CurrentValue);
+                    if (item.Options != null)
+                    {
+                        foreach (var opt in item.Options) cboOpt.Items.Add(opt);
+                    }
+                    int selIdx = item.Options?.IndexOf(item.CurrentValue) ?? -1;
                     if (selIdx >= 0) cboOpt.SelectedIndex = selIdx;
                     else if (cboOpt.Items.Count > 0) cboOpt.SelectedIndex = 0;
                     rowPanel.Controls.Add(cboOpt);
 
+                    // Current Value Label
+                    var lblCurrentVal = new Label
+                    {
+                        Text = $"Current: {item.CurrentValue}",
+                        Font = FontHeaderLight,
+                        ForeColor = ThemeManager.TextSecondary,
+                        Location = new Point(S(10) + dropW + S(16), S(38)),
+                        AutoSize = true
+                    };
+                    rowPanel.Controls.Add(lblCurrentVal);
+
                     // Apply Button
                     bool canApply = Bios.BiosManager.Instance.ModificationsEnabled &&
                                    (item.Risk != Bios.BiosSettingRisk.Dangerous || Bios.BiosManager.Instance.DangerousAllowed);
-                    var btnApply = MakeButton(rowPanel, "Apply", rowW - S(95), S(32), S(85), S(28));
+                    var btnApply = MakeButton(rowPanel, "Apply", rowW - S(95), S(34), S(85), S(28));
                     btnApply.Enabled = canApply;
                     btnApply.Click += (s, e) =>
                     {
@@ -12352,8 +12354,42 @@ namespace PredatorControlApp
                         item.PendingValue = sel;
                         if (Bios.BiosManager.Instance.ApplySetting(item, out string err))
                         {
-                            MessageBox.Show(this, $"BIOS setting '{item.Name}' applied successfully to '{item.CurrentValue}'.",
-                                "BIOS Setting Updated", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                            lblCurrentVal.Text = $"Current: {item.CurrentValue}";
+                            _appSettings.SetBiosSettingValue(item.Name, item.CurrentValue);
+                            _appSettings.Save();
+
+                            bool requiresRestart = item.Name.Contains("MUX", StringComparison.OrdinalIgnoreCase) ||
+                                                   item.Name.Contains("Boot", StringComparison.OrdinalIgnoreCase) ||
+                                                   item.Category == Bios.BiosCategory.BootSetup ||
+                                                   err.Contains("restart", StringComparison.OrdinalIgnoreCase) ||
+                                                   err.Contains("reboot", StringComparison.OrdinalIgnoreCase);
+
+                            if (requiresRestart)
+                            {
+                                var dr = MessageBox.Show(this,
+                                    $"BIOS setting '{item.Name}' was successfully applied to '{item.CurrentValue}'.\r\n\r\nA system restart is required for this firmware setting to take full effect. Would you like to restart now?",
+                                    "BIOS Setting Applied - Restart Required",
+                                    MessageBoxButtons.YesNo,
+                                    MessageBoxIcon.Question);
+
+                                if (dr == DialogResult.Yes)
+                                {
+                                    try
+                                    {
+                                        Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 5") { CreateNoWindow = true, UseShellExecute = false });
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Program.Report(ex, false);
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                MessageBox.Show(this,
+                                    string.IsNullOrEmpty(err) ? $"BIOS setting '{item.Name}' applied successfully to '{item.CurrentValue}'." : err,
+                                    "BIOS Setting Updated", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                            }
                         }
                         else
                         {
@@ -12378,7 +12414,10 @@ namespace PredatorControlApp
             {
                 if (Bios.BiosManager.Instance.RestoreDefaults(false, out string msg))
                 {
-                    MessageBox.Show(this, msg, "BIOS Defaults Restored", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    _appSettings.BiosSettingsValues.Clear();
+                    _appSettings.Save();
+                    MessageBox.Show(this, string.IsNullOrEmpty(msg) ? "Factory defaults restored successfully." : msg,
+                        "BIOS Defaults Restored", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     PopulateEmbeddedBiosRows();
                 }
                 else

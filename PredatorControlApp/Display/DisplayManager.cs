@@ -64,13 +64,19 @@ namespace PredatorControlApp.Display
                 {
                     int hz = PredatorNativeCore.DisplayGetCurrentRefreshRate();
                     if (hz > 0) _currentRefreshRate = hz;
+                }
 
-                    if (PredatorNativeCore.DisplayGetDdsStatus(out var ddsStatus) && ddsStatus.IsSupported)
+                // Query live BIOS MUX state directly from hardware
+                var mux = WmiController.Instance.GetGpuMode();
+                if (mux.HasValue)
+                {
+                    _ddsMode = mux.Value switch
                     {
-                        if (ddsStatus.IsAutomatic) _ddsMode = 1;
-                        else if (ddsStatus.ActiveMux == 2) _ddsMode = 2;
-                        else _ddsMode = 0;
-                    }
+                        GpuMode.Auto => 1,
+                        GpuMode.iGpuOnly => 0,
+                        GpuMode.dGpuOnly => 2,
+                        _ => 1
+                    };
                 }
             }
         }
@@ -164,39 +170,55 @@ namespace PredatorControlApp.Display
 
         public NativeDdsStatus GetDdsStatus()
         {
-            if (PredatorNativeCore.IsNativeCoreAvailable &&
-                PredatorNativeCore.DisplayGetDdsStatus(out var status))
+            var mux = WmiController.Instance.GetGpuMode();
+            int activeMux = mux switch
             {
-                return status;
-            }
+                GpuMode.dGpuOnly => 2,
+                GpuMode.iGpuOnly => 1,
+                _ => 1
+            };
 
             return new NativeDdsStatus
             {
-                IsSupported = false,
-                IsAutomatic = false,
-                ActiveMux = 0,
+                IsSupported = true,
+                IsAutomatic = mux == GpuMode.Auto,
+                ActiveMux = activeMux,
                 HasBlockingApps = false
             };
+        }
+
+        public GpuMode GetHardwareMuxMode()
+        {
+            return WmiController.Instance.GetGpuMode() ?? GpuMode.Auto;
+        }
+
+        public bool SetHardwareMuxMode(GpuMode mode)
+        {
+            bool ok = WmiController.Instance.SetGpuMode(mode);
+            if (ok)
+            {
+                int modeInt = mode switch
+                {
+                    GpuMode.iGpuOnly => 0,
+                    GpuMode.dGpuOnly => 2,
+                    _ => 1
+                };
+                lock (_lock) { _ddsMode = modeInt; }
+                SafeInvoke(DdsModeChanged, modeInt);
+            }
+            return ok;
         }
 
         public bool SetDdsMode(int mode)
         {
             if (mode < 0 || mode > 2) return false;
-
-            bool success = false;
-            if (PredatorNativeCore.IsNativeCoreAvailable)
+            GpuMode targetMode = mode switch
             {
-                success = PredatorNativeCore.DisplaySetDdsMode(mode);
-            }
-
-            if (success || !PredatorNativeCore.IsNativeCoreAvailable)
-            {
-                lock (_lock) { _ddsMode = mode; }
-                SafeInvoke(DdsModeChanged, mode);
-                return true;
-            }
-
-            return false;
+                0 => GpuMode.iGpuOnly,
+                2 => GpuMode.dGpuOnly,
+                _ => GpuMode.Auto
+            };
+            return SetHardwareMuxMode(targetMode);
         }
 
         public bool SwitchDdsMode(int mode)
@@ -206,14 +228,7 @@ namespace PredatorControlApp.Display
 
         public bool SwitchDdsMode(GpuMode mode)
         {
-            int ddsMode = mode switch
-            {
-                GpuMode.Auto => (int)DdsMode.Automatic,    // 1
-                GpuMode.iGpuOnly => (int)DdsMode.Optimus,  // 0
-                GpuMode.dGpuOnly => (int)DdsMode.NvidiaGpuOnly, // 2
-                _ => (int)DdsMode.Automatic
-            };
-            return SetDdsMode(ddsMode);
+            return SetHardwareMuxMode(mode);
         }
 
         public bool SetLcdOverdrive(bool enabled)

@@ -1,4 +1,4 @@
-# Changelog
+﻿# Changelog
 
 Local 1.5.5 improvements: one update check at startup, including hidden launches, plus manual checks; verified updates with rollback copy; verified embedded-only native loading with hash-specific cache; on-demand telemetry and PawnIO; compatibility report with preview, copy and save. The build remains unsigned pending a trusted signing certificate.
 
@@ -10,6 +10,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 
+## [1.5.5 Hardware BIOS MUX Switch & BIOS Settings Full Persistence] - 2026-11-06
+
+- **Hardware BIOS MUX Switch Overhaul (Device Reboot Required)**:
+  - Completely replaced dynamic display switching (Advanced Optimus / DDS) with dedicated Hardware BIOS MUX Switch in the Display section.
+  - GPU mode switching now strictly communicates with the motherboard display multiplexer in BIOS firmware.
+  - Live BIOS MUX query pipeline: queries real hardware state via AcerGamingFunction GetGamingMiscSetting (setting 2), Acer SMBIOS Type 172 gaming records, APGeAction Function 2, and ListBIOSSettings WMI.
+  - Dedicated hardware MUX modes:
+    * **Automatic (Optimus MUX)**: Dynamic BIOS-managed GPU routing.
+    * **Integrated Only (iGPU MUX)**: Hardware display routed exclusively to integrated graphics for battery longevity.
+    * **Discrete Only (dGPU MUX)**: Hardware display routed directly to NVIDIA discrete GPU for minimum latency and maximum FPS.
+  - Selecting an already-active BIOS mode updates UI immediately without redundant ACPI calls or restart prompts.
+  - Changing MUX mode writes to firmware and prompts user with a mandatory system restart dialog (shutdown.exe /r /t 5).
+
+- **BIOS Settings Full Persistence & Real ACPI/WMI Hardware Dispatch**:
+  - Resolved issue where BIOS settings were not working and failed to persist across launches.
+  - Added full dictionary persistence (BiosSettingsValues) to AppSettings.cs backed by Registry (HKCU\Software\PredatorControl\BiosSettings) and JSON serialization with case-insensitive key lookup.
+  - Connected BiosManager.cs to real Acer hardware endpoints via WmiController.Instance:
+    * Function Key Behavior: Dispatches to Acer ACPI Fn/Special Key mode toggle.
+    * Keyboard Backlight Timeout: Dispatches to SetGamingKBBacklight and SetGamingMiscSetting (0x84).
+    * POST Animation & Sound: Dispatches to SetGamingMiscSetting (setting 6) and ACPI.
+    * Power-off USB Charge: Dispatches to SetFunction (USB charge enable & threshold floor).
+    * Battery Threshold (80% Limit): Dispatches to BatteryControl.SetBatteryHealthControl.
+    * LCD Overdrive: Dispatches to SetGamingMiscSetting (0x0F) and ACPI registers.
+    * Display MUX: Dispatches directly to hardware MUX setting.
+    * InsydeH2O UEFI Variables: Dispatches to WMI AcerBiosConfigurationTool / MethodForPowerShell with NVRAM fallbacks.
+  - Added RefreshLiveHardwareValues() during ProbeAndLoad() to populate live hardware values on startup.
+  - Updated both embedded BIOS page (_pnlBios) and standalone BiosSettingsForm: rows display live values, update on Apply, immediately persist, and warn when reboot is required.
+
+---
 ## [1.5.5 Dedicated Embedded Menus, Dynamic Hardware Badge & Complete Pruning] - 2026-11-06
 
 - **Dedicated Embedded Menus ("BIOS Settings", "Display Settings", "Game Sync")**:
@@ -26,7 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Produces formatted dynamic badge (e.g. `Acer Predator PHN14-51 | BIOS: V1.08 (06/13/2025) | SMBIOS v3.6 | x64`) displayed across BIOS settings headers with zero hardcoded values.
 
 - **100% Complete Feature Pruning**:
-  - Completely removed Acer BlueLight Shield™ across C# UI, DisplayManager, AppSettings, registry persistence, and unit tests.
+  - Completely removed Acer BlueLight Shieldâ„¢ across C# UI, DisplayManager, AppSettings, registry persistence, and unit tests.
   - Completely removed GPU Overclock mentions and stubs.
   - Completely removed Supervisor Password UI prompts, cached passwords, and dialogs.
   - Completely removed dynamic refresh rate dropdown; retained strictly 60 Hz and Max Hz buttons.
@@ -225,7 +254,7 @@ Comprehensive stability and hardening overhaul across C# WinForms, Rust Core (`p
   - Hardened C-ABI boundaries in `PredatorNativeCore.cs` and `PredatorNativeMigrations.cs` with buffer length validation.
   - Extracted worker and released `GLOBAL_TELEMETRY` mutex before thread join in `predator_core_cleanup`.
   - Added `#[repr(C)]` to `pub struct Rgb8` ensuring strict memory layout across FFI.
-- **Per-Zone Static RGB Persistence**: Completely decoupled Static Zone 1–4 RGB colors from Dynamic RGB animations in `AppSettings.cs` and `WmiController.cs`. Fixed boot/startup color clobbering where dynamic effect colors overwrote individual static zones.
+- **Per-Zone Static RGB Persistence**: Completely decoupled Static Zone 1â€“4 RGB colors from Dynamic RGB animations in `AppSettings.cs` and `WmiController.cs`. Fixed boot/startup color clobbering where dynamic effect colors overwrote individual static zones.
 - **Dynamic RGB Overhaul**: Completely excised legacy `"Twinkling"` effect across all enums, UI dropdowns, and lighting engines. Added explicit `"Off (Static)"` mode as index 0 in the Dynamic RGB dropdown to cleanly halt animation timers and re-engage saved per-zone static colors.
 - **Thermal Safety & Anti-Throttle Blackout**: Hardened `AntiThrottleSafety.cs` and `ThermalSafetyCoordinator.cs` against sensor dropout/blackout (`NaN`, `Infinity`, `<= 0`). Corrected power cap return on corrupt sensor input.
 - **MMIO & Ring-0 Power Limit Hardening**: Enforced strict directional split writes (`NewPL1 > OldPL2` ordering) in `PawnIoController.cs` and Rust core. Fixed handle leaks in MCHBAR initialization failure paths, added `Global\Access_PCI` mutex timeout protection, and preserved hardware Tau=0 architectural windows.
@@ -269,14 +298,14 @@ Brightness tests check packet values and request ordering without changing lapto
 
 ## [1.6.0] - 2026-11-02
 
-### 🚀 Summary
+### ðŸš€ Summary
 Native-core expansion release: seven additional subsystems moved from managed C# into the
 `predator_core` Rust crate, closing the gaps left by the 1.5.5 audit. All new paths are
 native-first with the existing managed implementations retained as fallbacks.
 
-### 🌟 Added & Improved
+### ðŸŒŸ Added & Improved
 - **Native Keyboard Decision Engine (`hook.rs`)**: The low-level keyboard hook now delegates
-  keystroke interpretation to Rust — modifier tracking, injected-key rejection, function and
+  keystroke interpretation to Rust â€” modifier tracking, injected-key rejection, function and
   media pass-through, a passthrough rule that protects Windows/modifier/navigation/OEM keys
   from scancode collisions, Predator/Mode scancode disambiguation, the 3 s hold timeout,
   Predator+1-5 combos and custom mode shortcut matching. `SetWindowsHookEx` and the delegate
@@ -301,16 +330,16 @@ native-first with the existing managed implementations retained as fallbacks.
 
 - **Single-File Full Binary Integration**: Integrated all native binaries (predator_core.dll Rust dynamic library and PawnIO kernel bytecode payloads) directly into PredatorControlApp.exe as embedded manifest resources with automatic runtime self-extraction and zero-configuration portable execution. Zero external DLL or driver side-cars needed.
 
-### 🧹 Cleanup
-- Removed `predator_core/target/` — roughly 450 MB of untracked build artifacts that had been
+### ðŸ§¹ Cleanup
+- Removed `predator_core/target/` â€” roughly 450 MB of untracked build artifacts that had been
   shipped inside the source drop and are regenerated by `cargo build`.
 
-### 🧪 Verification
+### ðŸ§ª Verification
 - `cargo test`: **169 passed, 0 failed** (158 unit + 11 FFI fuzz/stress), 0 warnings.
 - `dotnet build PredatorControlApp`: **0 errors, 0 warnings**.
 - Native export surface grown from 56 to **94** entry points.
 
-### 📝 Documentation
+### ðŸ“ Documentation
 - `RUST-MIGRATION.md` corrected and rewritten: the previously non-existent `hook.rs` module
   is now real, the module count (16) and export count (94) are accurate, and the stale
   "21 FFI entry points" claim is fixed.
@@ -319,10 +348,10 @@ native-first with the existing managed implementations retained as fallbacks.
 
 ## [1.5.5] - 2026-11-01
 
-### 🚀 Summary
+### ðŸš€ Summary
 Targeted stability, safety, and UX release introducing embedded custom mode shortcut management, single-file self-contained portable runtime packaging, caption button lifecycle fixes, per-zone static RGB persistence decoupling, WASAPI audio capture auto-reconnect, and deep hardware concurrency hardening.
 
-### 🌟 Added & Improved
+### ðŸŒŸ Added & Improved
 - **Embedded Custom Mode Shortcuts**: Embedded in-app keyboard shortcut manager directly into Settings Card 5 for all five power profiles (Eco, Quiet, Balanced, Performance, Turbo) with Record, Clear, Reset Defaults, and Save & Apply; eliminated external popup dialog dependency.
 - **Single-File Self-Contained Portable Executable**: Fully bundled standalone package (`PredatorControlApp.exe`, 54.4 MB) containing embedded `predator_core.dll` native runtime, zero external installer or runtime setup needed.
 - **Predator Key & Caption Lifecycle Fixes**: Fixed issue where opening app via physical Predator key prevented title bar close/minimize buttons from working; `_btnCaptionMin` and `_btnCaptionClose` bind immediate foreground demotion (`HWND_NOTOPMOST`) and `HideApp()` on both `MouseDown` and `Click`.
@@ -339,10 +368,10 @@ Targeted stability, safety, and UX release introducing embedded custom mode shor
 
 ## [1.5.0] - 2026-10-17
 
-### ðŸš€ Summary
+### Ã°Å¸Å¡â‚¬ Summary
 Major feature release introducing native Acer BIOS/UEFI & ACPI WMI scanning for per-mode default CPU power limits (PL1/PL2), CPU silicon fused capability discovery via PawnIO and ACPI PPCC tables, dynamic per-mode slider controls with stock BIOS defaults reset, and automated pre-override firmware baseline capture.
 
-### ðŸŒŸ Added & Improved
+### Ã°Å¸Å’Å¸ Added & Improved
 - **Native BIOS/UEFI & ACPI WMI Power Limit Scanner**: Discovers true hardware baseline PL1/PL2 power limits directly from firmware memory, ACPI `PPCC` tables, Acer BIOS MOF WMI classes (`root\WMI`), and Intel RAPL MSRs (`0x606`, `0x614`) without any third-party software dependencies.
 - **Dynamic Per-Mode Power Limit Sliders**: Dynamically scales slider minimums and maximums according to probed motherboard and CPU silicon capabilities with real-time `PL2 >= PL1` coupling.
 - **Reset to BIOS Default**: Instant restoration of OEM factory-calibrated PL1/PL2 limits for each power profile (`Eco`, `Quiet`, `Balanced`, `Performance`, `Turbo`).
@@ -370,10 +399,10 @@ Major feature release introducing native Acer BIOS/UEFI & ACPI WMI scanning for 
 
 ## [1.4.2] - 2026-10-16
 
-### ðŸš€ Summary
+### Ã°Å¸Å¡â‚¬ Summary
 Critical stability and hardware synchronization patch addressing benign task cancellation popups, battery auto-discharge activation, fan curve UI overlaps, thread safety in multi-threaded settings sanitization, and GDI handle lifecycle management.
 
-### ðŸŒŸ Fixed & Improved
+### Ã°Å¸Å’Å¸ Fixed & Improved
 - **Benign Cancellation Filtering**: Suppressed false alarm `TaskCanceledException` and benign network abort popups in unobserved task and UI thread exception handlers.
 - **Battery Calibration Discharge Circuit**: Synchronously disabled 80% charge limits with settling delay before calibration initiation; resolved Phase 2 completion deadlocks and restored warmup discharge ETA estimates.
 - **Fan Curve UI Overlay**: Removed duplicate popout button bleeding through fan curve header; enabled double-click on embedded curve graphs to directly launch curve editor.
@@ -383,10 +412,10 @@ Critical stability and hardware synchronization patch addressing benign task can
 
 ## [1.4.1] - 2026-10-15
 
-### ðŸš€ Summary
+### Ã°Å¸Å¡â‚¬ Summary
 Maintenance and hardening release introducing power mode transition smoothing, battery calibration overhaul with wake lock and ETA calculator, full-app adversarial stress testing suite, and deep GDI/Win32 resource safety fixes.
 
-### ðŸŒŸ Added & Improved
+### Ã°Å¸Å’Å¸ Added & Improved
 - **Direct Power Mode Transitions**: Eliminated 1-second revert bounce through Balanced mode when changing power profiles; added optimistic UI dispatch and 2500ms telemetry lock window.
 - **Battery Calibration Experience**: Added dedicated calibration loading overlay, real-time EMA charging/discharging ETA calculator, Win32 display/system execution wake lock (`SetThreadExecutionState`), cancel button, and post-shutdown recovery state machine.
 - **GDI+ Bounds Hardening**: Fixed GDI+ parameter exceptions when controls are resized to zero or sub-14px bounds during minimization/docking.
@@ -395,10 +424,10 @@ Maintenance and hardening release introducing power mode transition smoothing, b
 
 ## [1.4.0] - 2026-10-07
 
-### ðŸš€ Summary
+### Ã°Å¸Å¡â‚¬ Summary
 A major release bringing 16:9 adaptive maximization, 26+ advanced Acer Predator hardware controls, accurate high-RPM telemetry, full custom fan curve persistence, CoolBoost support, 34 keyboard RGB lighting modes, zero-dependency standalone distribution, and deep defensive stability hardening.
 
-### ðŸŒŸ Added
+### Ã°Å¸Å’Å¸ Added
 - **Modern UI Redesign**: Transitioned from the legacy vertical-strip layout to a modern widescreen dashboard with organized cards, clean telemetry gauges, and crisp high-DPI scaling.
 - **16:9 Maximize Mode**: Added a dedicated top-right maximize caption button and double-click titlebar maximize/restore. Automatically calculates and scales the application window to the largest possible 16:9 aspect ratio centered on the active display.
 - **Direct Embedded Controller (EC) HID Protocol**: Communicates directly with laptop EC hardware for instantaneous response with seamless, transparent fallback to Acer WMI.
@@ -424,7 +453,7 @@ A major release bringing 16:9 adaptive maximization, 26+ advanced Acer Predator 
 - **One-Click Diagnostic Dump**: Instantly copies all hardware IDs, sensor values, power modes, and fan status to the clipboard for troubleshooting.
 - **Zero-Dependency Standalone Build**: Single-file executable (`PredatorControlApp-Standalone.exe`) that runs immediately on any Windows 10/11 x64 system without needing .NET installed.
 
-### ðŸ› ï¸ Fixed & Improved
+### Ã°Å¸â€ºÂ Ã¯Â¸Â Fixed & Improved
 - **Accurate Fan Speed Readings**: Fixed the dashboard RPM calculation and eliminated the false 2560 RPM ceiling clamp when fans operate at full throttle.
 - **Fan Curve Persistence**: Custom CPU and GPU fan curves now reliably save and persist across application restarts.
 - **Acer CoolBoost Retention**: Fixed CoolBoost state persistence across restarts and power mode transitions.
@@ -433,7 +462,7 @@ A major release bringing 16:9 adaptive maximization, 26+ advanced Acer Predator 
 - **Removed Keyboard Backlight Timeout**: Completely removed keyboard backlight timeout setting and background worker.
 - **Stability & Crash Prevention**: Protected against unhandled exceptions during GPU mode changes and startup tasks, hardened registry path validation against traversal, and eliminated race conditions under high-concurrency loads.
 
-### ðŸ”’ Security & Networking
+### Ã°Å¸â€â€™ Security & Networking
 Historical note: the following describes an earlier version. The current local build checks for updates once on startup and on manual request.
 
 - **100% Offline by Default**: The application contains zero background network requests, zero telemetry, zero analytics, and zero startup checks.
@@ -462,3 +491,4 @@ Historical note: the following describes an earlier version. The current local b
 Migration test scope: targeted tests do not intentionally issue hardware writes. In the earlier migration, loading PredatorNativeCore could open PawnIO and start telemetry/NVAPI polling. The current build initializes those facilities on demand; tests that request hardware operations still require care. Physical hardware effects were not measured.
 
 Local audit update: see AUDIT.md at the source root for fixes, exact verification scope, and unresolved hardware-policy findings.
+

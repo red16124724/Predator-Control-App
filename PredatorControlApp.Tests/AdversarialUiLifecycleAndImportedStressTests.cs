@@ -90,33 +90,28 @@ namespace PredatorControlApp.Tests
         }
 
         [Fact]
-        public void DisplaySettingsForm_DdsModeSwitching_WithoutNvidiaDriver_SafelyHandledAndDisabled()
+        public void DisplaySettingsForm_HardwareMuxSwitching_SafelyHandledAndRendered()
         {
             StaTestRunner.Run(() =>
             {
                 using var form = new DisplaySettingsForm();
                 form.CreateControl();
 
-                var cboDdsField = typeof(DisplaySettingsForm).GetField("_cboDdsMode", BindingFlags.NonPublic | BindingFlags.Instance);
-                var btnDdsField = typeof(DisplaySettingsForm).GetField("_btnApplyDds", BindingFlags.NonPublic | BindingFlags.Instance);
-                Assert.NotNull(cboDdsField);
-                Assert.NotNull(btnDdsField);
+                var btnAuto = typeof(DisplaySettingsForm).GetField("_btnMuxAuto", BindingFlags.NonPublic | BindingFlags.Instance);
+                var btnIntegrated = typeof(DisplaySettingsForm).GetField("_btnMuxIntegrated", BindingFlags.NonPublic | BindingFlags.Instance);
+                var btnDiscrete = typeof(DisplaySettingsForm).GetField("_btnMuxDiscrete", BindingFlags.NonPublic | BindingFlags.Instance);
+                var lblStatus = typeof(DisplaySettingsForm).GetField("_lblMuxStatus", BindingFlags.NonPublic | BindingFlags.Instance);
 
-                var cboDds = (ComboBox)cboDdsField.GetValue(form)!;
-                var btnDds = (PredatorButton)btnDdsField.GetValue(form)!;
+                Assert.NotNull(btnAuto);
+                Assert.NotNull(btnIntegrated);
+                Assert.NotNull(btnDiscrete);
+                Assert.NotNull(lblStatus);
 
-                var ddsStatus = DisplayManager.Instance.GetDdsStatus();
-                if (!ddsStatus.IsSupported)
-                {
-                    Assert.False(cboDds.Enabled);
-                    Assert.False(btnDds.Enabled);
-                }
+                var applyMux = typeof(DisplaySettingsForm).GetMethod("ApplyMuxMode", BindingFlags.NonPublic | BindingFlags.Instance);
+                Assert.NotNull(applyMux);
 
-                var onApplyDds = typeof(DisplaySettingsForm).GetMethod("OnApplyDdsClicked", BindingFlags.NonPublic | BindingFlags.Instance);
-                Assert.NotNull(onApplyDds);
-
-                // Invoking when unsupported must not throw and must abort safely
-                var ex = Record.Exception(() => onApplyDds.Invoke(form, new object[] { form, EventArgs.Empty }));
+                // Invoking ApplyMuxMode must execute safely without throwing exceptions
+                var ex = Record.Exception(() => applyMux.Invoke(form, new object[] { GpuMode.Auto }));
                 Assert.Null(ex);
             });
         }

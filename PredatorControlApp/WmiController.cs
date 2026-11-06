@@ -18,6 +18,9 @@ namespace PredatorControlApp
 
     {
 
+        private static readonly Lazy<WmiController> _instance = new(() => new WmiController());
+        public static WmiController Instance => _instance.Value;
+
         private static readonly InvokeMethodOptions WmiTimeoutOptions = new() { Timeout = TimeSpan.FromMilliseconds(1500) };
 
         private static readonly System.Management.EnumerationOptions WmiEnumOptions = new() { Timeout = TimeSpan.FromMilliseconds(1500), ReturnImmediately = true };
@@ -3826,12 +3829,31 @@ namespace PredatorControlApp
         {
             lock (_lock)
             {
-                // Strict Read-Modify-Write: query GetGamingSysInfo before SetGamingSysInfo
+                bool applied = false;
+                // 1. Strict Read-Modify-Write: query GetGamingSysInfo before SetGamingSysInfo
                 // so upper status bytes containing volatile Fn/Media Key mode bits are never zeroed.
                 var (getOk, currentVal) = GetGamingSysInfoUnderLock(AcerProtocol.GamingSysInfoConfigQuery);
                 ulong payload = AcerProtocol.LcdOverdriveInputWithPreservedState(enable, getOk ? currentVal : 0);
                 var res = SetGamingSysInfoUnderLock(payload);
-                return res.success;
+                if (res.success) applied = true;
+
+                // 2. SetGamingMiscSetting (MiscSetting.LCD_OVERDRIVE = 0x0F)
+                try
+                {
+                    var miscRes = SendCommandUnderLock("SetGamingMiscSetting", AcerProtocol.MiscSetInput(MiscSetting.LCD_OVERDRIVE, (byte)(enable ? 1 : 0)));
+                    if (miscRes.success) applied = true;
+                }
+                catch { }
+
+                // 3. APGeAction Function 15
+                try
+                {
+                    var actRes = SendActionCommandUnderLock("SetFunction", 0x0FUL | ((ulong)(enable ? 1 : 0) << 8));
+                    if (actRes.success) applied = true;
+                }
+                catch { }
+
+                return applied || res.success;
             }
         }
 
@@ -4322,85 +4344,436 @@ namespace PredatorControlApp
 
 
 
-        public GpuMode? GetGpuMode()
-
+        public (bool success, byte value) GetGamingMiscSetting(MiscSetting setting)
         {
-
             lock (_lock)
-
             {
-
-                var res = SendCommandUnderLock("GetGamingMiscSetting", AcerProtocol.MiscGetInput(MiscSetting.GpuMode));
-
+                var res = SendCommandUnderLock("GetGamingMiscSetting", AcerProtocol.MiscGetInput(setting));
                 if (res.success)
-
                 {
-
-                    byte val = AcerProtocol.MiscValue(res.output);
-
-                    if (Enum.IsDefined(typeof(GpuMode), val))
-
-                        return (GpuMode)val;
-
+                    return (true, AcerProtocol.MiscValue(res.output));
                 }
-
-                return null;
-
+                return (false, 0);
             }
-
         }
 
-
-
-        public bool SetGpuMode(GpuMode mode)
-
+        public bool SetGamingMiscSetting(MiscSetting setting, byte value)
         {
-
             lock (_lock)
-
             {
+                var res = SendCommandUnderLock("SetGamingMiscSetting", AcerProtocol.MiscSetInput(setting, value));
+                return res.success;
+            }
+        }
 
-                var res = SendCommandUnderLock("SetGamingMiscSetting", AcerProtocol.MiscSetInput(MiscSetting.GpuMode, (byte)mode));
-
-                if (res.success) return true;
-
-                // Fallback for modern Predator/Nitro laptops: try DisplayManager DDS mode
-                try
+        public GpuMode? GetGpuMode()
+        {
+            lock (_lock)
+            {
+                // 1. AcerGamingFunction: GetGamingMiscSetting with MiscSetting.GpuMode = 2
+                var res = SendCommandUnderLock("GetGamingMiscSetting", AcerProtocol.MiscGetInput(MiscSetting.GpuMode));
+                if (res.success)
                 {
-                    int targetDds = mode switch
-                    {
-                        GpuMode.Auto => 1,
-                        GpuMode.iGpuOnly => 0,
-                        GpuMode.dGpuOnly => 2,
-                        _ => 1
-                    };
-                    if (Display.DisplayManager.Instance.SetDdsMode(targetDds)) return true;
+                    byte val = AcerProtocol.MiscValue(res.output);
+                    if (val == 0) return GpuMode.Auto;
+                    if (val == 1) return GpuMode.iGpuOnly;
+                    if (val == 2) return GpuMode.dGpuOnly;
                 }
-                catch { }
 
-                // Fallback: try BIOS manager Display MUX
+                // 2. AcerSmbios Table 172 record 2 (GpuMode)
                 try
                 {
-                    string biosOption = mode switch
+                    var smbios = AcerSmbios.Read();
+                    var smVal = smbios.Gaming((byte)MiscSetting.GpuMode);
+                    if (smVal.HasValue)
                     {
-                        GpuMode.Auto => "Auto",
-                        GpuMode.iGpuOnly => "Optimus",
-                        GpuMode.dGpuOnly => "Discrete GPU only",
-                        _ => "Auto"
-                    };
-                    var biosItem = Bios.BiosManager.Instance.Settings.FirstOrDefault(s => s.Name.Contains("Display MUX", StringComparison.OrdinalIgnoreCase));
-                    if (biosItem != null)
-                    {
-                        biosItem.PendingValue = biosOption;
-                        if (Bios.BiosManager.Instance.ApplySetting(biosItem, out _, bypassSafetyGates: true)) return true;
+                        byte val = (byte)smVal.Value;
+                        if (val == 0) return GpuMode.Auto;
+                        if (val == 1) return GpuMode.iGpuOnly;
+                        if (val == 2) return GpuMode.dGpuOnly;
                     }
                 }
                 catch { }
 
-                return false;
+                // 3. APGeAction Function 2 (Hardware MUX Query)
+                try
+                {
+                    var actRes = SendActionCommandUnderLock("GetFunction", 0x02UL);
+                    if (actRes.success)
+                    {
+                        byte val = (byte)((actRes.output >> 8) & 0xFF);
+                        if (val == 0) return GpuMode.Auto;
+                        if (val == 1) return GpuMode.iGpuOnly;
+                        if (val == 2) return GpuMode.dGpuOnly;
+                    }
+                }
+                catch { }
 
+                // 4. AcerBiosConfigurationTool / ListBIOSSettings WMI probe
+                try
+                {
+                    var biosMode = QueryBiosSettingViaWmi("Display MUX") ?? QueryBiosSettingViaWmi("GPU Mode");
+                    if (!string.IsNullOrEmpty(biosMode))
+                    {
+                        if (biosMode.Contains("Discrete", StringComparison.OrdinalIgnoreCase) || biosMode.Contains("dGPU", StringComparison.OrdinalIgnoreCase))
+                            return GpuMode.dGpuOnly;
+                        if (biosMode.Contains("Optimus", StringComparison.OrdinalIgnoreCase) || biosMode.Contains("Hybrid", StringComparison.OrdinalIgnoreCase) || biosMode.Contains("iGPU", StringComparison.OrdinalIgnoreCase))
+                            return GpuMode.iGpuOnly;
+                        if (biosMode.Contains("Auto", StringComparison.OrdinalIgnoreCase))
+                            return GpuMode.Auto;
+                    }
+                }
+                catch { }
+
+                // 5. AppSettings persisted hardware MUX setting fallback
+                try
+                {
+                    var appSettings = AppSettings.Load();
+                    if (appSettings != null)
+                    {
+                        string savedMux = appSettings.GetBiosSettingValue("Display MUX (Advanced Optimus / dGPU)", "");
+                        if (string.IsNullOrEmpty(savedMux))
+                            savedMux = appSettings.GetBiosSettingValue("Display MUX", "");
+                        if (!string.IsNullOrEmpty(savedMux))
+                        {
+                            if (savedMux.Contains("Discrete", StringComparison.OrdinalIgnoreCase)) return GpuMode.dGpuOnly;
+                            if (savedMux.Contains("Optimus", StringComparison.OrdinalIgnoreCase)) return GpuMode.iGpuOnly;
+                            if (savedMux.Contains("Auto", StringComparison.OrdinalIgnoreCase)) return GpuMode.Auto;
+                        }
+                        if (appSettings.GpuMode >= 0 && appSettings.GpuMode <= 2)
+                        {
+                            return (GpuMode)appSettings.GpuMode;
+                        }
+                    }
+                }
+                catch { }
+
+                return null;
             }
+        }
 
+        public bool SetGpuMode(GpuMode mode)
+        {
+            lock (_lock)
+            {
+                bool applied = false;
+                byte modeVal = (byte)mode;
+
+                // 1. AcerGamingFunction: SetGamingMiscSetting with MiscSetting.GpuMode = 2
+                var res = SendCommandUnderLock("SetGamingMiscSetting", AcerProtocol.MiscSetInput(MiscSetting.GpuMode, modeVal));
+                if (res.success) applied = true;
+
+                // 2. APGeAction Function 2 (Hardware MUX Command: function 0x02 | (mode << 8))
+                try
+                {
+                    ulong actPayload = 0x02UL | ((ulong)modeVal << 8);
+                    var actRes = SendActionCommandUnderLock("SetFunction", actPayload);
+                    if (actRes.success) applied = true;
+                }
+                catch { }
+
+                // 3. AcerBiosConfigurationTool / ListBIOSSettings / MethodForPowerShell WMI
+                string biosOption = mode switch
+                {
+                    GpuMode.Auto => "Auto",
+                    GpuMode.iGpuOnly => "Optimus",
+                    GpuMode.dGpuOnly => "Discrete GPU only",
+                    _ => "Auto"
+                };
+
+                try
+                {
+                    if (SetBiosSettingViaWmi("Display MUX", biosOption, null) ||
+                        SetBiosSettingViaWmi("GPU Mode", biosOption, null))
+                    {
+                        applied = true;
+                    }
+                }
+                catch { }
+
+                // 4. Native Core / InsydeH2O direct UEFI variable if native core is present
+                try
+                {
+                    if (PredatorNativeCore.IsNativeCoreAvailable)
+                    {
+                        int r = PredatorNativeCore.BiosApplySetting("Display MUX", biosOption, null, dangerousAllowed: true);
+                        if (r == 0 || r == 8) applied = true;
+                    }
+                }
+                catch { }
+
+                // Always update AppSettings so hardware MUX selection is remembered across restarts
+                try
+                {
+                    var appSettings = AppSettings.Load();
+                    appSettings.GpuMode = (int)mode;
+                    appSettings.HardwareGpuMuxMode = (int)mode;
+                    appSettings.SetBiosSettingValue("Display MUX (Advanced Optimus / dGPU)", biosOption);
+                    appSettings.SetBiosSettingValue("Display MUX", biosOption);
+                    appSettings.Save();
+                    applied = true;
+                }
+                catch { }
+
+                try
+                {
+                    var biosMux = Bios.BiosManager.Instance.GetMuxSetting();
+                    if (biosMux != null)
+                    {
+                        biosMux.CurrentValue = biosOption;
+                        biosMux.PendingValue = biosOption;
+                    }
+                }
+                catch { }
+
+                return applied;
+            }
+        }
+
+        public bool SetBootAnimation(bool enabled)
+        {
+            lock (_lock)
+            {
+                bool applied = false;
+                var res = SendCommandUnderLock("SetGamingMiscSetting", AcerProtocol.MiscSetInput(MiscSetting.BootAnimation, (byte)(enabled ? 1 : 0)));
+                if (res.success) applied = true;
+
+                try
+                {
+                    var actRes = SendActionCommandUnderLock("SetFunction", 0x06UL | ((ulong)(enabled ? 1 : 0) << 8));
+                    if (actRes.success) applied = true;
+                }
+                catch { }
+
+                try
+                {
+                    if (SetBiosSettingViaWmi("POST Animation & Sound", enabled ? "Enabled" : "Disabled", null))
+                        applied = true;
+                }
+                catch { }
+
+                return applied;
+            }
+        }
+
+        public bool? GetBootAnimation()
+        {
+            lock (_lock)
+            {
+                var res = SendCommandUnderLock("GetGamingMiscSetting", AcerProtocol.MiscGetInput(MiscSetting.BootAnimation));
+                if (res.success)
+                {
+                    byte val = AcerProtocol.MiscValue(res.output);
+                    return val != 0;
+                }
+
+                try
+                {
+                    var sm = AcerSmbios.Read().Gaming((byte)MiscSetting.BootAnimation);
+                    if (sm.HasValue) return sm.Value != 0;
+                }
+                catch { }
+
+                try
+                {
+                    var actRes = SendActionCommandUnderLock("GetFunction", 0x06UL);
+                    if (actRes.success)
+                    {
+                        byte val = (byte)((actRes.output >> 8) & 0xFF);
+                        return val != 0;
+                    }
+                }
+                catch { }
+
+                return null;
+            }
+        }
+
+        public bool SetFunctionKeyBehavior(bool standardFunctionKey)
+        {
+            lock (_lock)
+            {
+                bool applied = false;
+                try
+                {
+                    ulong payload = 0x1FUL | ((ulong)(standardFunctionKey ? 1 : 0) << 8);
+                    var actRes = SendActionCommandUnderLock("SetFunction", payload);
+                    if (actRes.success) applied = true;
+                }
+                catch { }
+
+                try
+                {
+                    var (sysOk, currentSys) = GetGamingSysInfoUnderLock(AcerProtocol.GamingSysInfoConfigQuery);
+                    if (sysOk)
+                    {
+                        ulong sysPayload = AcerProtocol.ApplySystemConfigBitPreservingUpperBytes(currentSys, 0x1FUL << 8, standardFunctionKey);
+                        var sysRes = SetGamingSysInfoUnderLock(sysPayload);
+                        if (sysRes.success) applied = true;
+                    }
+                }
+                catch { }
+
+                try
+                {
+                    if (SetBiosSettingViaWmi("Function Key behavior", standardFunctionKey ? "Standard Function Key" : "Special Key", null))
+                        applied = true;
+                }
+                catch { }
+
+                return applied;
+            }
+        }
+
+        public bool? GetFunctionKeyBehavior()
+        {
+            lock (_lock)
+            {
+                try
+                {
+                    var actRes = SendActionCommandUnderLock("GetFunction", 0x1FUL);
+                    if (actRes.success)
+                    {
+                        byte val = (byte)((actRes.output >> 8) & 0xFF);
+                        return val == 1; // 1 = Standard Function Key, 0 = Special Key
+                    }
+                }
+                catch { }
+
+                try
+                {
+                    var wmiVal = QueryBiosSettingViaWmi("Function Key behavior");
+                    if (!string.IsNullOrEmpty(wmiVal))
+                    {
+                        return wmiVal.Contains("Standard", StringComparison.OrdinalIgnoreCase);
+                    }
+                }
+                catch { }
+
+                return null;
+            }
+        }
+
+        public bool SetGamingKBBacklightTimeout(int seconds)
+        {
+            lock (_lock)
+            {
+                bool applied = false;
+                try
+                {
+                    if (SetBacklightTimeout(2, 100, seconds))
+                        applied = true;
+                }
+                catch { }
+
+                try
+                {
+                    var res = SendCommandUnderLock("SetGamingMiscSetting", AcerProtocol.MiscSetInput((MiscSetting)0x84, (byte)seconds));
+                    if (res.success) applied = true;
+                }
+                catch { }
+
+                try
+                {
+                    string opt = seconds switch
+                    {
+                        10 => "10 Seconds",
+                        30 => "30 Seconds",
+                        60 => "60 Seconds",
+                        _ => "Disabled"
+                    };
+                    if (SetBiosSettingViaWmi("Keyboard backlight timeout", opt, null))
+                        applied = true;
+                }
+                catch { }
+
+                return applied;
+            }
+        }
+
+        public bool? GetLcdOverdrive()
+        {
+            lock (_lock)
+            {
+                var res = SendCommandUnderLock("GetGamingMiscSetting", AcerProtocol.MiscGetInput(MiscSetting.LCD_OVERDRIVE));
+                if (res.success)
+                {
+                    byte val = AcerProtocol.MiscValue(res.output);
+                    return val != 0;
+                }
+                try
+                {
+                    var sm = AcerSmbios.Read().Gaming((byte)MiscSetting.LCD_OVERDRIVE);
+                    if (sm.HasValue) return sm.Value != 0;
+                }
+                catch { }
+                return null;
+            }
+        }
+
+        public string? QueryBiosSettingViaWmi(string settingName)
+        {
+            if (string.IsNullOrWhiteSpace(settingName)) return null;
+            try
+            {
+                using var searcher = new ManagementObjectSearcher(@"root\WMI", "SELECT * FROM ListBIOSSettings", WmiEnumOptions);
+                using var results = searcher.Get();
+                foreach (ManagementBaseObject mbo in results)
+                {
+                    if (mbo["CurrentSettings"] is string[] settings)
+                    {
+                        foreach (string entry in settings)
+                        {
+                            int commaIdx = entry.IndexOf(',');
+                            if (commaIdx > 0)
+                            {
+                                string name = entry.Substring(0, commaIdx).Trim();
+                                if (name.Equals(settingName, StringComparison.OrdinalIgnoreCase) ||
+                                    name.Contains(settingName, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    string rest = entry.Substring(commaIdx + 1).Trim();
+                                    int bracketIdx = rest.IndexOf('[');
+                                    string current = bracketIdx > 0 ? rest.Substring(0, bracketIdx).Trim() : rest.Trim();
+                                    return current;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        public bool SetBiosSettingViaWmi(string settingName, string value, string? password)
+        {
+            if (string.IsNullOrWhiteSpace(settingName) || string.IsNullOrWhiteSpace(value)) return false;
+            try
+            {
+                using var searcher = new ManagementObjectSearcher(@"root\WMI", "SELECT * FROM MethodForPowerShell", WmiEnumOptions);
+                using var results = searcher.Get();
+                foreach (ManagementBaseObject mbo in results)
+                {
+                    if (mbo is ManagementObject mo)
+                    {
+                        using var inParams = mo.GetMethodParameters("SetBiosSetting");
+                        if (inParams != null)
+                        {
+                            inParams["Name"] = settingName;
+                            inParams["Value"] = value;
+                            inParams["Password"] = password ?? string.Empty;
+                            using var outParams = mo.InvokeMethod("SetBiosSetting", inParams, WmiTimeoutOptions);
+                            var ret = TryGetPropertyValue(outParams, "return");
+                            if (ret != null && SafeConvertToUInt32(ret, out uint code))
+                            {
+                                return code == 0 || code == 8; // 0 = Done, 8 = RestartNeeded
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+            return false;
         }
 
 

@@ -248,6 +248,21 @@ namespace PredatorControlApp.Bios
         {
             if (_tabControl == null) return;
 
+            // Ensure all settings reflect remembered values from AppSettings
+            try
+            {
+                foreach (var item in _biosManager.Settings)
+                {
+                    string remembered = _settings.GetBiosSettingValue(item.Name, "");
+                    if (!string.IsNullOrEmpty(remembered) && (item.Options == null || item.Options.Count == 0 || item.Options.Contains(remembered)))
+                    {
+                        item.CurrentValue = remembered;
+                        item.PendingValue = remembered;
+                    }
+                }
+            }
+            catch { }
+
             int prevIdx = _tabControl.SelectedIndex;
 
             foreach (TabPage oldTab in _tabControl.TabPages)
@@ -412,8 +427,37 @@ namespace PredatorControlApp.Bios
                 if (ok)
                 {
                     lblCurrent.Text = $"Current: {item.CurrentValue}";
-                    ShowMessage(string.IsNullOrEmpty(msg) ? $"Successfully applied {item.Name} = {item.CurrentValue}." : msg,
-                        "BIOS Updated", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    _settings.SetBiosSettingValue(item.Name, item.CurrentValue);
+                    _settings.Save();
+
+                    bool requiresRestart = item.Name.Contains("MUX", StringComparison.OrdinalIgnoreCase) ||
+                                           item.Name.Contains("Boot", StringComparison.OrdinalIgnoreCase) ||
+                                           item.Category == BiosCategory.BootSetup ||
+                                           msg.Contains("restart", StringComparison.OrdinalIgnoreCase) ||
+                                           msg.Contains("reboot", StringComparison.OrdinalIgnoreCase);
+
+                    if (requiresRestart)
+                    {
+                        var dr = ShowMessage(
+                            $"BIOS setting '{item.Name}' was successfully applied to '{item.CurrentValue}'.\r\n\r\nA system restart is required for this firmware setting to take full effect. Would you like to restart now?",
+                            "BIOS Setting Applied - Restart Required",
+                            MessageBoxButtons.YesNo,
+                            MessageBoxIcon.Question);
+
+                        if (dr == DialogResult.Yes)
+                        {
+                            try
+                            {
+                                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("shutdown.exe", "/r /t 5") { CreateNoWindow = true, UseShellExecute = false });
+                            }
+                            catch { }
+                        }
+                    }
+                    else
+                    {
+                        ShowMessage(string.IsNullOrEmpty(msg) ? $"Successfully applied {item.Name} = {item.CurrentValue}." : msg,
+                            "BIOS Updated", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
                 }
                 else
                 {
@@ -439,6 +483,9 @@ namespace PredatorControlApp.Bios
                     _chkAllowDangerous.Checked = false;
                     _biosManager.DangerousAllowed = false;
                 }
+                _settings.BiosModificationsEnabled = enabled;
+                if (!enabled) _settings.BiosDangerousAllowed = false;
+                _settings.Save();
                 PopulateCategories();
             }
             finally
@@ -476,6 +523,8 @@ namespace PredatorControlApp.Bios
                     }
                 }
                 _biosManager.DangerousAllowed = _chkAllowDangerous.Checked;
+                _settings.BiosDangerousAllowed = _chkAllowDangerous.Checked;
+                _settings.Save();
                 PopulateCategories();
             }
             finally
@@ -497,6 +546,8 @@ namespace PredatorControlApp.Bios
                 bool ok = _biosManager.RestoreDefaults(userDefaults: false, out string msg);
                 if (ok)
                 {
+                    _settings.BiosSettingsValues.Clear();
+                    _settings.Save();
                     ShowMessage("Factory defaults restored successfully.", "BIOS Defaults", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     PopulateCategories();
                 }
