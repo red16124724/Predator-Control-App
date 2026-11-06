@@ -2,9 +2,12 @@ pub mod acpi;
 pub mod audio;
 pub mod backlight;
 pub mod battery;
+pub mod bios;
 pub mod cpu_spec;
 pub mod curve;
+pub mod display;
 pub mod ec_hid;
+pub mod game_profile;
 pub mod graphproj;
 pub mod history;
 pub mod hook;
@@ -178,6 +181,7 @@ pub unsafe extern "C" fn predator_core_cleanup() {
 
         ec_hid::predator_enek_close();
         audio::predator_audio_capture_stop();
+        game_profile::shutdown();
 
         nvapi::shutdown();
     });
@@ -1181,6 +1185,13 @@ pub use uefi::predator_uefi_fetch_and_scan_power;
 // 7. Native Model Catalog Lookup
 pub use model_catalog::predator_model_catalog_lookup;
 
+// 8. Event-Driven Game Profiles Native Engine
+pub use migration_exports::{
+    predator_game_profile_clear, predator_game_profile_get_active, predator_game_profile_init,
+    predator_game_profile_poll_event, predator_game_profile_register,
+    predator_game_profile_shutdown, predator_game_profile_unregister,
+};
+
 // Subsystem aliases and lifecycle controls for C-ABI compatibility
 #[no_mangle]
 pub unsafe extern "C" fn predator_pawnio_open() -> i32 {
@@ -1705,3 +1716,11 @@ mod tests {
         assert!(snap.timestamp_ms <= now_ms);
     }
 }
+
+// 9. Universal BIOS and Firmware Settings Native Subsystem
+pub use migration_exports::{
+    predator_bios_apply_setting, predator_bios_get_setting_info,
+    predator_bios_get_settings_count, predator_bios_probe_support,
+    predator_bios_restore_defaults,
+};
+

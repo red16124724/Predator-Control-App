@@ -78,6 +78,30 @@ namespace PredatorControlApp
         public const int StatusBiosLocked = 2;
     }
 
+    public struct NativeDdsStatus
+    {
+        public bool IsSupported;
+        public bool IsAutomatic;
+        public int ActiveMux; // 0 = Unknown, 1 = Optimus, 2 = dGPU
+        public bool HasBlockingApps;
+    }
+
+    public struct NativeBiosSettingInfo
+    {
+        public string Name;
+        public string CurrentValue;
+        public string[] Options;
+        public int Risk; // 0 = Normal, 1 = Dangerous
+        public int Kind; // 1 = WmiNative, 2 = AcpiFallback, 3 = UefiNvram
+    }
+
+    public struct NativeGameProfileEvent
+    {
+        public int EventType; // 0 = None, 1 = Started, 2 = Exited, 3 = Switched
+        public uint ProfileId;
+        public uint ProcessId;
+    }
+
     public static class PredatorNativeCore
     {
         private const string DllName = "predator_core.dll";
@@ -837,6 +861,82 @@ namespace PredatorControlApp
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         private static extern int predator_model_catalog_lookup([In] byte[] modelPtr, nuint modelLen, out int outTier, out int outFans, out int outYear);
 
+        // 8. Display & Advanced Optimus (DDS)
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_display_get_supported_refresh_rates([Out] int[] outRates, nuint maxCount, out nuint outCount);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_display_get_current_refresh_rate();
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_display_set_refresh_rate(int hz);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_display_set_bluelight_shield(int mode);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_display_get_dds_status(out int outSupported, out int outAuto, out int outMux, out int outBlocking);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_display_set_dds_mode(int mode);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_display_set_lcd_overdrive(int enabled);
+
+        // 9. Universal BIOS & Firmware
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_bios_probe_support(out int outSupportMode, [Out] byte[] outModelName, nuint maxLen);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_bios_get_settings_count();
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_bios_get_setting_info(
+            nuint index,
+            [Out] byte[] outName,
+            [Out] byte[] outVal,
+            [Out] byte[] outOptions,
+            out int outRisk,
+            out int outKind,
+            nuint maxLen);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_bios_apply_setting([In] byte[] name, [In] byte[] value, [In] byte[] password, int dangerousAllowed);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_bios_restore_defaults([In] byte[] password, int userDefaults);
+
+        // 10. Event-Driven Game Profiles
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_game_profile_init();
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_game_profile_shutdown();
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_game_profile_register(
+            uint profileId,
+            [In] byte[] exeName,
+            [In] byte[]? fullPath,
+            int mode,
+            uint pl1,
+            uint pl2,
+            int fanMode,
+            int refreshRate,
+            int ddsMode);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_game_profile_unregister(uint profileId);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_game_profile_clear();
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_game_profile_poll_event(out int outEventType, out uint outProfileId, out uint outPid);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_game_profile_get_active(out uint outProfileId, out uint outPid);
+
         #endregion
 
         // ---- RGB animation ----
@@ -1276,6 +1376,248 @@ namespace PredatorControlApp
                 byte[] bytes = System.Text.Encoding.UTF8.GetBytes(model);
                 return predator_model_catalog_lookup(bytes, (nuint)bytes.Length, out tier, out fans, out year) == 0;
             }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        // 8. Display & Advanced Optimus (DDS)
+        public static bool DisplayGetSupportedRefreshRates(out int[] rates)
+        {
+            rates = new[] { 60, 144, 165, 240 };
+            if (!IsNativeCoreAvailable) return false;
+            try
+            {
+                int[] buffer = new int[32];
+                if (predator_display_get_supported_refresh_rates(buffer, (nuint)buffer.Length, out nuint count) == 0 && count > 0)
+                {
+                    rates = new int[count];
+                    Array.Copy(buffer, rates, (int)count);
+                    return true;
+                }
+                return false;
+            }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        public static int DisplayGetCurrentRefreshRate()
+        {
+            if (!IsNativeCoreAvailable) return 60;
+            try
+            {
+                int hz = predator_display_get_current_refresh_rate();
+                return hz > 0 ? hz : 60;
+            }
+            catch (Exception ex) { HandleNativeException(ex); return 60; }
+        }
+
+        public static bool DisplaySetRefreshRate(int hz)
+        {
+            if (!IsNativeCoreAvailable || hz < 30) return false;
+            try { return predator_display_set_refresh_rate(hz) == 0; }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        public static bool DisplaySetBlueLightShield(int mode)
+        {
+            if (!IsNativeCoreAvailable || mode < 0 || mode > 100) return false;
+            try { return predator_display_set_bluelight_shield(mode) == 0; }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        public static bool DisplayGetDdsStatus(out NativeDdsStatus status)
+        {
+            status = default;
+            if (!IsNativeCoreAvailable) return false;
+            try
+            {
+                int ret = predator_display_get_dds_status(out int supported, out int isAuto, out int mux, out int blocking);
+                if (ret == 0)
+                {
+                    status.IsSupported = supported != 0;
+                    status.IsAutomatic = isAuto != 0;
+                    status.ActiveMux = mux;
+                    status.HasBlockingApps = blocking != 0;
+                    return true;
+                }
+                return false;
+            }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        public static bool DisplaySetDdsMode(int mode)
+        {
+            if (!IsNativeCoreAvailable || mode < 0 || mode > 2) return false;
+            try { return predator_display_set_dds_mode(mode) == 0; }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        public static bool DisplaySetLcdOverdrive(bool enabled)
+        {
+            if (!IsNativeCoreAvailable) return false;
+            try { return predator_display_set_lcd_overdrive(enabled ? 1 : 0) == 0; }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        // 9. Universal BIOS & Firmware
+        public static bool BiosProbeSupport(out int supportMode, out string modelName)
+        {
+            supportMode = 0;
+            modelName = "Unknown";
+            if (!IsNativeCoreAvailable) return false;
+            try
+            {
+                byte[] nameBuf = new byte[128];
+                int ret = predator_bios_probe_support(out supportMode, nameBuf, (nuint)nameBuf.Length);
+                if (ret == 0)
+                {
+                    int len = Array.IndexOf(nameBuf, (byte)0);
+                    if (len < 0) len = nameBuf.Length;
+                    modelName = System.Text.Encoding.UTF8.GetString(nameBuf, 0, len);
+                    return true;
+                }
+                return false;
+            }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        public static int BiosGetSettingsCount()
+        {
+            if (!IsNativeCoreAvailable) return 0;
+            try
+            {
+                int count = predator_bios_get_settings_count();
+                return count >= 0 ? count : 0;
+            }
+            catch (Exception ex) { HandleNativeException(ex); return 0; }
+        }
+
+        public static bool BiosGetSettingInfo(int index, out NativeBiosSettingInfo info)
+        {
+            info = default;
+            if (!IsNativeCoreAvailable || index < 0) return false;
+            try
+            {
+                byte[] nameBuf = new byte[128];
+                byte[] valBuf = new byte[128];
+                byte[] optBuf = new byte[512];
+                int ret = predator_bios_get_setting_info((nuint)index, nameBuf, valBuf, optBuf, out int risk, out int kind, 512);
+                if (ret == 0)
+                {
+                    int nLen = Array.IndexOf(nameBuf, (byte)0); if (nLen < 0) nLen = nameBuf.Length;
+                    int vLen = Array.IndexOf(valBuf, (byte)0); if (vLen < 0) vLen = valBuf.Length;
+                    int oLen = Array.IndexOf(optBuf, (byte)0); if (oLen < 0) oLen = optBuf.Length;
+
+                    info.Name = System.Text.Encoding.UTF8.GetString(nameBuf, 0, nLen);
+                    info.CurrentValue = System.Text.Encoding.UTF8.GetString(valBuf, 0, vLen);
+                    string optStr = System.Text.Encoding.UTF8.GetString(optBuf, 0, oLen);
+                    info.Options = optStr.Split(';', StringSplitOptions.RemoveEmptyEntries);
+                    info.Risk = risk;
+                    info.Kind = kind;
+                    return true;
+                }
+                return false;
+            }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        public static int BiosApplySetting(string name, string value, string? password, bool dangerousAllowed)
+        {
+            if (!IsNativeCoreAvailable || string.IsNullOrEmpty(name)) return -1;
+            try
+            {
+                byte[] nameBytes = System.Text.Encoding.UTF8.GetBytes(name + "\0");
+                byte[] valBytes = System.Text.Encoding.UTF8.GetBytes((value ?? "") + "\0");
+                byte[] pwdBytes = string.IsNullOrEmpty(password)
+                    ? new byte[] { 0 }
+                    : System.Text.Encoding.UTF8.GetBytes(password + "\0");
+
+                int res = predator_bios_apply_setting(nameBytes, valBytes, pwdBytes, dangerousAllowed ? 1 : 0);
+                Array.Clear(pwdBytes, 0, pwdBytes.Length);
+                return res;
+            }
+            catch (Exception ex) { HandleNativeException(ex); return -1; }
+        }
+
+        public static int BiosRestoreDefaults(string? password, bool userDefaults)
+        {
+            if (!IsNativeCoreAvailable) return -1;
+            try
+            {
+                byte[] pwdBytes = string.IsNullOrEmpty(password)
+                    ? new byte[] { 0 }
+                    : System.Text.Encoding.UTF8.GetBytes(password + "\0");
+
+                int res = predator_bios_restore_defaults(pwdBytes, userDefaults ? 1 : 0);
+                Array.Clear(pwdBytes, 0, pwdBytes.Length);
+                return res;
+            }
+            catch (Exception ex) { HandleNativeException(ex); return -1; }
+        }
+
+        // 10. Event-Driven Game Profiles
+        public static bool GameProfileInit()
+        {
+            if (!IsNativeCoreAvailable) return false;
+            try { return predator_game_profile_init() == 0; }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        public static void GameProfileShutdown()
+        {
+            if (!IsNativeCoreAvailable) return;
+            try { predator_game_profile_shutdown(); }
+            catch (Exception ex) { HandleNativeException(ex); }
+        }
+
+        public static bool GameProfileRegister(uint profileId, string exeName, string? fullPath, int mode, uint pl1, uint pl2, int fanMode, int refreshRate, int ddsMode)
+        {
+            if (!IsNativeCoreAvailable || profileId == 0 || string.IsNullOrEmpty(exeName)) return false;
+            try
+            {
+                byte[] exeBytes = System.Text.Encoding.UTF8.GetBytes(exeName + "\0");
+                byte[]? pathBytes = string.IsNullOrEmpty(fullPath) ? null : System.Text.Encoding.UTF8.GetBytes(fullPath + "\0");
+                return predator_game_profile_register(profileId, exeBytes, pathBytes, mode, pl1, pl2, fanMode, refreshRate, ddsMode) == 0;
+            }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        public static bool GameProfileUnregister(uint profileId)
+        {
+            if (!IsNativeCoreAvailable || profileId == 0) return false;
+            try { return predator_game_profile_unregister(profileId) == 0; }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        public static void GameProfileClear()
+        {
+            if (!IsNativeCoreAvailable) return;
+            try { predator_game_profile_clear(); }
+            catch (Exception ex) { HandleNativeException(ex); }
+        }
+
+        public static bool GameProfilePollEvent(out NativeGameProfileEvent ev)
+        {
+            ev = default;
+            if (!IsNativeCoreAvailable) return false;
+            try
+            {
+                int ret = predator_game_profile_poll_event(out int eventType, out uint profileId, out uint pid);
+                if (ret == 1)
+                {
+                    ev.EventType = eventType;
+                    ev.ProfileId = profileId;
+                    ev.ProcessId = pid;
+                    return true;
+                }
+                return false;
+            }
+            catch (Exception ex) { HandleNativeException(ex); return false; }
+        }
+
+        public static bool GameProfileGetActive(out uint profileId, out uint pid)
+        {
+            profileId = 0; pid = 0;
+            if (!IsNativeCoreAvailable) return false;
+            try { return predator_game_profile_get_active(out profileId, out pid) == 1; }
             catch (Exception ex) { HandleNativeException(ex); return false; }
         }
 

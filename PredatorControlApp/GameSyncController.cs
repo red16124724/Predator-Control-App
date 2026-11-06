@@ -54,6 +54,7 @@ namespace PredatorControlApp
                         }
                         SaveUnderLock();
                     }
+                SyncProfilesToNative();
                 }
                 if (changed)
                 {
@@ -180,6 +181,7 @@ namespace PredatorControlApp
             _pollTimer.Tick += PollProcesses;
 
             Load();
+            SyncProfilesToNative();
 
             if (_enabled)
                 _pollTimer.Start();
@@ -195,6 +197,7 @@ namespace PredatorControlApp
                 _profiles.Add(profile.Clone());
                 SaveUnderLock();
             }
+            SyncProfilesToNative();
         }
 
         public void RemoveProfile(string exeName)
@@ -213,6 +216,7 @@ namespace PredatorControlApp
                 }
                 SaveUnderLock();
             }
+            SyncProfilesToNative();
             try
             {
                 RegistrySafety.DeleteGameProfile(exeName);
@@ -390,6 +394,44 @@ namespace PredatorControlApp
             });
         }
 
+        
+        public void SyncProfilesToNative()
+        {
+            if (!PredatorNativeCore.IsNativeCoreAvailable) return;
+            try
+            {
+                if (_enabled)
+                {
+                    PredatorNativeCore.GameProfileInit();
+                    PredatorNativeCore.GameProfileClear();
+                    lock (_lock)
+                    {
+                        uint id = 1;
+                        foreach (var p in _profiles)
+                        {
+                            p.ProfileId = id++;
+                            PredatorNativeCore.GameProfileRegister(
+                                p.ProfileId,
+                                p.ExecutableName,
+                                p.ExecutablePath,
+                                p.PowerMode,
+                                (uint)Math.Max(0, p.CpuPl1Watts),
+                                (uint)Math.Max(0, p.CpuPl2Watts),
+                                p.FanMode,
+                                p.RefreshRate,
+                                p.DdsMode);
+                        }
+                    }
+                }
+                else
+                {
+                    PredatorNativeCore.GameProfileClear();
+                    PredatorNativeCore.GameProfileShutdown();
+                }
+            }
+            catch { }
+        }
+
         internal void PollOnce()
         {
             GameProfile? detectedProfile = null;
@@ -402,6 +444,52 @@ namespace PredatorControlApp
                 if (_disposed || !_enabled || _profiles.Count == 0) return;
                 currentActiveExe = _activeExe;
                 profilesSnapshot = _profiles.Select(p => p.Clone()).ToList();
+            }
+
+            // 0. Native event-driven pump (zero-polling Win32 hook)
+            if (PredatorNativeCore.IsNativeCoreAvailable)
+            {
+                while (PredatorNativeCore.GameProfilePollEvent(out var ev))
+                {
+                    if (ev.EventType == 1) // Started
+                    {
+                        var prof = profilesSnapshot.FirstOrDefault(p => p.ProfileId == ev.ProfileId);
+                        if (prof != null)
+                        {
+                            lock (_lock) { _activeExe = prof.ExecutableName; }
+                            GameDetected?.Invoke(prof.Clone());
+                            return;
+                        }
+                    }
+                    else if (ev.EventType == 2) // Exited
+                    {
+                        DashboardSnapshot? exitSnap = null;
+                        lock (_lock)
+                        {
+                            if (_activeExe != null)
+                            {
+                                exitSnap = _savedSnapshot;
+                                _activeExe = null;
+                                _savedSnapshot = null;
+                            }
+                        }
+                        if (exitSnap != null)
+                        {
+                            GameExited?.Invoke(exitSnap);
+                            return;
+                        }
+                    }
+                    else if (ev.EventType == 3) // Switched
+                    {
+                        var prof = profilesSnapshot.FirstOrDefault(p => p.ProfileId == ev.ProfileId);
+                        if (prof != null)
+                        {
+                            lock (_lock) { _activeExe = prof.ExecutableName; }
+                            GameDetected?.Invoke(prof.Clone());
+                            return;
+                        }
+                    }
+                }
             }
 
             // 1. Fast foreground window check

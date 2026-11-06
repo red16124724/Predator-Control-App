@@ -46,6 +46,9 @@ namespace PredatorControlApp
         public bool ApplyCpuPowerLimits { get; set; } = false;
         public int CpuPl1Watts { get; set; } = -1;
         public int CpuPl2Watts { get; set; } = -1;
+        public int DdsMode { get; set; } = -1;
+        public int LcdOverdrive { get; set; } = -1;
+        public uint ProfileId { get; set; } = 0;
 
         public static readonly HashSet<string> BlockedExecutableNames = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -229,7 +232,10 @@ namespace PredatorControlApp
                 RgbB = this.RgbB,
                 ApplyCpuPowerLimits = this.ApplyCpuPowerLimits,
                 CpuPl1Watts = this.CpuPl1Watts,
-                CpuPl2Watts = this.CpuPl2Watts
+                CpuPl2Watts = this.CpuPl2Watts,
+                DdsMode = this.DdsMode,
+                LcdOverdrive = this.LcdOverdrive,
+                ProfileId = this.ProfileId
             };
         }
     }
@@ -253,6 +259,8 @@ namespace PredatorControlApp
         public bool CpuPowerLimitsWereApplied { get; set; }
         public int CpuPl1Watts { get; set; } = -1;
         public int CpuPl2Watts { get; set; } = -1;
+        public int DdsMode { get; set; } = -1;
+        public int LcdOverdrive { get; set; } = -1;
 
         public DashboardSnapshot Clone()
         {
@@ -274,7 +282,9 @@ namespace PredatorControlApp
                 RgbB = this.RgbB,
                 CpuPowerLimitsWereApplied = this.CpuPowerLimitsWereApplied,
                 CpuPl1Watts = this.CpuPl1Watts,
-                CpuPl2Watts = this.CpuPl2Watts
+                CpuPl2Watts = this.CpuPl2Watts,
+                DdsMode = this.DdsMode,
+                LcdOverdrive = this.LcdOverdrive
             };
         }
     }

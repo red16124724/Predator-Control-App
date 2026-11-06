@@ -6,7 +6,7 @@
 //! may hand over buffers that are not naturally aligned.
 
 use crate::{
-    backlight, battery, cpu_spec, curve, graphproj, history, hook, is_valid_buffer,
+    backlight, battery, bios, cpu_spec, curve, game_profile, graphproj, history, hook, is_valid_buffer,
     is_valid_mut_buffer, pipeguard, procsync, shortcuts, uefi,
 };
 
@@ -988,3 +988,433 @@ pub unsafe extern "C" fn predator_uefi_parse_variable_power(
         }
     })
 }
+
+// ============================================================================
+// Event-Driven Game Profiles Native Engine (GameProfile)
+// ============================================================================
+
+/// Initializes the native game profile engine and Win32 foreground hook.
+#[no_mangle]
+pub unsafe extern "C" fn predator_game_profile_init() -> i32 {
+    crate::safe_ffi(-1, || game_profile::init())
+}
+
+/// Shuts down the Win32 hook, stops monitoring, and releases resources.
+#[no_mangle]
+pub unsafe extern "C" fn predator_game_profile_shutdown() -> i32 {
+    crate::safe_ffi(-1, || game_profile::shutdown())
+}
+
+/// Registers or updates a game profile in the match table.
+///
+/// `exe_name` must be a null-terminated UTF-8 string.
+/// `full_path` is optional; may be null or a null-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn predator_game_profile_register(
+    profile_id: u32,
+    exe_name: *const u8,
+    full_path: *const u8,
+    mode: i32,
+    pl1: u32,
+    pl2: u32,
+    fan_mode: i32,
+    refresh_rate: i32,
+    dds_mode: i32,
+) -> i32 {
+    crate::safe_ffi(-1, || {
+        if profile_id == 0 || !is_valid_buffer(exe_name) {
+            return -1;
+        }
+
+        // Read null-terminated exe_name
+        let mut exe_len = 0;
+        while exe_len < 260 {
+            let b = *exe_name.add(exe_len);
+            if b == 0 {
+                break;
+            }
+            exe_len += 1;
+        }
+        if exe_len == 0 {
+            return -1;
+        }
+        let exe_slice = std::slice::from_raw_parts(exe_name, exe_len);
+        let exe_str = match std::str::from_utf8(exe_slice) {
+            Ok(s) => s.trim().to_string(),
+            Err(_) => return -1,
+        };
+
+        // Read optional null-terminated full_path
+        let path_str = if is_valid_buffer(full_path) {
+            let mut path_len = 0;
+            while path_len < 1024 {
+                let b = *full_path.add(path_len);
+                if b == 0 {
+                    break;
+                }
+                path_len += 1;
+            }
+            let path_slice = std::slice::from_raw_parts(full_path, path_len);
+            std::str::from_utf8(path_slice).unwrap_or("").trim().to_string()
+        } else {
+            String::new()
+        };
+
+        let config = game_profile::GameProfileConfig {
+            profile_id,
+            exe_name: exe_str,
+            full_path: path_str,
+            mode,
+            pl1,
+            pl2,
+            fan_mode,
+            refresh_rate,
+            dds_mode,
+        };
+
+        match game_profile::register_profile(config) {
+            Ok(()) => 0,
+            Err(_) => -2,
+        }
+    })
+}
+
+/// Unregisters a profile by ID from the match table.
+#[no_mangle]
+pub unsafe extern "C" fn predator_game_profile_unregister(profile_id: u32) -> i32 {
+    crate::safe_ffi(-1, || {
+        if profile_id == 0 {
+            return -1;
+        }
+        if game_profile::unregister_profile(profile_id) {
+            0
+        } else {
+            -1
+        }
+    })
+}
+
+/// Clears all game profiles from the match table.
+#[no_mangle]
+pub unsafe extern "C" fn predator_game_profile_clear() -> i32 {
+    crate::safe_ffi(-1, || {
+        game_profile::clear_profiles();
+        0
+    })
+}
+
+/// Polls the next event from the game profile event queue.
+///
+/// Returns 1 if an event was popped and written to output pointers, 0 if queue is empty,
+/// or -1 if any required output pointer is invalid.
+#[no_mangle]
+pub unsafe extern "C" fn predator_game_profile_poll_event(
+    out_event_type: *mut i32,
+    out_profile_id: *mut u32,
+    out_pid: *mut u32,
+) -> i32 {
+    crate::safe_ffi(-1, || {
+        if !is_valid_mut_buffer(out_event_type)
+            || !is_valid_mut_buffer(out_profile_id)
+            || !is_valid_mut_buffer(out_pid)
+        {
+            return -1;
+        }
+
+        match game_profile::poll_event() {
+            Some(event) => {
+                let ev_type = event.event_type();
+                std::ptr::write_unaligned(out_event_type, ev_type);
+
+                match event {
+                    game_profile::ProfileEvent::GameStarted { profile_id, pid } => {
+                        std::ptr::write_unaligned(out_profile_id, profile_id);
+                        std::ptr::write_unaligned(out_pid, pid);
+                    }
+                    game_profile::ProfileEvent::GameExited { profile_id, pid } => {
+                        std::ptr::write_unaligned(out_profile_id, profile_id);
+                        std::ptr::write_unaligned(out_pid, pid);
+                    }
+                    game_profile::ProfileEvent::GameSwitched {
+                        old_profile_id,
+                        new_profile_id,
+                    } => {
+                        std::ptr::write_unaligned(out_profile_id, new_profile_id);
+                        std::ptr::write_unaligned(out_pid, old_profile_id);
+                    }
+                }
+                1
+            }
+            None => {
+                std::ptr::write_unaligned(out_event_type, game_profile::EVENT_TYPE_NONE);
+                std::ptr::write_unaligned(out_profile_id, 0);
+                std::ptr::write_unaligned(out_pid, 0);
+                0
+            }
+        }
+    })
+}
+
+/// Retrieves the currently active game (profile_id, pid).
+///
+/// Returns 1 if an active game is currently running, 0 if no game is active,
+/// or -1 if output pointers are invalid.
+#[no_mangle]
+pub unsafe extern "C" fn predator_game_profile_get_active(
+    out_profile_id: *mut u32,
+    out_pid: *mut u32,
+) -> i32 {
+    crate::safe_ffi(-1, || {
+        if !is_valid_mut_buffer(out_profile_id) || !is_valid_mut_buffer(out_pid) {
+            return -1;
+        }
+
+        match game_profile::get_active() {
+            Some((profile_id, pid)) => {
+                std::ptr::write_unaligned(out_profile_id, profile_id);
+                std::ptr::write_unaligned(out_pid, pid);
+                1
+            }
+            None => {
+                std::ptr::write_unaligned(out_profile_id, 0);
+                std::ptr::write_unaligned(out_pid, 0);
+                0
+            }
+        }
+    })
+}
+
+
+// ============================================================================
+// Display & Advanced Optimus (DDS) Exports
+// ============================================================================
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_display_get_supported_refresh_rates(
+    out_rates: *mut i32,
+    max_count: usize,
+    out_count: *mut usize,
+) -> i32 {
+    crate::safe_ffi(-1, || {
+        if !is_valid_mut_buffer(out_rates) || !is_valid_mut_buffer(out_count) || max_count == 0 {
+            return -1;
+        }
+        let rates = crate::display::get_supported_refresh_rates();
+        let copy_count = rates.len().min(max_count);
+        for i in 0..copy_count {
+            std::ptr::write_unaligned(out_rates.add(i), rates[i]);
+        }
+        std::ptr::write_unaligned(out_count, copy_count);
+        0
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_display_get_current_refresh_rate() -> i32 {
+    crate::safe_ffi(-1, || crate::display::get_current_refresh_rate())
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_display_set_refresh_rate(hz: i32) -> i32 {
+    crate::safe_ffi(-1, || {
+        if crate::display::set_refresh_rate(hz).is_ok() { 0 } else { -1 }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_display_set_bluelight_shield(mode: i32) -> i32 {
+    crate::safe_ffi(-1, || {
+        if crate::display::set_bluelight_shield(mode).is_ok() { 0 } else { -1 }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_display_get_dds_status(
+    out_supported: *mut i32,
+    out_auto: *mut i32,
+    out_mux: *mut i32,
+    out_blocking: *mut i32,
+) -> i32 {
+    crate::safe_ffi(-1, || {
+        if !is_valid_mut_buffer(out_supported)
+            || !is_valid_mut_buffer(out_auto)
+            || !is_valid_mut_buffer(out_mux)
+            || !is_valid_mut_buffer(out_blocking)
+        {
+            return -1;
+        }
+        let st = crate::display::get_dds_status();
+        std::ptr::write_unaligned(out_supported, if st.is_supported { 1 } else { 0 });
+        std::ptr::write_unaligned(out_auto, if st.is_automatic { 1 } else { 0 });
+        std::ptr::write_unaligned(out_mux, st.active_mux as i32);
+        std::ptr::write_unaligned(out_blocking, if st.has_blocking_apps { 1 } else { 0 });
+        0
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_display_set_dds_mode(mode: i32) -> i32 {
+    crate::safe_ffi(-1, || {
+        if crate::display::set_dds_mode(mode).is_ok() { 0 } else { -1 }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_display_set_lcd_overdrive(enabled: i32) -> i32 {
+    crate::safe_ffi(-1, || {
+        if crate::display::set_lcd_overdrive(enabled != 0).is_ok() { 0 } else { -1 }
+    })
+}
+
+// ============================================================================
+// Universal BIOS & Firmware Settings Exports
+// ============================================================================
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_bios_probe_support(
+    out_support_mode: *mut i32,
+    out_model_name: *mut u8,
+    max_len: usize,
+) -> i32 {
+    crate::safe_ffi(-1, || {
+        if !out_support_mode.is_null() && !is_valid_mut_buffer(out_support_mode) {
+            return -1;
+        }
+        if !out_model_name.is_null() && !is_valid_mut_buffer(out_model_name) {
+            return -1;
+        }
+        crate::bios::with_bios_manager(|mgr| {
+            if !out_support_mode.is_null() {
+                std::ptr::write_unaligned(out_support_mode, mgr.get_support_mode());
+            }
+            if !out_model_name.is_null() && is_valid_mut_buffer(out_model_name) && max_len > 0 {
+                let name = mgr.get_model_name().as_bytes();
+                let len = name.len().min(max_len - 1);
+                for i in 0..len {
+                    std::ptr::write_unaligned(out_model_name.add(i), name[i]);
+                }
+                std::ptr::write_unaligned(out_model_name.add(len), 0);
+            }
+            0
+        })
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_bios_get_settings_count() -> i32 {
+    crate::safe_ffi(-1, || {
+        crate::bios::with_bios_manager(|mgr| mgr.get_settings_count() as i32)
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_bios_get_setting_info(
+    index: usize,
+    out_name: *mut u8,
+    out_val: *mut u8,
+    out_options: *mut u8,
+    out_risk: *mut i32,
+    out_kind: *mut i32,
+    max_len: usize,
+) -> i32 {
+    crate::safe_ffi(-1, || {
+        if max_len == 0 {
+            return -1;
+        }
+        crate::bios::with_bios_manager(|mgr| {
+            if let Some(s) = mgr.get_setting(index) {
+                if is_valid_mut_buffer(out_name) {
+                    let b = s.name.as_bytes();
+                    let len = b.len().min(max_len - 1);
+                    for i in 0..len { std::ptr::write_unaligned(out_name.add(i), b[i]); }
+                    std::ptr::write_unaligned(out_name.add(len), 0);
+                }
+                if is_valid_mut_buffer(out_val) {
+                    let b = s.current.as_bytes();
+                    let len = b.len().min(max_len - 1);
+                    for i in 0..len { std::ptr::write_unaligned(out_val.add(i), b[i]); }
+                    std::ptr::write_unaligned(out_val.add(len), 0);
+                }
+                if is_valid_mut_buffer(out_options) {
+                    let joined = s.options.join(";");
+                    let b = joined.as_bytes();
+                    let len = b.len().min(max_len - 1);
+                    for i in 0..len { std::ptr::write_unaligned(out_options.add(i), b[i]); }
+                    std::ptr::write_unaligned(out_options.add(len), 0);
+                }
+                if is_valid_mut_buffer(out_risk) {
+                    std::ptr::write_unaligned(out_risk, s.risk as i32);
+                }
+                if is_valid_mut_buffer(out_kind) {
+                    std::ptr::write_unaligned(out_kind, s.kind as i32);
+                }
+                0
+            } else {
+                -1
+            }
+        })
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_bios_apply_setting(
+    name: *const u8,
+    value: *const u8,
+    password: *const u8,
+    dangerous_allowed: i32,
+) -> i32 {
+    crate::safe_ffi(-1, || {
+        if !is_valid_buffer(name) || !is_valid_buffer(value) {
+            return -1;
+        }
+
+        let name_str = match bios::read_ascii_c_str_limited(name, 128) {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+        let val_str = match bios::read_ascii_c_str_limited(value, 128) {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+        let mut pwd_str = if is_valid_buffer(password) {
+            match bios::read_ascii_c_str_limited(password, 128) {
+                Ok(s) => s,
+                Err(e) => return e,
+            }
+        } else {
+            String::new()
+        };
+
+        let res = crate::bios::with_bios_manager(|mgr| {
+            mgr.apply_setting(&name_str, &val_str, &pwd_str, dangerous_allowed != 0) as i32
+        });
+
+        bios::zeroize_string(&mut pwd_str);
+        res
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn predator_bios_restore_defaults(
+    password: *const u8,
+    user_defaults: i32,
+) -> i32 {
+    crate::safe_ffi(-1, || {
+        let mut pwd_str = if is_valid_buffer(password) {
+            match bios::read_ascii_c_str_limited(password, 128) {
+                Ok(s) => s,
+                Err(e) => return e,
+            }
+        } else {
+            String::new()
+        };
+
+        let res = crate::bios::with_bios_manager(|mgr| {
+            mgr.restore_defaults(&pwd_str, user_defaults != 0) as i32
+        });
+
+        bios::zeroize_string(&mut pwd_str);
+        res
+    })
+}
+

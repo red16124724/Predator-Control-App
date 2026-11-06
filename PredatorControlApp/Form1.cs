@@ -3634,7 +3634,17 @@ namespace PredatorControlApp
 
             _trayLcdOverdrive = new ToolStripMenuItem("LCD Overdrive (3ms)", null, (s, e) => ApplyLcdOverdrive(!_switchLcdOverdrive.Checked)) { CheckOnClick = true };
 
-            displayMenu.DropDownItems.AddRange([_trayDisplay60, _trayDisplayMax, new ToolStripSeparator(), _trayLcdOverdrive]);
+            var trayDisplaySettings = new ToolStripMenuItem("Display & GPU Switching...", null, (s, e) =>
+            {
+                using var dialog = new Display.DisplaySettingsForm(Display.DisplayManager.Instance, _appSettings);
+                dialog.ShowDialog();
+            });
+            var trayBiosSettings = new ToolStripMenuItem("BIOS & Firmware Settings...", null, (s, e) =>
+            {
+                using var dialog = new Bios.BiosSettingsForm(Bios.BiosManager.Instance, _appSettings);
+                dialog.ShowDialog();
+            });
+            displayMenu.DropDownItems.AddRange([_trayDisplay60, _trayDisplayMax, new ToolStripSeparator(), _trayLcdOverdrive, new ToolStripSeparator(), trayDisplaySettings, trayBiosSettings]);
 
 
 
@@ -10708,7 +10718,7 @@ namespace PredatorControlApp
 
             // Card 3: Hardware Diagnostics & Capabilities
 
-            var cardDiag = MakeCard(_pnlSettings, "HARDWARE DIAGNOSTICS & CAPABILITIES", col2X, pad, cardW, S(120));
+            var cardDiag = MakeCard(_pnlSettings, "HARDWARE DIAGNOSTICS & CAPABILITIES", col2X, pad, cardW, S(140));
 
             _btnDiagnostics = MakeButton(cardDiag, "Compatibility report", cPad, S(44), (cInnerW - S(8)) / 2, S(36));
             _btnDiagnostics.Click += (s, e) =>
@@ -10734,6 +10744,20 @@ namespace PredatorControlApp
                 bool copied = DiagnosticsDumper.CopyToClipboard(detailedReport);
                 MessageBox.Show(this, copied ? "Detailed report copied. Review it before sharing." : "Could not copy the report to the clipboard.",
                     "Detailed diagnostics", MessageBoxButtons.OK, copied ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+            };
+
+            var btnDisplaySettings = MakeButton(cardDiag, "Display & GPU Switch", cPad, S(88), (cInnerW - S(8)) / 2, S(36));
+            btnDisplaySettings.Click += (s, e) =>
+            {
+                using var dialog = new Display.DisplaySettingsForm(Display.DisplayManager.Instance, _appSettings);
+                dialog.ShowDialog(this);
+            };
+
+            var btnBiosSettings = MakeButton(cardDiag, "BIOS & Firmware", cPad + (cInnerW + S(8)) / 2, S(88), (cInnerW - S(8)) / 2, S(36));
+            btnBiosSettings.Click += (s, e) =>
+            {
+                using var dialog = new Bios.BiosSettingsForm(Bios.BiosManager.Instance, _appSettings);
+                dialog.ShowDialog(this);
             };
 
 

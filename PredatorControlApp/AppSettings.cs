@@ -415,6 +415,10 @@ namespace PredatorControlApp
 
         public int RefreshRate { get; set; } = 0;
         public bool LcdOverdrive { get; set; } = true;
+        public int DdsMode { get; set; } = 1; // 0 = Optimus, 1 = Auto, 2 = dGPU
+        public int BlueLightShieldMode { get; set; } = 0; // 0 = Off, 1 = Low 18%, 2 = High 36%, 3 = Ultra 54%
+        public bool BiosModificationsEnabled { get; set; } = false;
+        public bool BiosDangerousAllowed { get; set; } = false;
         public bool BatteryLimit { get; set; } = false;
         public long LastBatteryCalibrationUtcTicks { get; set; } = 0;
         public int BatteryCalibrationPhase { get; set; } = 0; // 0 = Idle, 1 = ChargingToFull, 2 = DischargingToEmpty
