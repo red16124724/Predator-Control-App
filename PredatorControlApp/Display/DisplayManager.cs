@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.Versioning;
+using Microsoft.Win32;
 using PredatorControlApp;
 
 namespace PredatorControlApp.Display
@@ -20,7 +22,8 @@ namespace PredatorControlApp.Display
         Ultra = 3     // 54% reduction
     }
 
-    public class DisplayManager
+    [SupportedOSPlatform("windows")]
+    public class DisplayManager : IDisposable
     {
         private static void SafeInvoke<T>(Action<T>? evt, T arg)
         {
@@ -40,6 +43,7 @@ namespace PredatorControlApp.Display
         private int _blueLightMode = 0;
         private int _ddsMode = 1; // Default Automatic
         private bool _lcdOverdrive = true;
+        private bool _disposed;
 
         public event Action<int>? RefreshRateChanged;
         public event Action<int>? BlueLightShieldChanged;
@@ -54,23 +58,49 @@ namespace PredatorControlApp.Display
         public DisplayManager()
         {
             RefreshCurrentState();
+            try
+            {
+                SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+            }
+            catch { }
+        }
+
+        private void OnDisplaySettingsChanged(object? sender, EventArgs e)
+        {
+            try
+            {
+                RefreshCurrentState();
+            }
+            catch { }
         }
 
         public void RefreshCurrentState()
         {
-            lock (_lock)
+            int hz = 0;
+            if (PredatorNativeCore.IsNativeCoreAvailable)
             {
-                if (PredatorNativeCore.IsNativeCoreAvailable)
-                {
-                    int hz = PredatorNativeCore.DisplayGetCurrentRefreshRate();
-                    if (hz > 0) _currentRefreshRate = hz;
-                }
+                int nativeHz = PredatorNativeCore.DisplayGetCurrentRefreshRate();
+                if (nativeHz > 0) hz = nativeHz;
+            }
 
-                // Query live BIOS MUX state directly from hardware
+            if (hz <= 0)
+            {
+                try
+                {
+                    int coreHz = Form1.GetCurrentRefreshRateCore();
+                    if (coreHz > 0) hz = coreHz;
+                }
+                catch { }
+            }
+
+            // Query live BIOS MUX state directly from hardware (outside lock to prevent deadlocks)
+            int? detectedDds = null;
+            try
+            {
                 var mux = WmiController.Instance.GetGpuMode();
                 if (mux.HasValue)
                 {
-                    _ddsMode = mux.Value switch
+                    detectedDds = mux.Value switch
                     {
                         GpuMode.Auto => 1,
                         GpuMode.iGpuOnly => 0,
@@ -79,36 +109,71 @@ namespace PredatorControlApp.Display
                     };
                 }
             }
+            catch { }
+
+            int oldHz;
+            int newHz = 0;
+            lock (_lock)
+            {
+                if (_disposed) return;
+                oldHz = _currentRefreshRate;
+                if (hz > 0)
+                {
+                    _currentRefreshRate = hz;
+                    newHz = hz;
+                }
+                if (detectedDds.HasValue)
+                {
+                    _ddsMode = detectedDds.Value;
+                }
+            }
+
+            if (newHz > 0 && newHz != oldHz)
+            {
+                SafeInvoke(RefreshRateChanged, newHz);
+            }
         }
 
-        public int GetMaxRefreshRate()
+        public int GetMaxRefreshRate(int displayIndex = 0)
         {
             try
             {
-                int coreMax = Form1.GetMaxRefreshRateCore();
+                int coreMax = Form1.GetMaxRefreshRateCore(displayIndex);
                 if (coreMax >= 60) return coreMax;
             }
             catch { }
 
-            var rates = GetSupportedRefreshRates();
+            var rates = GetSupportedRefreshRates(displayIndex);
             return (rates != null && rates.Length > 0) ? rates.Max() : 144;
         }
 
-        public bool SetRefreshRate60() => SetRefreshRate(60);
-        public bool SetRefreshRateMax() => SetRefreshRate(GetMaxRefreshRate());
+        public bool SetRefreshRate60(int displayIndex = 0) => SetRefreshRate(60, displayIndex);
+        public bool SetRefreshRateMax(int displayIndex = 0) => SetRefreshRate(GetMaxRefreshRate(displayIndex), displayIndex);
 
-        public int[] GetSupportedRefreshRates()
+        public int[] GetSupportedRefreshRates(int displayIndex = 0)
         {
             if (PredatorNativeCore.DisplayGetSupportedRefreshRates(out int[] rates) && rates != null && rates.Length > 0)
             {
                 return rates.OrderBy(r => r).ToArray();
             }
 
+            try
+            {
+                var coreRates = Form1.GetSupportedRefreshRatesCore(displayIndex);
+                if (coreRates != null && coreRates.Length > 0)
+                {
+                    return coreRates;
+                }
+            }
+            catch { }
+
             // High-fidelity fallback for gaming laptop panels
             return new[] { 60, 120, 144, 165, 240, 360 };
         }
 
-        public bool SetRefreshRate(int hz)
+        public bool SetRefreshRate(int hz) => SetRefreshRate(hz, 0);
+
+        public bool SetRefreshRate(int hz, int displayIndex)
         {
             if (hz < 30 || hz > 1000) return false;
 
@@ -124,7 +189,7 @@ namespace PredatorControlApp.Display
             }
 
             bool success = false;
-            if (PredatorNativeCore.IsNativeCoreAvailable)
+            if (displayIndex == 0 && PredatorNativeCore.IsNativeCoreAvailable)
             {
                 success = PredatorNativeCore.DisplaySetRefreshRate(hz);
             }
@@ -133,7 +198,7 @@ namespace PredatorControlApp.Display
             {
                 try
                 {
-                    success = Form1.SetRefreshRateCore(hz);
+                    success = Form1.SetRefreshRateCore(hz, displayIndex);
                 }
                 catch { }
             }
@@ -247,6 +312,21 @@ namespace PredatorControlApp.Display
             }
 
             return false;
+        }
+
+        public void Dispose()
+        {
+            lock (_lock)
+            {
+                if (_disposed) return;
+                _disposed = true;
+            }
+            try
+            {
+                SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+            }
+            catch { }
+            GC.SuppressFinalize(this);
         }
     }
 }

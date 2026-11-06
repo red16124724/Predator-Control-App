@@ -460,7 +460,33 @@ namespace PredatorControlApp
         protected override void OnDpiChanged(DpiChangedEventArgs e)
         {
             base.OnDpiChanged(e);
+            float factor = e.DeviceDpiOld > 0 ? (float)e.DeviceDpiNew / e.DeviceDpiOld : 1.0f;
             _dpiScale = e.DeviceDpiNew / 96f;
+            if (Math.Abs(factor - 1.0f) > 0.001f)
+            {
+                try
+                {
+                    this.Scale(new SizeF(factor, factor));
+                    RescaleControlFonts(this, factor);
+                }
+                catch { }
+            }
+        }
+
+        private static void RescaleControlFonts(Control root, float factor)
+        {
+            if (root.Font != null)
+            {
+                float newSize = Math.Max(6f, (float)Math.Round(root.Font.Size * factor, 2));
+                if (Math.Abs(newSize - root.Font.Size) > 0.05f)
+                {
+                    root.Font = new Font(root.Font.FontFamily, newSize, root.Font.Style);
+                }
+            }
+            foreach (Control child in root.Controls)
+            {
+                RescaleControlFonts(child, factor);
+            }
         }
 
         private void LstProfiles_DrawItem(object? sender, DrawItemEventArgs e)

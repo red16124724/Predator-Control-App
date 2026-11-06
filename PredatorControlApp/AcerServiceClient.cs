@@ -431,7 +431,9 @@ namespace PredatorControlApp
 
         {
 
-            return Task.Run(async () =>
+            try
+            {
+                return Task.Run(async () =>
 
             {
 
@@ -520,7 +522,8 @@ namespace PredatorControlApp
                 }
 
             });
-
+            }
+            catch { return Task.FromResult(false); }
         }
 
 

@@ -47,6 +47,18 @@ namespace PredatorControlApp.Bios
 
         public bool IsModified => !string.IsNullOrEmpty(PendingValue) &&
                                   !string.Equals(CurrentValue, PendingValue, StringComparison.OrdinalIgnoreCase);
+
+        public BiosSettingItem Clone() => new BiosSettingItem
+        {
+            Index = Index,
+            Name = Name,
+            CurrentValue = CurrentValue,
+            PendingValue = PendingValue,
+            Options = Options != null ? new List<string>(Options) : new List<string>(),
+            Risk = Risk,
+            Kind = Kind,
+            Category = Category
+        };
     }
 
     public class BiosManager
@@ -140,78 +152,92 @@ namespace PredatorControlApp.Bios
 
         public void ProbeAndLoad()
         {
+            var newSettings = new List<BiosSettingItem>();
+            var biosInfo = HardwareIdentity.GetDeviceBiosInfo(refresh: true);
+            string modelName = (!string.IsNullOrWhiteSpace(biosInfo.FullModelName) && biosInfo.FullModelName != "Unknown System")
+                ? biosInfo.FullModelName
+                : "Universal Acer Predator / Nitro";
+            var supportMode = BiosSupportMode.Unsupported;
+
+            if (PredatorNativeCore.IsNativeCoreAvailable)
+            {
+                if (PredatorNativeCore.BiosProbeSupport(out int mode, out string model))
+                {
+                    supportMode = (BiosSupportMode)mode;
+                    if (!string.IsNullOrWhiteSpace(model) && model != "Unknown")
+                    {
+                        modelName = model;
+                    }
+                }
+
+                int count = PredatorNativeCore.BiosGetSettingsCount();
+                for (int i = 0; i < count; i++)
+                {
+                    if (PredatorNativeCore.BiosGetSettingInfo(i, out var info))
+                    {
+                        var item = new BiosSettingItem
+                        {
+                            Index = i,
+                            Name = info.Name,
+                            CurrentValue = info.CurrentValue,
+                            PendingValue = info.CurrentValue,
+                            Options = info.Options != null ? new List<string>(info.Options) : new List<string>(),
+                            Risk = (BiosSettingRisk)info.Risk,
+                            Kind = (BiosSettingKind)info.Kind,
+                            Category = ClassifyCategory(info.Name)
+                        };
+                        newSettings.Add(item);
+                    }
+                }
+            }
+
+            // If native didn't provide settings or isn't available, provide comprehensive Acer native presets
+            if (newSettings.Count == 0)
+            {
+                supportMode = BiosSupportMode.AcpiWmiFallback2020;
+                if (string.IsNullOrWhiteSpace(modelName) || modelName == "Universal Acer Predator / Nitro")
+                {
+                    modelName = !string.IsNullOrWhiteSpace(biosInfo.FullModelName) && biosInfo.FullModelName != "Unknown System"
+                        ? biosInfo.FullModelName
+                        : "Acer Predator / Nitro Universal";
+                }
+                LoadFallbackAcerSettings(newSettings);
+            }
+
+            // Query live hardware state directly from WmiController and SMBIOS (outside lock to prevent deadlocks)
+            RefreshLiveHardwareValues(newSettings);
+
+            // Hydrate remembered values from AppSettings
+            try
+            {
+                var appSettings = AppSettings.Load();
+                foreach (var item in newSettings)
+                {
+                    string remembered = appSettings.GetBiosSettingValue(item.Name, "");
+                    if (!string.IsNullOrEmpty(remembered) && (item.Options == null || item.Options.Count == 0 || item.Options.Contains(remembered)))
+                    {
+                        item.CurrentValue = remembered;
+                        item.PendingValue = remembered;
+                    }
+                }
+            }
+            catch { }
+
             lock (_lock)
             {
                 _settings.Clear();
-                _biosInfo = HardwareIdentity.GetDeviceBiosInfo(refresh: true);
-                if (!string.IsNullOrWhiteSpace(_biosInfo.FullModelName) && _biosInfo.FullModelName != "Unknown System")
-                {
-                    _modelName = _biosInfo.FullModelName;
-                }
-
-                if (PredatorNativeCore.IsNativeCoreAvailable)
-                {
-                    if (PredatorNativeCore.BiosProbeSupport(out int mode, out string model))
-                    {
-                        _supportMode = (BiosSupportMode)mode;
-                        if (!string.IsNullOrWhiteSpace(model) && model != "Unknown")
-                        {
-                            _modelName = model;
-                        }
-                    }
-
-                    int count = PredatorNativeCore.BiosGetSettingsCount();
-                    for (int i = 0; i < count; i++)
-                    {
-                        if (PredatorNativeCore.BiosGetSettingInfo(i, out var info))
-                        {
-                            var item = new BiosSettingItem
-                            {
-                                Index = i,
-                                Name = info.Name,
-                                CurrentValue = info.CurrentValue,
-                                PendingValue = info.CurrentValue,
-                                Options = info.Options != null ? new List<string>(info.Options) : new List<string>(),
-                                Risk = (BiosSettingRisk)info.Risk,
-                                Kind = (BiosSettingKind)info.Kind,
-                                Category = ClassifyCategory(info.Name)
-                            };
-                            _settings.Add(item);
-                        }
-                    }
-                }
-
-                // If native didn't provide settings or isn't available, provide comprehensive Acer native presets
-                if (_settings.Count == 0)
-                {
-                    LoadFallbackAcerSettings();
-                }
-
-                // Query live hardware state directly from WmiController and SMBIOS
-                RefreshLiveHardwareValues();
-
-                // Hydrate remembered values from AppSettings so all applied settings persist across app launches and reboots
-                try
-                {
-                    var appSettings = AppSettings.Load();
-                    foreach (var item in _settings)
-                    {
-                        string remembered = appSettings.GetBiosSettingValue(item.Name, "");
-                        if (!string.IsNullOrEmpty(remembered) && (item.Options == null || item.Options.Count == 0 || item.Options.Contains(remembered)))
-                        {
-                            item.CurrentValue = remembered;
-                            item.PendingValue = remembered;
-                        }
-                    }
-                }
-                catch { }
+                _settings.AddRange(newSettings);
+                _biosInfo = biosInfo;
+                _modelName = modelName;
+                _supportMode = supportMode;
             }
         }
 
-        private void RefreshLiveHardwareValues()
+        private void RefreshLiveHardwareValues(List<BiosSettingItem>? targetSettings = null)
         {
             var wmi = WmiController.Instance;
-            foreach (var item in _settings)
+            var list = targetSettings ?? _settings;
+            foreach (var item in list)
             {
                 string norm = item.Name.ToLowerInvariant();
                 try
@@ -341,8 +367,9 @@ namespace PredatorControlApp.Bios
             return BiosCategory.System;
         }
 
-        private void LoadFallbackAcerSettings()
+        private void LoadFallbackAcerSettings(List<BiosSettingItem>? targetSettings = null)
         {
+            var list = targetSettings ?? _settings;
             _supportMode = BiosSupportMode.AcpiWmiFallback2020;
             if (string.IsNullOrWhiteSpace(_modelName) || _modelName == "Universal Acer Predator / Nitro")
             {
@@ -476,7 +503,7 @@ namespace PredatorControlApp.Bios
                 }
             };
 
-            _settings.AddRange(defaults);
+            foreach (var item in defaults) list.Add(item);
         }
 
         public void SetSupervisorPassword(string? password)
@@ -615,7 +642,16 @@ namespace PredatorControlApp.Bios
             }
 
             // 3. Update current value in-memory
-            lock (_lock) { item.CurrentValue = item.PendingValue; }
+            lock (_lock)
+            {
+                item.CurrentValue = item.PendingValue;
+                var match = _settings.FirstOrDefault(s => s.Index == item.Index || s.Name.Equals(item.Name, StringComparison.OrdinalIgnoreCase));
+                if (match != null)
+                {
+                    match.CurrentValue = item.PendingValue;
+                    match.PendingValue = item.PendingValue;
+                }
+            }
 
             // 4. Permanently remember applied BIOS setting across app restarts
             try
@@ -691,6 +727,41 @@ namespace PredatorControlApp.Bios
 
             ProbeAndLoad();
             return true;
+        }
+
+        public void HydrateFromSettings(AppSettings? settings = null)
+        {
+            try
+            {
+                var appSettings = settings ?? AppSettings.Load();
+                lock (_lock)
+                {
+                    foreach (var item in _settings)
+                    {
+                        string remembered = appSettings.GetBiosSettingValue(item.Name, "");
+                        if (!string.IsNullOrEmpty(remembered) && (item.Options == null || item.Options.Count == 0 || item.Options.Contains(remembered)))
+                        {
+                            item.CurrentValue = remembered;
+                            item.PendingValue = remembered;
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        public void UpdateMuxSetting(string option)
+        {
+            lock (_lock)
+            {
+                var mux = _settings.FirstOrDefault(s => s.Name.Contains("Display MUX", StringComparison.OrdinalIgnoreCase) ||
+                                                        s.Name.Contains("MUX", StringComparison.OrdinalIgnoreCase));
+                if (mux != null)
+                {
+                    mux.CurrentValue = option;
+                    mux.PendingValue = option;
+                }
+            }
         }
 
         public BiosSettingItem? GetMuxSetting()

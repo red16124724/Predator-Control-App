@@ -421,7 +421,24 @@ namespace PredatorControlApp
             get => GpuMode;
             set => GpuMode = value;
         }
-        public Dictionary<string, string> BiosSettingsValues { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        private Dictionary<string, string> _biosSettingsValues = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, string> BiosSettingsValues
+        {
+            get
+            {
+                lock (this)
+                {
+                    return _biosSettingsValues;
+                }
+            }
+            set
+            {
+                lock (this)
+                {
+                    _biosSettingsValues = value ?? new(StringComparer.OrdinalIgnoreCase);
+                }
+            }
+        }
 
         public string GetBiosSettingValue(string name, string defaultValue = "")
         {
@@ -1608,7 +1625,7 @@ namespace PredatorControlApp
             var cpu = _cpuCurve;
             if (cpu == null)
             {
-                _cpuCurve = new();
+                _cpuCurve = FanCurveGraph.DefaultCpuPoints.Select(p => new CurvePointData(p.X, p.Y)).ToList();
             }
             else
             {
@@ -1626,6 +1643,10 @@ namespace PredatorControlApp
                                 sanitized.Add(new CurvePointData(Math.Clamp(pt.X, 0, 100), Math.Clamp(pt.Y, 0, 100)));
                             }
                         }
+                        if (sanitized.Count < 2)
+                        {
+                            sanitized = FanCurveGraph.DefaultCpuPoints.Select(p => new CurvePointData(p.X, p.Y)).ToList();
+                        }
                         cpu.Clear();
                         cpu.AddRange(sanitized);
                     }
@@ -1636,7 +1657,7 @@ namespace PredatorControlApp
             var gpu = _gpuCurve;
             if (gpu == null)
             {
-                _gpuCurve = new();
+                _gpuCurve = FanCurveGraph.DefaultGpuPoints.Select(p => new CurvePointData(p.X, p.Y)).ToList();
             }
             else
             {
@@ -1653,6 +1674,10 @@ namespace PredatorControlApp
                             {
                                 sanitized.Add(new CurvePointData(Math.Clamp(pt.X, 0, 100), Math.Clamp(pt.Y, 0, 100)));
                             }
+                        }
+                        if (sanitized.Count < 2)
+                        {
+                            sanitized = FanCurveGraph.DefaultGpuPoints.Select(p => new CurvePointData(p.X, p.Y)).ToList();
                         }
                         gpu.Clear();
                         gpu.AddRange(sanitized);
@@ -1708,9 +1733,7 @@ namespace PredatorControlApp
 
         private static void CleanupOrphanedTempFiles()
         {
-            if (CustomFilePath != null) return;
-
-            CleanupStaleTempFilesIn(SettingsFilePath);
+            CleanupStaleTempFilesIn(CustomFilePath ?? SettingsFilePath);
         }
 
         internal void RestoreMissingStaticZoneColors(bool zone1, bool zone2, bool zone3, bool zone4)
@@ -1725,11 +1748,17 @@ namespace PredatorControlApp
 
         internal void RestoreMissingStaticZoneColorsFromJson(string json)
         {
-            using var doc = JsonDocument.Parse(json);
-            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var property in doc.RootElement.EnumerateObject()) names.Add(property.Name);
-            RestoreMissingStaticZoneColors(names.Contains(nameof(StaticZone1ColorArgb)), names.Contains(nameof(StaticZone2ColorArgb)),
-                names.Contains(nameof(StaticZone3ColorArgb)), names.Contains(nameof(StaticZone4ColorArgb)));
+            if (string.IsNullOrWhiteSpace(json)) return;
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.ValueKind != JsonValueKind.Object) return;
+                var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var property in doc.RootElement.EnumerateObject()) names.Add(property.Name);
+                RestoreMissingStaticZoneColors(names.Contains(nameof(StaticZone1ColorArgb)), names.Contains(nameof(StaticZone2ColorArgb)),
+                    names.Contains(nameof(StaticZone3ColorArgb)), names.Contains(nameof(StaticZone4ColorArgb)));
+            }
+            catch { }
         }
 
         private static bool TryGetRegistryInt(RegistryKey? key, string name, out int val)
@@ -1992,16 +2021,6 @@ namespace PredatorControlApp
                             else if (key.GetValue("RGB_Speed") is int spLegacy) settings.DynamicEffectSpeed = spLegacy;
 
                             if (key.GetValue("DynamicEffectDirection") is int ded) settings.DynamicEffectDirection = ded;
-                            if (hasKbl)
-                            {
-                                settings.KeyboardBrightnessLevel = kbl;
-                                settings.RgbBrightness = kbl;
-                            }
-                            else if (hasBr)
-                            {
-                                settings.KeyboardBrightnessLevel = br;
-                                settings.RgbBrightness = br;
-                            }
 
                             if (key.GetValue("SmoothPowerModeSwitching") is int spms) settings.SmoothPowerModeSwitching = spms == 1;
                             if (key.GetValue("WindowsOverlaySyncEnabled") is int wose) settings.WindowsOverlaySyncEnabled = wose == 1;
@@ -2159,7 +2178,8 @@ namespace PredatorControlApp
             try
             {
                 string path = SettingsFilePath;
-                string dir = Path.GetDirectoryName(path)!;
+                string dir = Path.GetDirectoryName(path) ?? Path.GetTempPath();
+                if (string.IsNullOrEmpty(dir)) dir = Path.GetTempPath();
 
                 // Reparse point / directory junction defense:
                 var dirInfo = new DirectoryInfo(dir);
@@ -2352,7 +2372,6 @@ namespace PredatorControlApp
                         key.SetValue("DynamicEffectSecondaryColorArgb", snapshot.DynamicEffectSecondaryColorArgb, RegistryValueKind.DWord);
                         key.SetValue("DynamicEffectSpeed", snapshot.DynamicEffectSpeed, RegistryValueKind.DWord);
                         key.SetValue("DynamicEffectDirection", snapshot.DynamicEffectDirection, RegistryValueKind.DWord);
-                        key.SetValue("KeyboardBrightnessLevel", snapshot.KeyboardBrightnessLevel, RegistryValueKind.DWord);
 
                         key.SetValue("SmoothPowerModeSwitching", snapshot.SmoothPowerModeSwitching ? 1 : 0);
                         key.SetValue("WindowsOverlaySyncEnabled", snapshot.WindowsOverlaySyncEnabled ? 1 : 0);

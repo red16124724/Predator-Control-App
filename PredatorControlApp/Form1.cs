@@ -73,7 +73,7 @@ namespace PredatorControlApp
         private static DateTime _lastTrimWorkingSetUtc = DateTime.MinValue;
         private static readonly TimeSpan TrimWorkingSetCooldown = TimeSpan.FromSeconds(30);
 
-        public bool IsUiRenderActive => Visible && WindowState != FormWindowState.Minimized && !IsDisposed && IsHandleCreated;
+        public bool IsUiRenderActive => Visible && WindowState != FormWindowState.Minimized && !IsDisposed && !Disposing && !_isClosing && IsHandleCreated;
 
         private static void TrimWorkingSet(bool force = false)
         {
@@ -622,19 +622,52 @@ namespace PredatorControlApp
 
 
 
-        private static readonly Font FontTitle = new("Segoe UI", 9.5f, FontStyle.Bold);
+        private Font _fontTitle = new("Segoe UI", 9.5f, FontStyle.Bold);
+        private Font _fontSectionHeader = new("Segoe UI", 8.5f, FontStyle.Bold);
+        private Font _fontHeaderLight = new("Segoe UI", 8.5f, FontStyle.Regular);
+        private Font _fontBody = new("Segoe UI", 9.5f, FontStyle.Regular);
+        private Font _fontBodyBold = new("Segoe UI", 9.5f, FontStyle.Bold);
+        private Font _fontCalibrationPercent = new("Segoe UI", 20f, FontStyle.Bold);
+        private Font _fontRiskBadge = new("Segoe UI", 7.5f, FontStyle.Bold);
 
-        private static readonly Font FontSectionHeader = new("Segoe UI", 8.5f, FontStyle.Bold);
+        private Font FontTitle => _fontTitle;
+        private Font FontSectionHeader => _fontSectionHeader;
+        private Font FontHeaderLight => _fontHeaderLight;
+        private Font FontBody => _fontBody;
+        private Font FontBodyBold => _fontBodyBold;
+        private Font FontCalibrationPercent => _fontCalibrationPercent;
+        private Font FontRiskBadge => _fontRiskBadge;
 
-        private static readonly Font FontHeaderLight = new("Segoe UI", 8.5f, FontStyle.Regular);
+        private void UpdateDpiFonts()
+        {
+            var oldTitle = _fontTitle;
+            var oldSec = _fontSectionHeader;
+            var oldLight = _fontHeaderLight;
+            var oldBody = _fontBody;
+            var oldBold = _fontBodyBold;
+            var oldCalib = _fontCalibrationPercent;
+            var oldRisk = _fontRiskBadge;
 
-        private static readonly Font FontBody = new("Segoe UI", 9.5f, FontStyle.Regular);
+            _fontTitle = new Font("Segoe UI", Math.Max(7f, 9.5f * _dpiScale), FontStyle.Bold);
+            _fontSectionHeader = new Font("Segoe UI", Math.Max(6.5f, 8.5f * _dpiScale), FontStyle.Bold);
+            _fontHeaderLight = new Font("Segoe UI", Math.Max(6.5f, 8.5f * _dpiScale), FontStyle.Regular);
+            _fontBody = new Font("Segoe UI", Math.Max(7f, 9.5f * _dpiScale), FontStyle.Regular);
+            _fontBodyBold = new Font("Segoe UI", Math.Max(7f, 9.5f * _dpiScale), FontStyle.Bold);
+            _fontCalibrationPercent = new Font("Segoe UI", Math.Max(14f, 20f * _dpiScale), FontStyle.Bold);
+            _fontRiskBadge = new Font("Segoe UI", Math.Max(6f, 7.5f * _dpiScale), FontStyle.Bold);
 
-        private static readonly Font FontBodyBold = new("Segoe UI", 9.5f, FontStyle.Bold);
+            try { oldTitle?.Dispose(); } catch { }
+            try { oldSec?.Dispose(); } catch { }
+            try { oldLight?.Dispose(); } catch { }
+            try { oldBody?.Dispose(); } catch { }
+            try { oldBold?.Dispose(); } catch { }
+            try { oldCalib?.Dispose(); } catch { }
+            try { oldRisk?.Dispose(); } catch { }
+        }
 
-        private static readonly Font FontCalibrationPercent = new("Segoe UI", 20f, FontStyle.Bold);
-
-        private static readonly Font FontRiskBadge = new("Segoe UI", 7.5f, FontStyle.Bold);
+        private bool _isUpdatingOverdrive;
+        private bool _isUpdatingModeKeyAction;
+        private bool _isUpdatingBiosSafetyGates;
 
 
 
@@ -1507,6 +1540,7 @@ namespace PredatorControlApp
 
 
             _dpiScale = (this.DeviceDpi > 0) ? this.DeviceDpi / 96f : 1.0f;
+            if (Math.Abs(_dpiScale - 1.0f) > 0.001f) UpdateDpiFonts();
 
             try { int detectedHz = GetMaxRefreshRateCore(); if (detectedHz > 60) _maxHz = detectedHz; } catch { }
 
@@ -3418,7 +3452,11 @@ namespace PredatorControlApp
 
                     Task.Run(() =>
                     {
-                        LightingEffectsManager.ApplyEffect(selectedMode, _wmi, color.R, color.G, color.B, (byte)targetBright, speed, direction, (OperatingMode)_currentPowerMode);
+                        try
+                        {
+                            LightingEffectsManager.ApplyEffect(selectedMode, _wmi, color.R, color.G, color.B, (byte)targetBright, speed, direction, (OperatingMode)_currentPowerMode);
+                        }
+                        catch { }
                     });
                 }
 
@@ -3440,116 +3478,99 @@ namespace PredatorControlApp
 
  
 
-        internal static int GetCurrentRefreshRateCore(int displayIndex = 0)
-
+        public static string? GetDisplayDeviceName(int displayIndex)
         {
-
-            if (displayIndex != 0) return 60;
-
-            DEVMODE dm = new(); dm.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
-
-            return EnumDisplaySettings(null, ENUM_CURRENT_SETTINGS, ref dm) ? dm.dmDisplayFrequency : 60;
-
+            try
+            {
+                var screens = Screen.AllScreens;
+                if (displayIndex >= 0 && displayIndex < screens.Length)
+                    return screens[displayIndex].DeviceName;
+            }
+            catch { }
+            return null;
         }
 
-
-
-        internal static int GetMaxRefreshRateCore(int displayIndex = 0)
-
+        public static int GetCurrentRefreshRateCore(int displayIndex = 0)
         {
+            if (displayIndex < 0) return 60;
+            string? devName = GetDisplayDeviceName(displayIndex);
+            if (displayIndex > 0 && devName == null) return 60;
+            DEVMODE dm = new(); dm.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
+            return EnumDisplaySettings(devName, ENUM_CURRENT_SETTINGS, ref dm) ? (dm.dmDisplayFrequency > 0 ? dm.dmDisplayFrequency : 60) : 60;
+        }
 
-            if (displayIndex != 0) return 60;
-
+        public static int GetMaxRefreshRateCore(int displayIndex = 0)
+        {
+            if (displayIndex < 0) return 60;
+            string? devName = GetDisplayDeviceName(displayIndex);
+            if (displayIndex > 0 && devName == null) return 60;
             DEVMODE cur = new(); cur.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
-
-            if (!EnumDisplaySettings(null, ENUM_CURRENT_SETTINGS, ref cur)) return 60;
-
-
+            if (!EnumDisplaySettings(devName, ENUM_CURRENT_SETTINGS, ref cur)) return 60;
 
             int maxHz = cur.dmDisplayFrequency > 0 ? cur.dmDisplayFrequency : 60;
-
             DEVMODE dm = new(); dm.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
-
-            for (int modeNum = 0; EnumDisplaySettings(null, modeNum, ref dm); modeNum++)
-
+            for (int modeNum = 0; EnumDisplaySettings(devName, modeNum, ref dm); modeNum++)
             {
-
                 if (IsSameGeometry(dm, cur) && dm.dmDisplayFrequency > maxHz)
-
                     maxHz = dm.dmDisplayFrequency;
-
                 dm.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
-
             }
-
             return maxHz;
-
         }
 
-
-
-        internal static bool IsSameGeometry(DEVMODE a, DEVMODE b) =>
-
-            a.dmPelsWidth == b.dmPelsWidth &&
-
-            a.dmPelsHeight == b.dmPelsHeight &&
-
-            a.dmBitsPerPel == b.dmBitsPerPel &&
-
-            (a.dmDisplayFlags & DM_INTERLACED) == 0;
-
-
-
-        internal static bool SetRefreshRateCore(int hz, int displayIndex = 0)
-
+        public static int[] GetSupportedRefreshRatesCore(int displayIndex = 0)
         {
-
-            if (SetRefreshRateOverride != null) return SetRefreshRateOverride(hz);
-
-            if (displayIndex != 0) return false;
-
-            if (hz <= 0) return false;
-
-
-
+            if (displayIndex < 0) return new[] { 60 };
+            string? devName = GetDisplayDeviceName(displayIndex);
+            if (displayIndex > 0 && devName == null) return new[] { 60 };
             DEVMODE cur = new(); cur.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
+            if (!EnumDisplaySettings(devName, ENUM_CURRENT_SETTINGS, ref cur)) return new[] { 60 };
 
-            if (!EnumDisplaySettings(null, ENUM_CURRENT_SETTINGS, ref cur)) return false;
-
-            if (cur.dmDisplayFrequency == hz) return true;
-
-
+            var rates = new HashSet<int>();
+            if (cur.dmDisplayFrequency > 0) rates.Add(cur.dmDisplayFrequency);
 
             DEVMODE dm = new(); dm.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
-
-            DEVMODE? match = null;
-
-            for (int modeNum = 0; EnumDisplaySettings(null, modeNum, ref dm); modeNum++)
-
+            for (int modeNum = 0; EnumDisplaySettings(devName, modeNum, ref dm); modeNum++)
             {
-
-                if (IsSameGeometry(dm, cur) && dm.dmDisplayFrequency == hz) { match = dm; break; }
-
+                if (IsSameGeometry(dm, cur) && dm.dmDisplayFrequency > 0)
+                    rates.Add(dm.dmDisplayFrequency);
                 dm.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
-
             }
+            return rates.Count > 0 ? rates.OrderBy(r => r).ToArray() : new[] { 60 };
+        }
 
+        internal static bool IsSameGeometry(DEVMODE a, DEVMODE b) =>
+            a.dmPelsWidth == b.dmPelsWidth &&
+            a.dmPelsHeight == b.dmPelsHeight &&
+            a.dmBitsPerPel == b.dmBitsPerPel &&
+            (a.dmDisplayFlags & DM_INTERLACED) == 0;
+
+        public static bool SetRefreshRateCore(int hz, int displayIndex = 0)
+        {
+            if (SetRefreshRateOverride != null) return SetRefreshRateOverride(hz);
+            if (hz <= 0 || displayIndex < 0) return false;
+
+            string? devName = GetDisplayDeviceName(displayIndex);
+            if (displayIndex > 0 && devName == null) return false;
+            DEVMODE cur = new(); cur.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
+            if (!EnumDisplaySettings(devName, ENUM_CURRENT_SETTINGS, ref cur)) return false;
+            if (cur.dmDisplayFrequency == hz) return true;
+
+            DEVMODE dm = new(); dm.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
+            DEVMODE? match = null;
+            for (int modeNum = 0; EnumDisplaySettings(devName, modeNum, ref dm); modeNum++)
+            {
+                if (IsSameGeometry(dm, cur) && dm.dmDisplayFrequency == hz) { match = dm; break; }
+                dm.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
+            }
             if (match == null) return false;
 
-
-
             DEVMODE target = match.Value;
-
             target.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
-
             target.dmFields = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
 
-
-
-            if (ChangeDisplaySettingsEx(null, ref target, IntPtr.Zero, CDS_TEST, IntPtr.Zero) != DISP_CHANGE_SUCCESSFUL) return false;
-
-            return ChangeDisplaySettingsEx(null, ref target, IntPtr.Zero, CDS_UPDATEREGISTRY, IntPtr.Zero) == DISP_CHANGE_SUCCESSFUL;
-
+            if (ChangeDisplaySettingsEx(devName, ref target, IntPtr.Zero, CDS_TEST, IntPtr.Zero) != DISP_CHANGE_SUCCESSFUL) return false;
+            return ChangeDisplaySettingsEx(devName, ref target, IntPtr.Zero, CDS_UPDATEREGISTRY, IntPtr.Zero) == DISP_CHANGE_SUCCESSFUL;
         }
 
 
@@ -3802,8 +3823,37 @@ namespace PredatorControlApp
 
 
 
+        public void NavigateToPanel(int panelIndex)
+        {
+            if (IsDisposed || Disposing) return;
+            if (InvokeRequired)
+            {
+                try { BeginInvoke(new Action(() => NavigateToPanel(panelIndex))); } catch { }
+                return;
+            }
+            switch (panelIndex % 8)
+            {
+                case 0: SwitchPage(_pnlDashboard, _btnNavDashboard); break;
+                case 1: SwitchPage(_pnlFans, _btnNavFans); break;
+                case 2: SwitchPage(_pnlLighting, _btnNavLighting); break;
+                case 3: SwitchPage(_pnlDisplay, _btnNavDisplay); break;
+                case 4: SwitchPage(_pnlBios, _btnNavBios); break;
+                case 5: SwitchPage(_pnlGameSync, _btnNavGameSync); break;
+                case 6: SwitchPage(_pnlSystem, _btnNavSystem); break;
+                case 7: SwitchPage(_pnlSettings, _btnNavSettings); break;
+            }
+        }
+
         private void SwitchPage(DarkScrollPanel targetPage, PredatorButton targetBtn)
         {
+            if (IsDisposed || Disposing) return;
+            if (InvokeRequired)
+            {
+                try { BeginInvoke(new Action(() => SwitchPage(targetPage, targetBtn))); } catch { }
+                return;
+            }
+            if (targetPage == null || targetBtn == null) return;
+
             if (_pnlDashboard != null) _pnlDashboard.Visible = false;
             if (_pnlFans != null) _pnlFans.Visible = false;
             if (_pnlLighting != null) _pnlLighting.Visible = false;
@@ -3827,9 +3877,10 @@ namespace PredatorControlApp
 
             targetBtn.IsActive = true;
             _activeNavBtn = targetBtn;
-            foreach (var r in _shortcutRows) { if (r.IsRecording) StopShortcutRecording(r); }
-
-
+            if (_shortcutRows != null)
+            {
+                foreach (var r in _shortcutRows) { if (r != null && r.IsRecording) StopShortcutRecording(r); }
+            }
 
             if (_pnlCalibrationOverlay != null && _pnlCalibrationOverlay.Visible)
             {
@@ -3844,6 +3895,12 @@ namespace PredatorControlApp
 
         private void SelectNavButton(PredatorButton targetBtn)
         {
+            if (IsDisposed || Disposing) return;
+            if (InvokeRequired)
+            {
+                try { BeginInvoke(new Action(() => SelectNavButton(targetBtn))); } catch { }
+                return;
+            }
             if (targetBtn == _btnNavDashboard) SwitchPage(_pnlDashboard, _btnNavDashboard);
             else if (targetBtn == _btnNavFans) SwitchPage(_pnlFans, _btnNavFans);
             else if (targetBtn == _btnNavLighting) SwitchPage(_pnlLighting, _btnNavLighting);
@@ -4747,21 +4804,21 @@ namespace PredatorControlApp
             _cboModeKeyAction.Items.AddRange(new[] { "Cycle Power Modes", "Toggle Turbo Mode" });
 
             _cboModeKeyAction.SelectedIndex = _modeKeyAction;
-
             _cboModeKeyAction.SelectedIndexChanged += (s, e) =>
-
             {
-
-                if (_isInitializing) return;
-
-                _modeKeyAction = _cboModeKeyAction.SelectedIndex;
-
-                if (_cboModeKeyActionSys != null && _cboModeKeyActionSys.SelectedIndex != _modeKeyAction)
-
-                    _cboModeKeyActionSys.SelectedIndex = _modeKeyAction;
-
-                SaveState("ModeKeyAction", _modeKeyAction);
-
+                if (_isInitializing || _isUpdatingModeKeyAction) return;
+                try
+                {
+                    _isUpdatingModeKeyAction = true;
+                    _modeKeyAction = _cboModeKeyAction.SelectedIndex;
+                    if (_cboModeKeyActionSys != null && _cboModeKeyActionSys.SelectedIndex != _modeKeyAction)
+                        _cboModeKeyActionSys.SelectedIndex = _modeKeyAction;
+                    SaveState("ModeKeyAction", _modeKeyAction);
+                }
+                finally
+                {
+                    _isUpdatingModeKeyAction = false;
+                }
             };
 
             cardPower.Controls.Add(_cboModeKeyAction);
@@ -4878,7 +4935,7 @@ namespace PredatorControlApp
 
 
 
-            _pnlDashboard.AutoScrollMinSize = new Size(0, S(840));
+            _pnlDashboard.AutoScrollMinSize = new Size(0, S(860));
 
         }
 
@@ -7430,7 +7487,7 @@ namespace PredatorControlApp
 
             int totalH = Math.Max(Math.Max(techCardY + S(126), thermalCardY + thermalCardH + S(12)), S(660));
 
-            _pnlFans.AutoScrollMinSize = new Size(0, totalH);
+            _pnlFans.AutoScrollMinSize = new Size(0, totalH + S(20));
 
         }
 
@@ -7670,12 +7727,16 @@ namespace PredatorControlApp
                 {
                     Task.Run(() =>
                     {
-                        if (gen != Volatile.Read(ref _brightnessApplyGeneration)) return;
-                        lock (_brightnessApplyLock)
+                        try
                         {
                             if (gen != Volatile.Read(ref _brightnessApplyGeneration)) return;
-                            _wmi.TurnOffBacklight();
+                            lock (_brightnessApplyLock)
+                            {
+                                if (gen != Volatile.Read(ref _brightnessApplyGeneration)) return;
+                                _wmi.TurnOffBacklight();
+                            }
                         }
+                        catch { }
                     });
                     if (onBat) _lblBrightHdr.Text = "BRIGHTNESS: Off (Battery Saver)";
                 }
@@ -7691,14 +7752,18 @@ namespace PredatorControlApp
                         {
                             Task.Run(() =>
                             {
-                                if (gen != Volatile.Read(ref _brightnessApplyGeneration)) return;
-                                lock (_brightnessApplyLock)
+                                try
                                 {
                                     if (gen != Volatile.Read(ref _brightnessApplyGeneration)) return;
-                                    _wmi.SetBrightness((byte)bVal, applyMode: false);
-                                    _lightingController.Brightness = bVal;
-                                    _lightingController.QueueApply(KeyboardLightingScope.Zones, 0);
+                                    lock (_brightnessApplyLock)
+                                    {
+                                        if (gen != Volatile.Read(ref _brightnessApplyGeneration)) return;
+                                        _wmi.SetBrightness((byte)bVal, applyMode: false);
+                                        _lightingController.Brightness = bVal;
+                                        _lightingController.QueueApply(KeyboardLightingScope.Zones, 0);
+                                    }
                                 }
+                                catch { }
                             });
                         }
                     }
@@ -7709,12 +7774,16 @@ namespace PredatorControlApp
                         Color c = Color.FromArgb(_appSettings.DynamicEffectPrimaryColorArgb);
                         Task.Run(() =>
                         {
-                            if (gen != Volatile.Read(ref _brightnessApplyGeneration)) return;
-                            lock (_brightnessApplyLock)
+                            try
                             {
                                 if (gen != Volatile.Read(ref _brightnessApplyGeneration)) return;
-                                LightingEffectsManager.ApplyEffect(dynMode, _wmi, c.R, c.G, c.B, (byte)bVal, spd, 0, (OperatingMode)_currentPowerMode);
+                                lock (_brightnessApplyLock)
+                                {
+                                    if (gen != Volatile.Read(ref _brightnessApplyGeneration)) return;
+                                    LightingEffectsManager.ApplyEffect(dynMode, _wmi, c.R, c.G, c.B, (byte)bVal, spd, 0, (OperatingMode)_currentPowerMode);
+                                }
                             }
+                            catch { }
                         });
                     }
                 }
@@ -8440,7 +8509,7 @@ namespace PredatorControlApp
 
 
 
-            _pnlLighting.AutoScrollMinSize = new Size(0, keyY + keyH + pad);
+            _pnlLighting.AutoScrollMinSize = new Size(0, keyY + keyH + pad * 2);
 
             RefreshLightingUi();
 
@@ -10319,7 +10388,7 @@ namespace PredatorControlApp
 
             MakeLabel(cardRate, "High refresh rates provide smoother gameplay animations and lower display input latency.", cPad, S(184), FontHeaderLight, SubHeaderColor);
 
-            _pnlDisplay.AutoScrollMinSize = new Size(0, S(420));
+            _pnlDisplay.AutoScrollMinSize = new Size(0, S(440));
         }
 
         private void BuildBiosPage()
@@ -10364,25 +10433,43 @@ namespace PredatorControlApp
 
             _chkEnableBiosModsSys.CheckedChanged += (s, e) =>
             {
-                Bios.BiosManager.Instance.ModificationsEnabled = _chkEnableBiosModsSys.Checked;
-                _appSettings.BiosModificationsEnabled = _chkEnableBiosModsSys.Checked;
-                _chkAllowDangerousBiosSys.Enabled = _chkEnableBiosModsSys.Checked;
-                if (!_chkEnableBiosModsSys.Checked)
+                if (_isUpdatingBiosSafetyGates) return;
+                try
                 {
-                    _chkAllowDangerousBiosSys.Checked = false;
-                    Bios.BiosManager.Instance.DangerousAllowed = false;
-                    _appSettings.BiosDangerousAllowed = false;
+                    _isUpdatingBiosSafetyGates = true;
+                    Bios.BiosManager.Instance.ModificationsEnabled = _chkEnableBiosModsSys.Checked;
+                    _appSettings.BiosModificationsEnabled = _chkEnableBiosModsSys.Checked;
+                    _chkAllowDangerousBiosSys.Enabled = _chkEnableBiosModsSys.Checked;
+                    if (!_chkEnableBiosModsSys.Checked)
+                    {
+                        _chkAllowDangerousBiosSys.Checked = false;
+                        Bios.BiosManager.Instance.DangerousAllowed = false;
+                        _appSettings.BiosDangerousAllowed = false;
+                    }
+                    _appSettings.Save();
+                    PopulateEmbeddedBiosRows();
                 }
-                _appSettings.Save();
-                PopulateEmbeddedBiosRows();
+                finally
+                {
+                    _isUpdatingBiosSafetyGates = false;
+                }
             };
 
             _chkAllowDangerousBiosSys.CheckedChanged += (s, e) =>
             {
-                Bios.BiosManager.Instance.DangerousAllowed = _chkAllowDangerousBiosSys.Checked;
-                _appSettings.BiosDangerousAllowed = _chkAllowDangerousBiosSys.Checked;
-                _appSettings.Save();
-                PopulateEmbeddedBiosRows();
+                if (_isUpdatingBiosSafetyGates) return;
+                try
+                {
+                    _isUpdatingBiosSafetyGates = true;
+                    Bios.BiosManager.Instance.DangerousAllowed = _chkAllowDangerousBiosSys.Checked;
+                    _appSettings.BiosDangerousAllowed = _chkAllowDangerousBiosSys.Checked;
+                    _appSettings.Save();
+                    PopulateEmbeddedBiosRows();
+                }
+                finally
+                {
+                    _isUpdatingBiosSafetyGates = false;
+                }
             };
 
             MakeLabel(cardBiosHeader, "Modifications unlock low-level ACPI/WMI hardware registers; dangerous settings can affect system stability.", cPad, S(106), FontHeaderLight, SubHeaderColor);
@@ -10424,7 +10511,7 @@ namespace PredatorControlApp
 
             PopulateEmbeddedBiosRows();
 
-            _pnlBios.AutoScrollMinSize = new Size(0, cardSettingsTop + cardSettingsH + pad);
+            _pnlBios.AutoScrollMinSize = new Size(0, cardSettingsTop + cardSettingsH + pad * 2);
         }
 
         private void BuildGameSyncPage()
@@ -10526,7 +10613,7 @@ namespace PredatorControlApp
 
             PopulateGameSyncProfilesList();
 
-            _pnlGameSync.AutoScrollMinSize = new Size(0, cardProfilesTop + cardProfilesH + pad);
+            _pnlGameSync.AutoScrollMinSize = new Size(0, cardProfilesTop + cardProfilesH + pad * 2);
         }
 
         private string GetGameSyncStatusText()
@@ -10762,11 +10849,19 @@ namespace PredatorControlApp
             _cboModeKeyActionSys.SelectedIndex = _modeKeyAction;
             _cboModeKeyActionSys.SelectedIndexChanged += (s, e) =>
             {
-                if (_isInitializing) return;
-                _modeKeyAction = _cboModeKeyActionSys.SelectedIndex;
-                if (_cboModeKeyAction != null && _cboModeKeyAction.SelectedIndex != _modeKeyAction)
-                    _cboModeKeyAction.SelectedIndex = _modeKeyAction;
-                SaveState("ModeKeyAction", _modeKeyAction);
+                if (_isInitializing || _isUpdatingModeKeyAction) return;
+                try
+                {
+                    _isUpdatingModeKeyAction = true;
+                    _modeKeyAction = _cboModeKeyActionSys.SelectedIndex;
+                    if (_cboModeKeyAction != null && _cboModeKeyAction.SelectedIndex != _modeKeyAction)
+                        _cboModeKeyAction.SelectedIndex = _modeKeyAction;
+                    SaveState("ModeKeyAction", _modeKeyAction);
+                }
+                finally
+                {
+                    _isUpdatingModeKeyAction = false;
+                }
             };
             cardPowerAuto.Controls.Add(_cboModeKeyActionSys);
 
@@ -10808,7 +10903,7 @@ namespace PredatorControlApp
 
             MakeLabel(cardUsb, "Maintains healthy lithium battery chemistry via hardware threshold limits.", cPad, S(224), FontHeaderLight, SubHeaderColor);
 
-            _pnlSystem.AutoScrollMinSize = new Size(0, S(350));
+            _pnlSystem.AutoScrollMinSize = new Size(0, S(370));
         }
 
         private void BuildSettingsPage()
@@ -11036,7 +11131,7 @@ namespace PredatorControlApp
 
             foreach (var req in requiredModes)
             {
-                var shortcut = editingList.First(s => s.ModeCode == req.Code);
+                var shortcut = editingList.FirstOrDefault(s => s.ModeCode == req.Code) ?? new CustomModeShortcut(req.Name, req.Code, req.DefaultKey, ctrl: true, alt: true);
 
                 Color modeColor = shortcut.ModeCode switch
                 {
@@ -11154,7 +11249,7 @@ namespace PredatorControlApp
             btnSaveShortcuts.Click += (s, e) => SaveAndApplyShortcuts();
             cardShortcuts.Controls.Add(btnSaveShortcuts);
 
-            _pnlSettings.AutoScrollMinSize = new Size(0, S(680));
+            _pnlSettings.AutoScrollMinSize = new Size(0, S(700));
 
         }
 
@@ -12428,43 +12523,36 @@ namespace PredatorControlApp
         }
 
         internal void ApplyLcdOverdrive(bool enable)
-
         {
-
-            if (_switchLcdOverdrive.Checked != enable)
-
-                _switchLcdOverdrive.Checked = enable;
-
-            if (_swOdSys != null && _swOdSys.Checked != enable)
-
-                _swOdSys.Checked = enable;
-
-            if (_trayLcdOverdrive != null)
-
-                _trayLcdOverdrive.Checked = enable;
-
-            _lblLcdOverdriveStatus.Text = enable ? "LCD Overdrive (Fast Response Time)" : "LCD Overdrive (Standard)";
-
-            _lblLcdOverdriveStatus.ForeColor = enable ? AccentColor : Color.White;
-
-            if (_lblOdStatusSys != null)
-
+            if (_isUpdatingOverdrive) return;
+            try
             {
-
-                _lblOdStatusSys.Text = enable ? "LCD Overdrive (Fast Response Time)" : "LCD Overdrive (Standard)";
-
-                _lblOdStatusSys.ForeColor = enable ? AccentColor : Color.White;
-
+                _isUpdatingOverdrive = true;
+                if (_switchLcdOverdrive != null && _switchLcdOverdrive.Checked != enable)
+                    _switchLcdOverdrive.Checked = enable;
+                if (_swOdSys != null && _swOdSys.Checked != enable)
+                    _swOdSys.Checked = enable;
+                if (_trayLcdOverdrive != null)
+                    _trayLcdOverdrive.Checked = enable;
+                if (_lblLcdOverdriveStatus != null)
+                {
+                    _lblLcdOverdriveStatus.Text = enable ? "LCD Overdrive (Fast Response Time)" : "LCD Overdrive (Standard)";
+                    _lblLcdOverdriveStatus.ForeColor = enable ? AccentColor : Color.White;
+                }
+                if (_lblOdStatusSys != null)
+                {
+                    _lblOdStatusSys.Text = enable ? "LCD Overdrive (Fast Response Time)" : "LCD Overdrive (Standard)";
+                    _lblOdStatusSys.ForeColor = enable ? AccentColor : Color.White;
+                }
+                if (!_isInitializing)
+                {
+                    SaveState("LcdOverdrive", enable ? 1 : 0);
+                    SaveStateToHklm("LcdOverdrive", enable ? 1 : 0);
+                }
             }
-
-            if (!_isInitializing)
-
+            finally
             {
-
-                SaveState("LcdOverdrive", enable ? 1 : 0);
-
-                SaveStateToHklm("LcdOverdrive", enable ? 1 : 0);
-
+                _isUpdatingOverdrive = false;
             }
 
             // Milestone 8: LCD Overdrive is intentionally decoupled from hardware.
@@ -12881,31 +12969,27 @@ namespace PredatorControlApp
 
 
             try
-
             {
-
-                string data = string.Join(";", points.Select(p => $"{p.X},{p.Y}"));
-
-                using var key = Registry.CurrentUser.CreateSubKey(@"SOFTWARE\PredatorControl");
-
-                key.SetValue(name, data);
-
+                lock (RegistrySafety.RegistryLock)
+                {
+                    string data = string.Join(";", points.Select(p => $"{p.X},{p.Y}"));
+                    using var key = RegistrySafety.CreateSafeSubKey(Registry.CurrentUser, RegistrySafety.BaseKeyPath);
+                    key?.SetValue(name, data);
+                    key?.Flush();
+                }
             }
-
             catch { }
 
             try
-
             {
-
-                string data = string.Join(";", points.Select(p => $"{p.X},{p.Y}"));
-
-                using var hklmKey = Registry.LocalMachine.CreateSubKey(@"SOFTWARE\PredatorControl");
-
-                hklmKey?.SetValue(name, data);
-
+                lock (RegistrySafety.RegistryLock)
+                {
+                    string data = string.Join(";", points.Select(p => $"{p.X},{p.Y}"));
+                    using var hklmKey = RegistrySafety.CreateSafeSubKey(Registry.LocalMachine, RegistrySafety.BaseKeyPath);
+                    hklmKey?.SetValue(name, data);
+                    hklmKey?.Flush();
+                }
             }
-
             catch { }
 
         }
@@ -12925,35 +13009,26 @@ namespace PredatorControlApp
                 string? data = null;
 
                 try
-
                 {
-
-                    using var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\PredatorControl");
-
-                    data = key?.GetValue(name) as string;
-
+                    lock (RegistrySafety.RegistryLock)
+                    {
+                        using var key = RegistrySafety.OpenSafeSubKey(Registry.CurrentUser, RegistrySafety.BaseKeyPath);
+                        data = key?.GetValue(name) as string;
+                    }
                 }
-
                 catch { }
 
-
-
                 if (string.IsNullOrEmpty(data))
-
                 {
-
                     try
-
                     {
-
-                        using var hklmKey = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\PredatorControl");
-
-                        data = hklmKey?.GetValue(name) as string;
-
+                        lock (RegistrySafety.RegistryLock)
+                        {
+                            using var hklmKey = RegistrySafety.OpenSafeSubKey(Registry.LocalMachine, RegistrySafety.BaseKeyPath);
+                            data = hklmKey?.GetValue(name) as string;
+                        }
                     }
-
                     catch { }
-
                 }
 
 
@@ -15211,28 +15286,25 @@ namespace PredatorControlApp
 
 
                     try
-
                     {
-
-                        using var key = Registry.CurrentUser.CreateSubKey(@"SOFTWARE\PredatorControl");
-
-                        key?.SetValue(name, value);
-                        key?.Flush();
-
+                        lock (RegistrySafety.RegistryLock)
+                        {
+                            using var key = RegistrySafety.CreateSafeSubKey(Registry.CurrentUser, RegistrySafety.BaseKeyPath);
+                            key?.SetValue(name, value);
+                            key?.Flush();
+                        }
                     }
-
                     catch { }
 
                     try
-
                     {
-
-                        using var hklmKey = Registry.LocalMachine.CreateSubKey(@"SOFTWARE\PredatorControl");
-
-                        hklmKey?.SetValue(name, value);
-
+                        lock (RegistrySafety.RegistryLock)
+                        {
+                            using var hklmKey = RegistrySafety.CreateSafeSubKey(Registry.LocalMachine, RegistrySafety.BaseKeyPath);
+                            hklmKey?.SetValue(name, value);
+                            hklmKey?.Flush();
+                        }
                     }
-
                     catch { }
 
                 }
@@ -15279,9 +15351,9 @@ namespace PredatorControlApp
 
                 var settings = AppSettings.Load();
 
-                using var key = Registry.CurrentUser.CreateSubKey(@"SOFTWARE\PredatorControl");
+                using var key = RegistrySafety.CreateSafeSubKey(Registry.CurrentUser, RegistrySafety.BaseKeyPath);
 
-                using var hklmKey = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\PredatorControl");
+                using var hklmKey = RegistrySafety.OpenSafeSubKey(Registry.LocalMachine, RegistrySafety.BaseKeyPath);
 
 
 
@@ -16443,10 +16515,8 @@ namespace PredatorControlApp
 
 
         private void UpdateTelemetryCore()
-
         {
-
-            if (_isClosing || IsDisposed) return;
+            if (_isClosing || IsDisposed || Disposing) return;
 
             if (InvokeRequired)
 
@@ -17980,30 +18050,100 @@ namespace PredatorControlApp
 
 
         protected override void OnDpiChanged(DpiChangedEventArgs e)
-
         {
-
+            float oldDpi = e.DeviceDpiOld > 0 ? e.DeviceDpiOld : 96f;
+            float factor = (float)e.DeviceDpiNew / oldDpi;
             _dpiScale = e.DeviceDpiNew / 96f;
-
             base.OnDpiChanged(e);
 
-            try
-
+            if (Math.Abs(factor - 1.0f) > 0.001f)
             {
-
-                _pnlDashboard?.SetDpiScale(_dpiScale);
-                _pnlFans?.SetDpiScale(_dpiScale);
-                _pnlLighting?.SetDpiScale(_dpiScale);
-                _pnlDisplay?.SetDpiScale(_dpiScale);
-                _pnlBios?.SetDpiScale(_dpiScale);
-                _pnlGameSync?.SetDpiScale(_dpiScale);
-                _pnlSystem?.SetDpiScale(_dpiScale);
-                _pnlSettings?.SetDpiScale(_dpiScale);
-
+                try
+                {
+                    UpdateDpiFonts();
+                    RescaleAllPagesAndChrome(factor);
+                    RescaleControlFonts(this, factor);
+                }
+                catch { }
             }
+        }
 
-            catch { }
+        private void RescaleAllPagesAndChrome(float factor)
+        {
+            if (_pnlDashboard != null)
+            {
+                _pnlDashboard.SetDpiScale(_dpiScale);
+                _pnlDashboard.AutoScrollMinSize = new Size(
+                    (int)(_pnlDashboard.AutoScrollMinSize.Width * factor),
+                    (int)(_pnlDashboard.AutoScrollMinSize.Height * factor));
+            }
+            if (_pnlFans != null)
+            {
+                _pnlFans.SetDpiScale(_dpiScale);
+                _pnlFans.AutoScrollMinSize = new Size(
+                    (int)(_pnlFans.AutoScrollMinSize.Width * factor),
+                    (int)(_pnlFans.AutoScrollMinSize.Height * factor));
+            }
+            if (_pnlLighting != null)
+            {
+                _pnlLighting.SetDpiScale(_dpiScale);
+                _pnlLighting.AutoScrollMinSize = new Size(
+                    (int)(_pnlLighting.AutoScrollMinSize.Width * factor),
+                    (int)(_pnlLighting.AutoScrollMinSize.Height * factor));
+            }
+            if (_pnlDisplay != null)
+            {
+                _pnlDisplay.SetDpiScale(_dpiScale);
+                _pnlDisplay.AutoScrollMinSize = new Size(
+                    (int)(_pnlDisplay.AutoScrollMinSize.Width * factor),
+                    (int)(_pnlDisplay.AutoScrollMinSize.Height * factor));
+            }
+            if (_pnlBios != null)
+            {
+                _pnlBios.SetDpiScale(_dpiScale);
+                _pnlBios.AutoScrollMinSize = new Size(
+                    (int)(_pnlBios.AutoScrollMinSize.Width * factor),
+                    (int)(_pnlBios.AutoScrollMinSize.Height * factor));
+            }
+            if (_pnlGameSync != null)
+            {
+                _pnlGameSync.SetDpiScale(_dpiScale);
+                _pnlGameSync.AutoScrollMinSize = new Size(
+                    (int)(_pnlGameSync.AutoScrollMinSize.Width * factor),
+                    (int)(_pnlGameSync.AutoScrollMinSize.Height * factor));
+            }
+            if (_pnlSystem != null)
+            {
+                _pnlSystem.SetDpiScale(_dpiScale);
+                _pnlSystem.AutoScrollMinSize = new Size(
+                    (int)(_pnlSystem.AutoScrollMinSize.Width * factor),
+                    (int)(_pnlSystem.AutoScrollMinSize.Height * factor));
+            }
+            if (_pnlSettings != null)
+            {
+                _pnlSettings.SetDpiScale(_dpiScale);
+                _pnlSettings.AutoScrollMinSize = new Size(
+                    (int)(_pnlSettings.AutoScrollMinSize.Width * factor),
+                    (int)(_pnlSettings.AutoScrollMinSize.Height * factor));
+            }
+            Invalidate(true);
+        }
 
+        private static void RescaleControlFonts(Control root, float factor)
+        {
+            if (root == null || root.IsDisposed) return;
+            if (root.Font != null)
+            {
+                float newSize = Math.Max(6f, (float)Math.Round(root.Font.Size * factor, 2));
+                if (Math.Abs(newSize - root.Font.Size) > 0.05f)
+                {
+                    root.Font = new Font(root.Font.FontFamily, newSize, root.Font.Style);
+                }
+            }
+            foreach (Control child in root.Controls)
+            {
+                RescaleControlFonts(child, factor);
+            }
         }
 
 

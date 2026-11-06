@@ -21,7 +21,8 @@ namespace PredatorControlApp
         {
             AutoScroll = true;
             ResizeRedraw = true;
-            SetStyle(ControlStyles.OptimizedDoubleBuffer, true);
+            DoubleBuffered = true;
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
             _dpi = DeviceDpi > 0 ? DeviceDpi / 96f : 1f;
 
             _themeHandler = () =>
@@ -268,32 +269,41 @@ namespace PredatorControlApp
             if (rect.IsEmpty) return;
 
             var g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-
-            Color trackColor = ThemeManager.IsDarkThemeActive ? Color.FromArgb(24, 27, 36) : Color.FromArgb(235, 237, 242);
-            Color thumbColor = ThemeManager.IsDarkThemeActive ? Color.FromArgb(65, 72, 92) : Color.FromArgb(180, 186, 200);
-
-            using (var trackBrush = new SolidBrush(trackColor))
-                g.FillRectangle(trackBrush, Math.Max(0, rect.X - S(1)), 0, rect.Width + S(2), ClientSize.Height);
-
-            using var path = new GraphicsPath();
-            if (rect.Width < 4 || rect.Height < 4)
+            var state = g.Save();
+            g.ResetTransform();
+            try
             {
-                path.AddRectangle(rect);
-            }
-            else
-            {
-                int maxR = Math.Max(1, Math.Min(rect.Width, rect.Height) / 2);
-                int r = Math.Clamp(rect.Width / 2, 1, maxR);
-                path.AddArc(rect.X, rect.Y, r * 2, r * 2, 180, 90);
-                path.AddArc(rect.Right - r * 2, rect.Y, r * 2, r * 2, 270, 90);
-                path.AddArc(rect.Right - r * 2, rect.Bottom - r * 2, r * 2, r * 2, 0, 90);
-                path.AddArc(rect.X, rect.Bottom - r * 2, r * 2, r * 2, 90, 90);
-                path.CloseFigure();
-            }
+                g.SmoothingMode = SmoothingMode.AntiAlias;
 
-            using (var thumbBrush = new SolidBrush(thumbColor))
-                g.FillPath(thumbBrush, path);
+                Color trackColor = ThemeManager.IsDarkThemeActive ? Color.FromArgb(24, 27, 36) : Color.FromArgb(235, 237, 242);
+                Color thumbColor = ThemeManager.IsDarkThemeActive ? Color.FromArgb(65, 72, 92) : Color.FromArgb(180, 186, 200);
+
+                using (var trackBrush = new SolidBrush(trackColor))
+                    g.FillRectangle(trackBrush, Math.Max(0, rect.X - S(1)), 0, rect.Width + S(2), ClientSize.Height);
+
+                using var path = new GraphicsPath();
+                if (rect.Width < 4 || rect.Height < 4)
+                {
+                    path.AddRectangle(rect);
+                }
+                else
+                {
+                    int maxR = Math.Max(1, Math.Min(rect.Width, rect.Height) / 2);
+                    int r = Math.Clamp(rect.Width / 2, 1, maxR);
+                    path.AddArc(rect.X, rect.Y, r * 2, r * 2, 180, 90);
+                    path.AddArc(rect.Right - r * 2, rect.Y, r * 2, r * 2, 270, 90);
+                    path.AddArc(rect.Right - r * 2, rect.Bottom - r * 2, r * 2, r * 2, 0, 90);
+                    path.AddArc(rect.X, rect.Bottom - r * 2, r * 2, r * 2, 90, 90);
+                    path.CloseFigure();
+                }
+
+                using (var thumbBrush = new SolidBrush(thumbColor))
+                    g.FillPath(thumbBrush, path);
+            }
+            finally
+            {
+                g.Restore(state);
+            }
         }
 
         protected override void Dispose(bool disposing)

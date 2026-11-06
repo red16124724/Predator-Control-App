@@ -96,7 +96,7 @@ namespace PredatorControlApp
 
 
 
-        private static CpuPowerLimitController? _instance;
+        private static volatile CpuPowerLimitController? _instance;
 
         private static readonly object _instanceLock = new();
 
@@ -754,58 +754,32 @@ namespace PredatorControlApp
 
 
         public DevicePowerCapabilities InitializeHardwareFingerprintAndBaseline(string? overrideSignature = null, int settleDelayMs = 0)
-
         {
+            OperatingMode activeMode = GetCurrentOperatingMode();
 
-            lock (_syncLock)
-
+            // Clean Hardware Reset Before Sampling Unverified BIOS Defaults (executed before lock to avoid lock inversion and sleeping under lock)
+            if (_settings.HardwareHasActiveCustomPowerOverride && !_settings.HasVerifiedBiosDefaultForMode(activeMode))
             {
-
-                string currentSignature = overrideSignature ?? _biosScanner.ComputeBiosHardwareFingerprint();
-
-                _settings.InvalidateIfBiosFingerprintChanged(currentSignature);
-
-
-
-                OperatingMode activeMode = GetCurrentOperatingMode();
-
-
-
-                // Clean Hardware Reset Before Sampling Unverified BIOS Defaults
-
-                if (_settings.HardwareHasActiveCustomPowerOverride && !_settings.HasVerifiedBiosDefaultForMode(activeMode))
-
+                if (_wmi != null)
                 {
-
-                    if (_wmi != null)
-
+                    try
                     {
-
-                        try
-
-                        {
-
-                            _wmi.ModeChannel?.TrySetOperatingMode(activeMode);
-
-                            _wmi.TrySetOperatingMode(activeMode, forceRetry: true);
-
-                        }
-
-                        catch { }
-
+                        _wmi.ModeChannel?.TrySetOperatingMode(activeMode);
+                        _wmi.TrySetOperatingMode(activeMode, forceRetry: true);
                     }
-
-                    if (settleDelayMs > 0)
-
-                    {
-
-                        Thread.Sleep(settleDelayMs);
-
-                    }
-
+                    catch { }
                 }
 
+                if (settleDelayMs > 0)
+                {
+                    Thread.Sleep(settleDelayMs);
+                }
+            }
 
+            lock (_syncLock)
+            {
+                string currentSignature = overrideSignature ?? _biosScanner.ComputeBiosHardwareFingerprint();
+                _settings.InvalidateIfBiosFingerprintChanged(currentSignature);
 
                 var caps = _pawnIoController.ScanDevicePowerCapabilities();
 

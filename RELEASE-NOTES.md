@@ -10,6 +10,18 @@ Current local 1.5.5 improvements: one update check on startup, including hidden 
 Version 1.5.5 brings a comprehensive codebase audit, bug fix, and stabilization overhaul across the C# .NET 10 WinForms UI, native Rust Core (predator_core.dll), Ring-0 PawnIO hardware drivers, and the complete 2,460-test suite (285 Rust + 2,175 .NET).
 
 
+### Comprehensive Stress Testing, Chaos Fuzzing & Bug Remediation (Update 2026-11-06)
+- **App-Wide Chaos, Fuzzing & Concurrency Stress Verification**:
+  - Implemented FullAppExhaustiveChaosAndStressTests.cs (13 tests, all passed in 22s) covering AppSettings numerical fuzzing, massive strings (100k) & SQL/XSS injection, corrupted JSON/registry recovery, 20-thread concurrent state mutations (2,000 parallel ops), UI navigation chaos across 8 panels (800 rapid switches), concurrent MUX mode toggling, BiosManager safety gate fuzzing, extreme telemetry loads (-500°C to 1250°C, 50k RPM, D3Cold sleep transitions), fan curve follower oscillations (1,000 rapid cycles), and GameSync rapid switching (400 events/sec).
+  - 100% test pass rate across 96 test classes (~2,200+ unit and integration tests) in the solution.
+- **Subsystem Concurrency, Telemetry & UI Fixes**:
+  - Eliminated lock inversion deadlock between WmiController._lock and BiosManager._lock during MUX updates.
+  - Eliminated telemetry UI starvation via non-blocking hot cache (<800ms) and Monitor.TryEnter(TimeSpan.FromMilliseconds(150)) contention fallbacks.
+  - Hardened dynamic DPI scaling across 100%–200% displays with UpdateDpiFonts() and recursive control font rescaling (RescaleControlFonts).
+  - Fixed multi-monitor refresh rate query fallback on invalid display indices.
+  - Hardened GameSync process exit event delivery, added retry loop on file renames against file locks, and isolated test paths.
+  - Hardened hardware protocol bitmasks, sign extension handling on USB charging ACPI payloads, and backlight timeouts.
+
 ### Hardware BIOS MUX Switch & BIOS Settings Full Persistence (Update 2026-11-06)
 - **Hardware BIOS MUX Switch Overhaul (Device Reboot Required)**:
   - Replaced dynamic display switching (Advanced Optimus / DDS) with dedicated Hardware BIOS MUX Switch in the Display section.

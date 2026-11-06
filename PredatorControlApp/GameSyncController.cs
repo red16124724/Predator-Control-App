@@ -11,6 +11,7 @@ namespace PredatorControlApp
         private readonly System.Windows.Forms.Timer _pollTimer;
         private readonly List<GameProfile> _profiles = new();
         private readonly string _savePath;
+        private readonly bool _isCustomSavePath;
 
         private readonly object _lock = new();
         private bool _enabled;
@@ -158,6 +159,7 @@ namespace PredatorControlApp
 
         public GameSyncController(string? customSavePath = null)
         {
+            _isCustomSavePath = customSavePath != null;
             if (customSavePath != null)
             {
                 _savePath = customSavePath;
@@ -198,6 +200,7 @@ namespace PredatorControlApp
                 SaveUnderLock();
             }
             SyncProfilesToNative();
+            if (!_isCustomSavePath) { try { RegistrySafety.SaveGameProfile(profile); } catch { } }
         }
 
         public void RemoveProfile(string exeName)
@@ -217,11 +220,14 @@ namespace PredatorControlApp
                 SaveUnderLock();
             }
             SyncProfilesToNative();
-            try
+            if (!_isCustomSavePath)
             {
-                RegistrySafety.DeleteGameProfile(exeName);
+                try
+                {
+                    RegistrySafety.DeleteGameProfile(exeName);
+                }
+                catch { }
             }
-            catch { }
             if (snapToExit != null)
             {
                 GameExited?.Invoke(snapToExit);
@@ -242,6 +248,7 @@ namespace PredatorControlApp
                 SaveUnderLock();
             }
             SyncProfilesToNative();
+            if (!_isCustomSavePath) { try { RegistrySafety.SaveGameProfile(profile); } catch { } }
         }
 
         public void SetPreGameSnapshot(DashboardSnapshot snapshot)
@@ -312,7 +319,8 @@ namespace PredatorControlApp
                 }
                 catch { }
             }
-            else
+
+            if (set.Count == 0)
             {
                 Process[]? procs = null;
                 try
@@ -473,16 +481,18 @@ namespace PredatorControlApp
                     else if (ev.EventType == 2) // Exited
                     {
                         DashboardSnapshot? exitSnap = null;
+                        bool hadActive = false;
                         lock (_lock)
                         {
                             if (_activeExe != null)
                             {
-                                exitSnap = _savedSnapshot;
+                                hadActive = true;
+                                exitSnap = _savedSnapshot?.Clone() ?? new DashboardSnapshot();
                                 _activeExe = null;
                                 _savedSnapshot = null;
                             }
                         }
-                        if (exitSnap != null)
+                        if (hadActive && exitSnap != null)
                         {
                             GameExited?.Invoke(exitSnap);
                             return;
@@ -607,13 +617,48 @@ namespace PredatorControlApp
                 var json = JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true });
                 var dir = Path.GetDirectoryName(_savePath);
                 if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                // Cleanup stale temp files older than 1 hour
+                if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+                {
+                    try
+                    {
+                        var staleFiles = Directory.GetFiles(dir, $"{Path.GetFileName(_savePath)}.*.tmp");
+                        foreach (var f in staleFiles)
+                        {
+                            try
+                            {
+                                if (DateTime.UtcNow - File.GetLastWriteTimeUtc(f) > TimeSpan.FromHours(1))
+                                    File.Delete(f);
+                            }
+                            catch { }
+                        }
+                    }
+                    catch { }
+                }
+
                 var tempPath = Path.Combine(!string.IsNullOrEmpty(dir) ? dir : Path.GetTempPath(), $"{Path.GetFileName(_savePath)}.{Guid.NewGuid():N}.tmp");
                 try
                 {
                     File.WriteAllText(tempPath, json);
-                    try { if (File.Exists(_savePath)) File.SetAttributes(_savePath, FileAttributes.Normal); } catch { }
-                    File.Move(tempPath, _savePath, overwrite: true);
-                    try { File.Copy(_savePath, _savePath + ".bak", overwrite: true); } catch { }
+                    bool moved = false;
+                    for (int attempt = 0; attempt < 3; attempt++)
+                    {
+                        try
+                        {
+                            try { if (File.Exists(_savePath)) File.SetAttributes(_savePath, FileAttributes.Normal); } catch { }
+                            File.Move(tempPath, _savePath, overwrite: true);
+                            moved = true;
+                            break;
+                        }
+                        catch (IOException) when (attempt < 2)
+                        {
+                            System.Threading.Thread.Sleep(50);
+                        }
+                    }
+                    if (moved)
+                    {
+                        try { File.Copy(_savePath, _savePath + ".bak", overwrite: true); } catch { }
+                    }
                 }
                 finally
                 {
@@ -691,6 +736,26 @@ namespace PredatorControlApp
                         }
                         catch { }
                     }
+                }
+
+                if (_profiles.Count == 0 && !_isCustomSavePath)
+                {
+                    try
+                    {
+                        var regProfiles = RegistrySafety.LoadGameProfiles();
+                        if (regProfiles != null && regProfiles.Count > 0)
+                        {
+                            foreach (var p in regProfiles)
+                            {
+                                if (p != null && !string.IsNullOrWhiteSpace(p.ExecutableName))
+                                {
+                                    SanitizeProfileValues(p);
+                                    _profiles.Add(p);
+                                }
+                            }
+                        }
+                    }
+                    catch { }
                 }
             }
         }

@@ -106,7 +106,7 @@ namespace PredatorControlApp
             if (root == null) return null;
             string normalized = relativePath?.Replace('/', '\\').Trim().TrimStart('\\') ?? "";
             if (!IsSafePath(normalized))
-                throw new SecurityException($"Registry path '{relativePath}' is outside authorized scope '{BaseKeyPath}'.");
+                throw new SecurityException($"Access to registry path '{normalized}' is unauthorized or unsafe.");
 
             try
             {
@@ -125,7 +125,7 @@ namespace PredatorControlApp
             if (root == null) return null;
             string normalized = relativePath?.Replace('/', '\\').Trim().TrimStart('\\') ?? "";
             if (!IsSafePath(normalized))
-                throw new SecurityException($"Registry path '{relativePath}' is outside authorized scope '{BaseKeyPath}'.");
+                throw new SecurityException($"Access to registry path '{normalized}' is unauthorized or unsafe.");
 
             try
             {
@@ -297,7 +297,7 @@ namespace PredatorControlApp
         {
             if (string.IsNullOrWhiteSpace(exeName)) return;
             string keyName = SanitizeSubKeyName(exeName);
-            if (string.IsNullOrWhiteSpace(keyName)) return;
+            if (string.IsNullOrWhiteSpace(keyName) || (keyName == "Profile" && !exeName.Contains("Profile", StringComparison.OrdinalIgnoreCase))) return;
 
             lock (RegistryLock)
             {

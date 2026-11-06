@@ -193,7 +193,8 @@ namespace PredatorControlApp
                     {
                         try
                         {
-                            ApplyAnimationFrame(effect, wmi, step++, r, g, b, token, generation);
+                            ApplyAnimationFrame(effect, wmi, step, r, g, b, token, generation);
+                            step = (step + 1) & 0x7FFFFFFF;
                             // Frame pacing lives in the native core when available.
                             uint nativeDelay = PredatorNativeCore.RgbFrameDelayMs(speed);
                             int delayMs = nativeDelay > 0
@@ -225,7 +226,8 @@ namespace PredatorControlApp
                 _nativeFrameBuffer = buffer;
             }
             // SetZoneColor applies the slider brightness once at the transport boundary.
-            if (!forceManaged && PredatorNativeCore.RgbRenderFrame((int)effect, (ulong)step, baseR, baseG, baseB, 100, buffer, ZoneCount) == ZoneCount)
+            int s = Math.Abs(step);
+            if (!forceManaged && PredatorNativeCore.RgbRenderFrame((int)effect, (ulong)s, baseR, baseG, baseB, 100, buffer, ZoneCount) == ZoneCount)
             {
                 if (token.IsCancellationRequested || generation != Volatile.Read(ref _currentAnimationGeneration))
                     return;
@@ -248,7 +250,7 @@ namespace PredatorControlApp
                 case LightingEffect34.Snake:
                 case LightingEffect34.PingPong:
                 case LightingEffect34.Racing:
-                    int activeZone = (step % 8) < 4 ? (step % 4) : (3 - (step % 4));
+                    int activeZone = Math.Clamp((s % 8) < 4 ? (s % 4) : (3 - (s % 4)), 0, 3);
                     for (int z = 1; z <= 4; z++)
                     {
                         if (token.IsCancellationRequested || generation != Volatile.Read(ref _currentAnimationGeneration)) return;
@@ -265,7 +267,7 @@ namespace PredatorControlApp
                     for (int z = 1; z <= 4; z++)
                     {
                         if (token.IsCancellationRequested || generation != Volatile.Read(ref _currentAnimationGeneration)) return;
-                        double hue = (((step * 15) + (z * 60)) % 360 + 360) % 360;
+                        double hue = (((s * 15) + (z * 60)) % 360 + 360) % 360;
                         var col = ColorFromHsv(hue, 1.0, scale);
                         wmi.SetZoneColor(z, col.R, col.G, col.B);
                     }
@@ -274,7 +276,7 @@ namespace PredatorControlApp
                 case LightingEffect34.Heartbeat:
                 case LightingEffect34.Ripple:
                 case LightingEffect34.Blasting:
-                    double pulse = Math.Abs(Math.Sin(step * 0.15));
+                    double pulse = Math.Abs(Math.Sin(s * 0.15));
                     byte pR = scaleR((byte)(baseR * pulse));
                     byte pG = scaleG((byte)(baseG * pulse));
                     byte pB = scaleB((byte)(baseB * pulse));
@@ -287,7 +289,7 @@ namespace PredatorControlApp
 
                 default:
                     // Color shifting between primary and complementary
-                    double phase = (Math.Sin(step * 0.1) + 1.0) / 2.0;
+                    double phase = (Math.Sin(s * 0.1) + 1.0) / 2.0;
                     byte sR = scaleR((byte)(baseR * phase));
                     byte sG = scaleG((byte)(baseG * (1.0 - phase)));
                     byte sB = scaleB((byte)(baseB * phase));

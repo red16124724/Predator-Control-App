@@ -353,22 +353,20 @@ namespace PredatorControlApp
                         switch (nativeAction)
                         {
                             case PredatorNativeMigrations.HookActionPredatorSense:
-                                DispatchAsync(() => _onPredatorSensePressed());
+                                DispatchAsync(() => { try { _onPredatorSensePressed?.Invoke(); } catch { } });
                                 break;
                             case PredatorNativeMigrations.HookActionModeKey:
                                 DispatchAsync(() =>
                                 {
-                                    if (_onModeKeyPressed != null)
-                                        _onModeKeyPressed.Invoke();
-                                    else
-                                        ModeKeyPressed?.Invoke();
+                                    try { _onModeKeyPressed?.Invoke(); } catch { }
+                                    try { ModeKeyPressed?.Invoke(); } catch { }
                                 });
                                 break;
                             case PredatorNativeMigrations.HookActionNumberKey:
                                 if (_onPredatorNumberPressed != null)
                                 {
                                     int capturedNumber = (int)nativeValue;
-                                    DispatchAsync(() => _onPredatorNumberPressed(capturedNumber));
+                                    DispatchAsync(() => { try { _onPredatorNumberPressed?.Invoke(capturedNumber); } catch { } });
                                 }
                                 break;
                             case PredatorNativeMigrations.HookActionCustomShortcut:
@@ -525,10 +523,8 @@ namespace PredatorControlApp
                                 // Asynchronous dispatch: never execute arbitrary delegate code synchronously in LL hook thread!
                                 DispatchAsync(() =>
                                 {
-                                    if (_onModeKeyPressed != null)
-                                        _onModeKeyPressed.Invoke();
-                                    else
-                                        ModeKeyPressed?.Invoke();
+                                    try { _onModeKeyPressed?.Invoke(); } catch { }
+                                    try { ModeKeyPressed?.Invoke(); } catch { }
                                 });
                             }
                         }
@@ -563,7 +559,7 @@ namespace PredatorControlApp
                                 if (now - _lastPredatorSenseTick >= 250)
                                 {
                                     _lastPredatorSenseTick = now;
-                                    DispatchAsync(() => _onPredatorSensePressed());
+                                    DispatchAsync(() => { try { _onPredatorSensePressed?.Invoke(); } catch { } });
                                 }
                             }
                             _isPredatorKeyPressed = false;
@@ -607,7 +603,7 @@ namespace PredatorControlApp
                                     _suppressPredatorReleaseAction = true;
                                     _activePredatorNumber = number;
                                     int capturedNumber = number;
-                                    DispatchAsync(() => _onPredatorNumberPressed(capturedNumber));
+                                    DispatchAsync(() => { try { _onPredatorNumberPressed?.Invoke(capturedNumber); } catch { } });
                                 }
                             }
                             else if (isKeyUp && _activePredatorNumber == number)

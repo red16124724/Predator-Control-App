@@ -10,6 +10,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 
+## [1.5.5 Comprehensive Stress Testing, Chaos Fuzzing & Bug Remediation] - 2026-11-06
+
+- **App-Wide Chaos, Fuzzing & Stress Testing (100% Pass Rate Across 96 Test Classes / ~2,200+ Tests)**:
+  - Created FullAppExhaustiveChaosAndStressTests.cs (13 tests, all passing):
+    * AppSettings fuzzing: Numerical overflow, underflow, NaN, infinity, and thermal boundaries clamped to legal hardware limits.
+    * Massive string & adversarial payload injection: 100k strings, control characters (\0, \r\n\t), XSS scripts, SQL tokens, and surrogate pairs handled safely without crashes.
+    * Corrupted JSON and registry recovery: Graceful fallback hydration without data loss.
+    * Multi-threaded concurrent mutation: 20 worker threads, 2,000 parallel mutations of curves, snapshots, and power modes without deadlocks.
+    * WinForms navigation chaos: 8 concurrent threads executing 800 panel switches with cross-thread BeginInvoke marshaling and zero exceptions.
+    * Hardware MUX mode concurrency: 10 threads alternating MUX modes with safety gate enforcement.
+    * BiosManager fuzzing: Null items, unauthorized dangerous settings, and out-of-spec option values handled safely.
+    * Telemetry extreme load: 1,000 rapid updates with extreme temperatures (-500°C to 1250°C), 0 RPM, 50,000 RPM, and rapid D3Cold sleep transitions clamped.
+    * Fan curve follower oscillations: 1,000 rapid cycles jumping 20°C to 100°C with hysteresis damping.
+    * GameSync rapid switching: 8 threads simulating 400 rapid process events/sec without state pollution.
+- **Subsystem & Core Bug Remediations**:
+  - **Lock Inversion Deadlock Elimination**: Decoupled WmiController._lock and BiosManager._lock during MUX updates; BiosManager.ProbeAndLoad queries hardware outside locks and atomically swaps state.
+  - **Telemetry UI Thread Starvation Fix**: Replaced unconditional locks in temperature and fan RPM queries with hot cache returns (<800ms) and Monitor.TryEnter(TimeSpan.FromMilliseconds(150)) contention fallbacks.
+  - **DPI Scaling & Font Layout Hardening**: Added dynamic DPI font rescaling (UpdateDpiFonts) and recursive control font scaling (RescaleControlFonts) across all forms (Form1, DisplaySettingsForm, BiosSettingsForm, GameSyncForm, FanCurveForm, HardwareCapabilitiesForm) supporting 100%, 125%, 150%, 175%, and 200% scaling.
+  - **Multi-Monitor Display Refresh Rate**: Replaced hardcoded null device names with GetDisplayDeviceName(displayIndex) querying Screen.AllScreens and guarded against negative/invalid display indices.
+  - **GameSync Controller Reliability**: Handled process exit notification drops, added retry loop on File.Move against file locks, and isolated test paths via _isCustomSavePath to avoid polluting user registry.
+  - **Hardware Protocol Bitmask Hardening**: Fixed integer sign-extension bug in USB charging ACPI payload, byte-masked sensor IDs, and clamped backlight timeouts and fan tables.
+  - **Re-entrancy Protection**: Added guards for LCD Overdrive, mode key actions, and BIOS safety gates.
+  - **Lighting & Hook Resiliency**: Fixed negative modulo integer wrap in LightingEffects34.cs and added null checks across keyboard hook event delegates.
+
+---
+
 ## [1.5.5 Hardware BIOS MUX Switch & BIOS Settings Full Persistence] - 2026-11-06
 
 - **Hardware BIOS MUX Switch Overhaul (Device Reboot Required)**:

@@ -349,7 +349,12 @@ namespace PredatorControlApp
             return (int)Math.Round(Math.Clamp(percent, 0, 100) / 10.0, MidpointRounding.AwayFromZero) * 10;
         }
 
-        public static ulong FanTableInput(FanTable table) => NativeAcerProtocol.TryEncode(27, (byte)table, 0, 0, 0, out ulong native) ? native : (ulong)table;
+        public static ulong FanTableInput(FanTable table)
+        {
+            byte val = (byte)table;
+            if (val < 1 || val > 3) val = (byte)FanTable.Standard;
+            return NativeAcerProtocol.TryEncode(27, val, 0, 0, 0, out ulong native) ? native : (ulong)val;
+        }
 
         public static FanTable? FanTableValue(ulong output)
         {
@@ -371,7 +376,8 @@ namespace PredatorControlApp
         {
             if (NativeAcerProtocol.TryEncode(6, on ? 1UL : 0, NativeAcerProtocol.Signed(floor), 0, 0, out ulong native)) return native;
             byte flag = (byte)(on ? 15 : 31);
-            return 4UL | ((ulong)flag << 8) | ((ulong)floor << 16);
+            ulong uFloor = unchecked((ulong)(long)floor) & 0xFFUL;
+            return 4UL | ((ulong)flag << 8) | (uFloor << 16);
         }
 
         public static UsbChargingState UsbChargingValue(ulong output)
@@ -388,7 +394,11 @@ namespace PredatorControlApp
         }
 
         public static uint MiscGetInput(MiscSetting setting) => NativeAcerProtocol.TryEncode(28, (byte)setting, 0, 0, 0, out ulong native) ? (uint)native : (uint)setting;
-        public static ulong MiscSetInput(MiscSetting setting, byte value) => NativeAcerProtocol.TryEncode(7, (ulong)setting, value, 0, 0, out ulong native) ? native : (ulong)setting | ((ulong)value << 8);
+        public static ulong MiscSetInput(MiscSetting setting, byte value)
+        {
+            byte s = (byte)setting;
+            return NativeAcerProtocol.TryEncode(7, (ulong)s, value, 0, 0, out ulong native) ? native : (ulong)s | ((ulong)value << 8);
+        }
         public static ulong LcdOverdriveProfileInput(bool enable) => NativeAcerProtocol.TryEncode(24, enable ? 1UL : 0, 0, 0, 0, out ulong native) ? native : enable ? 0x1000000000010UL : 0x10UL;
         public static ulong LcdOverdriveProfileSettingInput(bool enable) => NativeAcerProtocol.TryEncode(25, enable ? 1UL : 0, 0, 0, 0, out ulong native) ? native : enable ? (0x10UL | (1UL << 8)) : 0x10UL;
         public static ulong LcdOverdriveMiscSettingInput(bool enable, byte settingId = 0x0F) => NativeAcerProtocol.TryEncode(26, enable ? 1UL : 0, settingId, 0, 0, out ulong native) ? native : (ulong)settingId | ((ulong)(enable ? 1 : 0) << 8);
@@ -427,10 +437,14 @@ namespace PredatorControlApp
         {
             if (NativeAcerProtocol.TryEncode(9, on ? 1UL : 0, NativeAcerProtocol.Signed(floor), currentSysInfo, 0, out ulong native)) return native;
             byte flag = (byte)(on ? 15 : 31);
-            ulong basePayload = 4UL | ((ulong)flag << 8) | ((ulong)floor << 16);
+            ulong uFloor = unchecked((ulong)(long)floor) & 0xFFUL;
+            ulong basePayload = 4UL | ((ulong)flag << 8) | (uFloor << 16);
             ulong preservedUpper = currentSysInfo & 0xFFFFFFFFFF000000UL;
             return basePayload | preservedUpper;
         }
+
+        public static ulong GamingSysInfoInput(ulong featureBitMask, bool enable, ulong currentSysInfo = 0)
+            => ApplySystemConfigBitPreservingUpperBytes(currentSysInfo, featureBitMask, enable);
 
         public static ulong LcdOverdriveInputWithPreservedState(bool enable, ulong currentSysInfo = 0)
         {
@@ -854,7 +868,7 @@ namespace PredatorControlApp
     [SupportedOSPlatform("windows")]
     public static class HardwareIdentity
     {
-        private static DeviceBiosInfo? s_cachedBiosInfo;
+        private static volatile DeviceBiosInfo? s_cachedBiosInfo;
         private static readonly object s_biosInfoLock = new();
 
         public static DeviceBiosInfo GetDeviceBiosInfo(bool refresh = false)
@@ -1027,7 +1041,7 @@ namespace PredatorControlApp
                 // 5. Safe Registry Fallback: HKLM\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0
                 try
                 {
-                    using var cpuKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"HARDWARE\DESCRIPTION\System\CentralProcessor ");
+                    using var cpuKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"HARDWARE\DESCRIPTION\System\CentralProcessor\0");
                     if (cpuKey != null)
                     {
                         if (string.IsNullOrWhiteSpace(cpuName))

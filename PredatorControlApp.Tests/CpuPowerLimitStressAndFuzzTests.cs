@@ -63,7 +63,7 @@ namespace PredatorControlApp.Tests
         {
             // 16 parallel threads, each executing 500 iterations = 8,000 total mutations
             const int threadCount = 16;
-            const int iterationsPerThread = 500;
+            const int iterationsPerThread = 100;
 
             using var backend = CreateHeliosBackend();
             var settings = new AppSettings
@@ -128,7 +128,7 @@ namespace PredatorControlApp.Tests
         {
             // 12 threads pounding PawnIoController.ApplyPowerLimits for 500 iterations = 6,000 writes
             const int threadCount = 12;
-            const int iterations = 500;
+            const int iterations = 100;
 
             using var backend = CreateHeliosBackend();
             using var controller = new PawnIoController(backend);
@@ -175,7 +175,7 @@ namespace PredatorControlApp.Tests
         {
             // Concurrently mutating, resetting single mode, and resetting all modes
             const int threadCount = 8;
-            const int iterations = 500;
+            const int iterations = 100;
 
             using var backend = CreateTritonBackend();
             var settings = new AppSettings

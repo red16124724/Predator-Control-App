@@ -148,3 +148,20 @@ eadonly IntPtr _thermalHandle in ThermalSafetyCoordinator.cs.
 - Standalone Executable: `C:\Users\anshu\Downloads\Predator-Control-1.5.5\PredatorControlApp.exe`
 - Size: 54,495,246 bytes
 - Hash & Execution Verification: Tested via `--apply-power`, initialized cleanly with zero dependencies.
+
+## 4. Phase 2 Stress Hardening, Chaos Testing & Concurrency Remediation (Update 2026-11-06)
+- **Chaos Suite Created**: FullAppExhaustiveChaosAndStressTests.cs (13 tests, all passing, 22.1s duration):
+  - Fuzzing of AppSettings (NaN, infinity, boundary clamp).
+  - 100k character string and SQL/XSS payload injection resilience.
+  - 20 worker threads, 2,000 concurrent mutations of power modes and fan curves without deadlock.
+  - 8-thread rapid navigation stress (800 panel switches across all 8 views) with cross-thread marshaling.
+  - Telemetry pipeline stress (1,000 updates, -500°C to 1250°C, 50k RPM, D3Cold transitions).
+  - Fan curve follower oscillation (1,000 cycles, 20°C to 100°C) with hysteresis damping and emergency safety floors.
+  - GameSync rapid switching (400 process events/sec across 8 threads).
+- **Subsystem & Core Fixes**:
+  - Lock inversion deadlock resolved: decoupled WmiController._lock and BiosManager._lock.
+  - Non-blocking telemetry cache (<800ms) with Monitor.TryEnter(150ms) prevents UI stalls.
+  - Dynamic DPI font scaling (UpdateDpiFonts) and recursive font rescaling (RescaleControlFonts) implemented across all forms for 100%–200% displays.
+  - Multi-monitor display refresh rate query corrected via GetDisplayDeviceName querying Screen.AllScreens.
+  - File locking retry loops added for GameSync profile saves; isolated unit test paths.
+  - Hardware protocol payloads hardened against integer sign extension; backlight timeouts clamped to 0..255.

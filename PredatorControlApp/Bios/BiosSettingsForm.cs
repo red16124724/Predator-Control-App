@@ -251,15 +251,7 @@ namespace PredatorControlApp.Bios
             // Ensure all settings reflect remembered values from AppSettings
             try
             {
-                foreach (var item in _biosManager.Settings)
-                {
-                    string remembered = _settings.GetBiosSettingValue(item.Name, "");
-                    if (!string.IsNullOrEmpty(remembered) && (item.Options == null || item.Options.Count == 0 || item.Options.Contains(remembered)))
-                    {
-                        item.CurrentValue = remembered;
-                        item.PendingValue = remembered;
-                    }
-                }
+                _biosManager.HydrateFromSettings(_settings);
             }
             catch { }
 
@@ -555,6 +547,38 @@ namespace PredatorControlApp.Bios
                 {
                     ShowMessage(msg, "Restore Defaults Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
+            }
+        }
+
+        protected override void OnDpiChanged(DpiChangedEventArgs e)
+        {
+            base.OnDpiChanged(e);
+            float factor = e.DeviceDpiOld > 0 ? (float)e.DeviceDpiNew / e.DeviceDpiOld : 1.0f;
+            if (Math.Abs(factor - 1.0f) > 0.001f)
+            {
+                try
+                {
+                    this.Scale(new SizeF(factor, factor));
+                    RescaleControlFonts(this, factor);
+                    PopulateCategories();
+                }
+                catch { }
+            }
+        }
+
+        private static void RescaleControlFonts(Control root, float factor)
+        {
+            if (root.Font != null)
+            {
+                float newSize = Math.Max(6f, (float)Math.Round(root.Font.Size * factor, 2));
+                if (Math.Abs(newSize - root.Font.Size) > 0.05f)
+                {
+                    root.Font = new Font(root.Font.FontFamily, newSize, root.Font.Style);
+                }
+            }
+            foreach (Control child in root.Controls)
+            {
+                RescaleControlFonts(child, factor);
             }
         }
 

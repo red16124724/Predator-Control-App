@@ -83,13 +83,13 @@ namespace PredatorControlApp
 
 
 
-        private int _cachedCpuTempReading;
+        private volatile int _cachedCpuTempReading;
 
-        private int _cachedGpuTempReading;
+        private volatile int _cachedGpuTempReading;
 
-        private int _cachedCpuRpmReading;
+        private volatile int _cachedCpuRpmReading;
 
-        private int _cachedGpuRpmReading;
+        private volatile int _cachedGpuRpmReading;
 
         private DateTime _lastCpuTempReadTime = DateTime.MinValue;
 
@@ -1291,7 +1291,7 @@ namespace PredatorControlApp
 
                     using var inParamsDisposer = inParams;
 
-                    inParams["gmInput"] = (uint)(0x0001 | (sensorId << 8));
+                    inParams["gmInput"] = (uint)(0x0001u | (((uint)sensorId & 0xFFu) << 8));
 
                     ulong raw = 0;
 
@@ -3158,298 +3158,206 @@ namespace PredatorControlApp
 
 
         public virtual int CpuTemp
-
         {
-
             get
-
             {
-
-                lock (_lock)
-
-                {
-
-                    if (DateTime.UtcNow - _lastCpuTempReadTime < SensorCacheDuration && _cachedCpuTempReading > 0)
-
-                        return _cachedCpuTempReading;
-
-
-
-                    _lastCpuTempReadTime = DateTime.UtcNow;
-
-                    int temp = GetSensorReading(0x01);
-
-                    if (temp > 0 && temp <= 125)
-
-                    {
-
-                        _cachedCpuTempReading = temp;
-
-                        return temp;
-
-                    }
-
+                if (DateTime.UtcNow - _lastCpuTempReadTime < SensorCacheDuration && _cachedCpuTempReading > 0)
                     return _cachedCpuTempReading;
 
+                if (!Monitor.TryEnter(_lock, TimeSpan.FromMilliseconds(150)))
+                    return _cachedCpuTempReading;
+
+                try
+                {
+                    if (DateTime.UtcNow - _lastCpuTempReadTime < SensorCacheDuration && _cachedCpuTempReading > 0)
+                        return _cachedCpuTempReading;
+
+                    _lastCpuTempReadTime = DateTime.UtcNow;
+                    int temp = GetSensorReading(0x01);
+                    if (temp > 0 && temp <= 125)
+                    {
+                        _cachedCpuTempReading = temp;
+                        return temp;
+                    }
+                    return _cachedCpuTempReading;
                 }
-
+                finally
+                {
+                    Monitor.Exit(_lock);
+                }
             }
-
         }
-
-
 
         public virtual int GpuTemp
-
         {
-
             get
-
             {
-
-                lock (_lock)
-
-                {
-
-                    if (_suppressGpuQueries) return 0;
-
-                    if (DateTime.UtcNow - _lastGpuTempReadTime < SensorCacheDuration && _cachedGpuTempReading > 0)
-
-                        return _cachedGpuTempReading;
-
-
-
-                    _lastGpuTempReadTime = DateTime.UtcNow;
-
-                    int temp = GetSensorReading(0x0A);
-
-                    if (temp > 0 && temp <= 125)
-
-                    {
-
-                        _cachedGpuTempReading = temp;
-
-                        return temp;
-
-                    }
-
-
-
+                if (_suppressGpuQueries) return 0;
+                if (DateTime.UtcNow - _lastGpuTempReadTime < SensorCacheDuration && _cachedGpuTempReading > 0)
                     return _cachedGpuTempReading;
 
+                if (!Monitor.TryEnter(_lock, TimeSpan.FromMilliseconds(150)))
+                    return _cachedGpuTempReading;
+
+                try
+                {
+                    if (_suppressGpuQueries) return 0;
+                    if (DateTime.UtcNow - _lastGpuTempReadTime < SensorCacheDuration && _cachedGpuTempReading > 0)
+                        return _cachedGpuTempReading;
+
+                    _lastGpuTempReadTime = DateTime.UtcNow;
+                    int temp = GetSensorReading(0x0A);
+                    if (temp > 0 && temp <= 125)
+                    {
+                        _cachedGpuTempReading = temp;
+                        return temp;
+                    }
+
+                    return _cachedGpuTempReading;
                 }
-
+                finally
+                {
+                    Monitor.Exit(_lock);
+                }
             }
-
         }
-
-
 
         public static bool IsDutyCyclePayload(int val)
-
         {
-
             // Detect raw Acer duty cycle payload: 2560 is 10% duty (0x0A00 = 10 << 8).
-
             // Any multiple of 256 where (val >> 8) <= 100 and (val & 0xFF) == 0 is a duty cycle percentage, not tachometer RPM.
-
             return val == 2560 || (val > 0 && (val & 0xFF) == 0 && (val >> 8) <= 100);
-
         }
-
-
 
         public virtual int CpuFanRpm
-
         {
-
             get
-
             {
-
-                lock (_lock)
-
-                {
-
-                    if (DateTime.UtcNow - _lastCpuRpmReadTime < SensorCacheDuration && _cachedCpuRpmReading > 0)
-
-                        return _cachedCpuRpmReading;
-
-
-
-                    _lastCpuRpmReadTime = DateTime.UtcNow;
-
-                    int rpm = GetSensorReading(0x02);
-
-                    if (rpm > 0 && rpm <= 15000 && !IsDutyCyclePayload(rpm))
-
-                    {
-
-                        _cachedCpuRpmReading = rpm;
-
-                        return rpm;
-
-                    }
-
-
-
-                    int legacyRpm = GetGamingFanSpeed(0x01);
-
-                    if (legacyRpm > 0 && legacyRpm <= 15000 && !IsDutyCyclePayload(legacyRpm))
-
-                    {
-
-                        _cachedCpuRpmReading = legacyRpm;
-
-                        return legacyRpm;
-
-                    }
-
-
-
+                if (DateTime.UtcNow - _lastCpuRpmReadTime < SensorCacheDuration && _cachedCpuRpmReading > 0)
                     return _cachedCpuRpmReading;
 
+                if (!Monitor.TryEnter(_lock, TimeSpan.FromMilliseconds(150)))
+                    return _cachedCpuRpmReading;
+
+                try
+                {
+                    if (DateTime.UtcNow - _lastCpuRpmReadTime < SensorCacheDuration && _cachedCpuRpmReading > 0)
+                        return _cachedCpuRpmReading;
+
+                    _lastCpuRpmReadTime = DateTime.UtcNow;
+                    int rpm = GetSensorReading(0x02);
+                    if (rpm > 0 && rpm <= 15000 && !IsDutyCyclePayload(rpm))
+                    {
+                        _cachedCpuRpmReading = rpm;
+                        return rpm;
+                    }
+
+                    int legacyRpm = GetGamingFanSpeed(0x01);
+                    if (legacyRpm > 0 && legacyRpm <= 15000 && !IsDutyCyclePayload(legacyRpm))
+                    {
+                        _cachedCpuRpmReading = legacyRpm;
+                        return legacyRpm;
+                    }
+
+                    return _cachedCpuRpmReading;
                 }
-
+                finally
+                {
+                    Monitor.Exit(_lock);
+                }
             }
-
         }
-
-
 
         public virtual int GpuFanRpm
-
         {
-
             get
-
             {
-
-                lock (_lock)
-
-                {
-
-                    if (_suppressGpuQueries) return 0;
-
-                    if (DateTime.UtcNow - _lastGpuRpmReadTime < SensorCacheDuration && _cachedGpuRpmReading > 0)
-
-                        return _cachedGpuRpmReading;
-
-
-
-                    _lastGpuRpmReadTime = DateTime.UtcNow;
-
-                    int rpm = GetSensorReading(0x06);
-
-                    if (rpm > 0 && rpm <= 15000 && !IsDutyCyclePayload(rpm))
-
-                    {
-
-                        _cachedGpuRpmReading = rpm;
-
-                        return rpm;
-
-                    }
-
-
-
-                    int legacyRpm = GetGamingFanSpeed(0x04);
-
-                    if (legacyRpm > 0 && legacyRpm <= 15000 && !IsDutyCyclePayload(legacyRpm))
-
-                    {
-
-                        _cachedGpuRpmReading = legacyRpm;
-
-                        return legacyRpm;
-
-                    }
-
-
-
+                if (_suppressGpuQueries) return 0;
+                if (DateTime.UtcNow - _lastGpuRpmReadTime < SensorCacheDuration && _cachedGpuRpmReading > 0)
                     return _cachedGpuRpmReading;
 
-                }
+                if (!Monitor.TryEnter(_lock, TimeSpan.FromMilliseconds(150)))
+                    return _cachedGpuRpmReading;
 
-            }
-
-        }
-
-
-
-        private int _cachedSystemRpmReading;
-
-        private DateTime _lastSystemRpmReadTime = DateTime.MinValue;
-
-        private bool _systemFanChecked;
-
-        private bool _hasSystemFan = true;
-
-
-
-        public virtual int SystemFanRpm
-
-        {
-
-            get
-
-            {
-
-                lock (_lock)
-
+                try
                 {
+                    if (_suppressGpuQueries) return 0;
+                    if (DateTime.UtcNow - _lastGpuRpmReadTime < SensorCacheDuration && _cachedGpuRpmReading > 0)
+                        return _cachedGpuRpmReading;
 
-                    if (DateTime.UtcNow - _lastSystemRpmReadTime < SensorCacheDuration)
-
-                        return _cachedSystemRpmReading;
-
-
-
-                    if (_systemFanChecked && !_hasSystemFan && (DateTime.UtcNow - _lastSystemRpmReadTime).TotalSeconds < 10)
-
-                        return 0;
-
-
-
-                    _lastSystemRpmReadTime = DateTime.UtcNow;
-
-                    int rpm = GetSensorReading((ulong)SensorId.SystemFanSpeed);
-
-                    if (rpm == 0 || rpm > 15000 || IsDutyCyclePayload(rpm))
-
-                        rpm = GetSensorReading((ulong)SensorId.System2FanSpeed);
-
-
-
-                    _systemFanChecked = true;
-
+                    _lastGpuRpmReadTime = DateTime.UtcNow;
+                    int rpm = GetSensorReading(0x06);
                     if (rpm > 0 && rpm <= 15000 && !IsDutyCyclePayload(rpm))
-
                     {
-
-                        _hasSystemFan = true;
-
-                        _cachedSystemRpmReading = rpm;
-
+                        _cachedGpuRpmReading = rpm;
                         return rpm;
-
                     }
 
+                    int legacyRpm = GetGamingFanSpeed(0x04);
+                    if (legacyRpm > 0 && legacyRpm <= 15000 && !IsDutyCyclePayload(legacyRpm))
+                    {
+                        _cachedGpuRpmReading = legacyRpm;
+                        return legacyRpm;
+                    }
 
-
-                    _hasSystemFan = false;
-
-                    _cachedSystemRpmReading = 0;
-
-                    return 0;
-
+                    return _cachedGpuRpmReading;
                 }
-
+                finally
+                {
+                    Monitor.Exit(_lock);
+                }
             }
-
         }
 
+        private volatile int _cachedSystemRpmReading;
+        private DateTime _lastSystemRpmReadTime = DateTime.MinValue;
+        private bool _systemFanChecked;
+        private bool _hasSystemFan = true;
 
+        public virtual int SystemFanRpm
+        {
+            get
+            {
+                if (DateTime.UtcNow - _lastSystemRpmReadTime < SensorCacheDuration)
+                    return _cachedSystemRpmReading;
+
+                if (_systemFanChecked && !_hasSystemFan && (DateTime.UtcNow - _lastSystemRpmReadTime).TotalSeconds < 10)
+                    return 0;
+
+                if (!Monitor.TryEnter(_lock, TimeSpan.FromMilliseconds(150)))
+                    return _cachedSystemRpmReading;
+
+                try
+                {
+                    if (DateTime.UtcNow - _lastSystemRpmReadTime < SensorCacheDuration)
+                        return _cachedSystemRpmReading;
+
+                    if (_systemFanChecked && !_hasSystemFan && (DateTime.UtcNow - _lastSystemRpmReadTime).TotalSeconds < 10)
+                        return 0;
+
+                    _lastSystemRpmReadTime = DateTime.UtcNow;
+                    int rpm = GetSensorReading((ulong)SensorId.SystemFanSpeed);
+                    if (rpm == 0 || rpm > 15000 || IsDutyCyclePayload(rpm))
+                        rpm = GetSensorReading((ulong)SensorId.System2FanSpeed);
+
+                    _systemFanChecked = true;
+                    if (rpm > 0 && rpm <= 15000 && !IsDutyCyclePayload(rpm))
+                    {
+                        _hasSystemFan = true;
+                        _cachedSystemRpmReading = rpm;
+                        return rpm;
+                    }
+
+                    _hasSystemFan = false;
+                    _cachedSystemRpmReading = 0;
+                    return 0;
+                }
+                finally
+                {
+                    Monitor.Exit(_lock);
+                }
+            }
+        }
 
         public static Guid GetOverlayForMode(byte acerMode) => acerMode switch
 
@@ -4454,9 +4362,17 @@ namespace PredatorControlApp
 
         public bool SetGpuMode(GpuMode mode)
         {
+            string biosOption = mode switch
+            {
+                GpuMode.Auto => "Auto",
+                GpuMode.iGpuOnly => "Optimus",
+                GpuMode.dGpuOnly => "Discrete GPU only",
+                _ => "Auto"
+            };
+
+            bool applied = false;
             lock (_lock)
             {
-                bool applied = false;
                 byte modeVal = (byte)mode;
 
                 // 1. AcerGamingFunction: SetGamingMiscSetting with MiscSetting.GpuMode = 2
@@ -4473,14 +4389,6 @@ namespace PredatorControlApp
                 catch { }
 
                 // 3. AcerBiosConfigurationTool / ListBIOSSettings / MethodForPowerShell WMI
-                string biosOption = mode switch
-                {
-                    GpuMode.Auto => "Auto",
-                    GpuMode.iGpuOnly => "Optimus",
-                    GpuMode.dGpuOnly => "Discrete GPU only",
-                    _ => "Auto"
-                };
-
                 try
                 {
                     if (SetBiosSettingViaWmi("Display MUX", biosOption, null) ||
@@ -4514,20 +4422,15 @@ namespace PredatorControlApp
                     applied = true;
                 }
                 catch { }
-
-                try
-                {
-                    var biosMux = Bios.BiosManager.Instance.GetMuxSetting();
-                    if (biosMux != null)
-                    {
-                        biosMux.CurrentValue = biosOption;
-                        biosMux.PendingValue = biosOption;
-                    }
-                }
-                catch { }
-
-                return applied;
             }
+
+            try
+            {
+                Bios.BiosManager.Instance.UpdateMuxSetting(biosOption);
+            }
+            catch { }
+
+            return applied;
         }
 
         public bool SetBootAnimation(bool enabled)
@@ -4656,6 +4559,7 @@ namespace PredatorControlApp
 
         public bool SetGamingKBBacklightTimeout(int seconds)
         {
+            seconds = Math.Clamp(seconds, 0, 255);
             lock (_lock)
             {
                 bool applied = false;

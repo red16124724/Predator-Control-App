@@ -196,7 +196,7 @@ namespace PredatorControlApp
 
                                         if (newlineReceived)
                                         {
-                                            string line = sb.ToString().Replace(" ", "").Trim();
+                                            string line = sb.ToString().Replace("\0", "").Trim();
                                             if (!string.IsNullOrEmpty(line))
                                             {
                                                 try { _onMessage(line); } catch { }

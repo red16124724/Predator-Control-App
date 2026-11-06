@@ -38,6 +38,8 @@ namespace PredatorControlApp.Display
         private PredatorSwitch _switchOverdrive = null!;
 
         private readonly Action _themeHandler;
+        private readonly Action<int>? _refreshRateHandler;
+        private readonly Action<int>? _ddsModeHandler;
 
         public DisplaySettingsForm(DisplayManager? displayManager = null, AppSettings? settings = null)
         {
@@ -50,6 +52,12 @@ namespace PredatorControlApp.Display
 
             _themeHandler = () => SafeBeginInvoke(ApplyTheme);
             ThemeManager.ThemeChanged += _themeHandler;
+
+            _refreshRateHandler = (hz) => SafeBeginInvoke(() => { if (_lblCurrentHz != null) _lblCurrentHz.Text = $"Current: {hz} Hz"; });
+            _displayManager.RefreshRateChanged += _refreshRateHandler;
+
+            _ddsModeHandler = (mode) => SafeBeginInvoke(LoadCurrentValues);
+            _displayManager.DdsModeChanged += _ddsModeHandler;
         }
 
         private void SafeBeginInvoke(Action action)
@@ -397,11 +405,45 @@ namespace PredatorControlApp.Display
             _settings.Save();
         }
 
+        protected override void OnDpiChanged(DpiChangedEventArgs e)
+        {
+            base.OnDpiChanged(e);
+            float factor = e.DeviceDpiOld > 0 ? (float)e.DeviceDpiNew / e.DeviceDpiOld : 1.0f;
+            if (Math.Abs(factor - 1.0f) > 0.001f)
+            {
+                try
+                {
+                    this.Scale(new SizeF(factor, factor));
+                    RescaleControlFonts(this, factor);
+                }
+                catch { }
+            }
+        }
+
+        private static void RescaleControlFonts(Control root, float factor)
+        {
+            if (root.Font != null)
+            {
+                float newSize = Math.Max(6f, (float)Math.Round(root.Font.Size * factor, 2));
+                if (Math.Abs(newSize - root.Font.Size) > 0.05f)
+                {
+                    root.Font = new Font(root.Font.FontFamily, newSize, root.Font.Style);
+                }
+            }
+            foreach (Control child in root.Controls)
+            {
+                RescaleControlFonts(child, factor);
+            }
+        }
+
         protected override void Dispose(bool disposing)
         {
             if (disposing)
             {
                 ThemeManager.ThemeChanged -= _themeHandler;
+                if (_refreshRateHandler != null) _displayManager.RefreshRateChanged -= _refreshRateHandler;
+                if (_ddsModeHandler != null) _displayManager.DdsModeChanged -= _ddsModeHandler;
+                try { _wmi?.Dispose(); } catch { }
             }
             base.Dispose(disposing);
         }

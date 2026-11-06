@@ -89,6 +89,13 @@ namespace PredatorControlApp
                 try { _fanCurveForm?.Dispose(); } catch { }
                 try { _appIconBitmap?.Dispose(); } catch { }
                 try { _tipCalibration?.Dispose(); } catch { }
+                try { _fontTitle?.Dispose(); } catch { }
+                try { _fontSectionHeader?.Dispose(); } catch { }
+                try { _fontHeaderLight?.Dispose(); } catch { }
+                try { _fontBody?.Dispose(); } catch { }
+                try { _fontBodyBold?.Dispose(); } catch { }
+                try { _fontCalibrationPercent?.Dispose(); } catch { }
+                try { _fontRiskBadge?.Dispose(); } catch { }
                     components?.Dispose();
             }
             else
