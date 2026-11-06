@@ -567,11 +567,11 @@ namespace PredatorControlApp.Tests
         }
 
         [Fact]
-        public void CurrentVersion_Is155()
+        public void CurrentVersion_Is158()
         {
             Assert.Equal(1, Updater.Current.Major);
             Assert.Equal(5, Updater.Current.Minor);
-            Assert.Equal(5, Updater.Current.Build);
+            Assert.Equal(8, Updater.Current.Build);
         }
 
         [Fact]

@@ -4617,6 +4617,8 @@ namespace PredatorControlApp
                 _lblHardwareLinkTitle = MakeLabel(cardSensors, "HARDWARE LINK:", cardW / 2, S(100), FontBody, SubHeaderColor);
                 int linkW = TextRenderer.MeasureText("HARDWARE LINK:", FontBody).Width;
                 _lblProtocolBadge = MakeLabel(cardSensors, _wmi.EcHid != null && _wmi.EcHid.IsOpen ? "Direct Hardware Controller" : "Acer System Driver", (cardW / 2) + linkW + S(8), S(100), FontBodyBold, AccentColor, "accent");
+                _lblProtocolBadge.AutoEllipsis = true;
+                _lblProtocolBadge.MaximumSize = new Size(Math.Max(S(50), cardW - _lblProtocolBadge.Left - cPad), S(20));
             }
             else
             {
@@ -4624,6 +4626,8 @@ namespace PredatorControlApp
                 _lblHardwareLinkTitle = MakeLabel(cardSensors, "HARDWARE LINK:", cPad, S(100), FontBody, SubHeaderColor);
                 int linkW = TextRenderer.MeasureText("HARDWARE LINK:", FontBody).Width;
                 _lblProtocolBadge = MakeLabel(cardSensors, _wmi.EcHid != null && _wmi.EcHid.IsOpen ? "Direct Hardware Controller" : "Acer System Driver", cPad + linkW + S(8), S(100), FontBodyBold, AccentColor, "accent");
+                _lblProtocolBadge.AutoEllipsis = true;
+                _lblProtocolBadge.MaximumSize = new Size(Math.Max(S(50), cardW - _lblProtocolBadge.Left - cPad), S(20));
             }
 
 
@@ -4812,7 +4816,7 @@ namespace PredatorControlApp
 
             // Card 4: Display Refresh Rate & LCD Overdrive
 
-            var cardQuickCooling = MakeCard(_pnlDashboard, "DISPLAY & REFRESH RATE", col2X, pad + S(454), cardW, S(164));
+            var cardQuickCooling = MakeCard(_pnlDashboard, "DISPLAY & REFRESH RATE", col2X, pad + S(464), cardW, S(164));
 
             int dispW = (cInnerW - S(8)) / 2;
 
@@ -4884,7 +4888,7 @@ namespace PredatorControlApp
 
             // Card 5: Quick Navigation Shortcuts
 
-            var cardQuickJump = MakeCard(_pnlDashboard, "QUICK NAVIGATION & SHORTCUTS", col2X, pad + S(630), cardW, S(184));
+            var cardQuickJump = MakeCard(_pnlDashboard, "QUICK NAVIGATION & SHORTCUTS", col2X, pad + S(640), cardW, S(184));
 
             var btnJumpFans = MakeButton(cardQuickJump, "💨  Open Fan Controls & Speed Locking", cPad, S(44), cInnerW, S(34));
 
@@ -5066,7 +5070,7 @@ namespace PredatorControlApp
 
             int btnSpacing = S(8);
 
-            int scanBtnW = S(110);
+            int scanBtnW = S(90);
 
             int resetBtnW = cInnerW - scanBtnW - btnSpacing;
 
@@ -10313,11 +10317,15 @@ namespace PredatorControlApp
             _lblGpuStatusSys = MakeLabel(cardGpu, "Status: Querying BIOS hardware MUX switch...", cPad, S(68), FontBodyBold, ThemeManager.Accent);
             UpdateGpuModeStatusLabel();
 
-            int muxBtnW = (cInnerW - 2 * S(8)) / 3;
-            int btnH = S(36);
-            _btnGpuAuto = MakeButton(cardGpu, "🔄  Automatic (Optimus MUX)", cPad, S(104), muxBtnW, btnH);
-            _btnGpuHybrid = MakeButton(cardGpu, "🔋  Integrated Only (iGPU MUX)", cPad + muxBtnW + S(8), S(104), muxBtnW, btnH);
-            _btnGpuDiscrete = MakeButton(cardGpu, "⚡  Discrete Only (dGPU MUX)", cPad + 2 * (muxBtnW + S(8)), S(104), muxBtnW, btnH);
+            int muxBtnH = S(34);
+            int muxGap = S(8);
+            int muxY = S(100);
+            _btnGpuAuto = MakeButton(cardGpu, "🔄  Automatic (Optimus MUX)", cPad, muxY, cInnerW, muxBtnH);
+            muxY += muxBtnH + muxGap;
+            _btnGpuHybrid = MakeButton(cardGpu, "🔋  Integrated Only (iGPU MUX)", cPad, muxY, cInnerW, muxBtnH);
+            muxY += muxBtnH + muxGap;
+            _btnGpuDiscrete = MakeButton(cardGpu, "⚡  Discrete Only (dGPU MUX)", cPad, muxY, cInnerW, muxBtnH);
+            muxY += muxBtnH + muxGap + S(6);
 
             var curGpuMode = _wmi.GetGpuMode() ?? GpuMode.Auto;
             var muxItem = Bios.BiosManager.Instance.Settings.FirstOrDefault(s => s.Name.Contains("Display MUX", StringComparison.OrdinalIgnoreCase));
@@ -10334,7 +10342,7 @@ namespace PredatorControlApp
             _btnGpuHybrid.Click += (s, e) => ApplyGpuMode(GpuMode.iGpuOnly, _btnGpuHybrid);
             _btnGpuDiscrete.Click += (s, e) => ApplyGpuMode(GpuMode.dGpuOnly, _btnGpuDiscrete);
 
-            MakeLabel(cardGpu, "Hardware MUX switch changes configure UEFI/BIOS routing and require a system restart to take effect.", cPad, S(164), FontHeaderLight, SubHeaderColor);
+            MakeLabel(cardGpu, "Hardware MUX switch changes configure UEFI/BIOS routing and require a system restart to take effect.", cPad, muxY, FontHeaderLight, SubHeaderColor);
 
             // ==========================================
             // CARD 2: DISPLAY REFRESH RATE & OVERDRIVE
