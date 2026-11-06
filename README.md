@@ -25,7 +25,7 @@ Stock OEM utilities (**PredatorSense** & **NitroSense**) consume up to **500 MB+
 **Predator Control App** replaces OEM bloat with a standalone single binary:
 - **Instant Response (< 1ms)**: Zero Electron, zero webviews — pure native WinForms on .NET 10 with a high-throughput Rust kernel interop core (`predator_core.dll`).
 - **Zero Background Drain**: Minimal memory footprint (~18-28 MB private working set) and near-zero idle CPU usage (< 0.1%).
-- **Embedded Display & BIOS Controls**: Integrated NVIDIA Advanced Optimus (Dynamic Display Switch), display refresh rate switcher, BlueLight Shield, and Acer BIOS & Firmware configuration directly into the System & Power section without cramped popup windows.
+- **Dedicated Embedded Display, BIOS & Game Sync Menus**: Dedicated full-sized pages for Display Settings (NVIDIA Advanced Optimus DDS, 60Hz/MaxHz modes, LCD Overdrive), BIOS & Firmware Settings (dynamic hardware architecture badge querying Win32_BIOS/WMI with zero hardcoding, two-tier safety gates), and Game Sync (event-driven foreground game profiles).
 - **Helios Neo & AI Lighting Stability**: Eliminates periodic RGB keyboard blinking on Helios Neo 16/16s/18 and 16 AI series by suppressing redundant EC/WMI reassertions.
 - **Deep Ring-0 Hardware Access**: Direct Embedded Controller (EC) fan registers, ACPI PPCC table parsing, and Intel MCHBAR MMIO / MSR `0x610` power limit management via signed PawnIO driver.
 

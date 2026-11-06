@@ -33,7 +33,6 @@ namespace PredatorControlApp.Bios
         private Label _lblModeBadge = null!;
         private CheckBox _chkEnableModifications = null!;
         private CheckBox _chkAllowDangerous = null!;
-        private PredatorButton _btnPassword = null!;
         private PredatorButton _btnRestoreDefaults = null!;
         private TabControl _tabControl = null!;
 
@@ -113,7 +112,7 @@ namespace PredatorControlApp.Bios
             // Badges row
             _lblModelBadge = new Label
             {
-                Text = $"Model: {_biosManager.ModelName}",
+                Text = _biosManager.BiosBadgeText,
                 Font = s_fontModelBadge,
                 ForeColor = ThemeManager.Accent,
                 Location = new Point(18, y),
@@ -126,7 +125,7 @@ namespace PredatorControlApp.Bios
                 Text = $"[{_biosManager.GetSupportModeDescription()}]",
                 Font = s_fontModeBadge,
                 ForeColor = ThemeManager.TextSecondary,
-                Location = new Point(240, y),
+                Location = new Point(_lblModelBadge.Right + 12, y),
                 AutoSize = true
             };
             mainPanel.Controls.Add(_lblModeBadge);
@@ -181,14 +180,7 @@ namespace PredatorControlApp.Bios
             _chkAllowDangerous.CheckedChanged += OnDangerousToggled;
             cardSafety.Controls.Add(_chkAllowDangerous);
 
-            _btnPassword = new PredatorButton
-            {
-                Text = "Supervisor Pwd",
-                Location = new Point(625, 34),
-                Size = new Size(130, 28)
-            };
-            _btnPassword.Click += OnPasswordClicked;
-            cardSafety.Controls.Add(_btnPassword);
+
 
             y += 85;
 
@@ -221,6 +213,9 @@ namespace PredatorControlApp.Bios
             btnRefresh.Click += (s, e) =>
             {
                 _biosManager.ProbeAndLoad();
+                _lblModelBadge.Text = _biosManager.BiosBadgeText;
+                _lblModeBadge.Text = $"[{_biosManager.GetSupportModeDescription()}]";
+                _lblModeBadge.Location = new Point(_lblModelBadge.Right + 12, _lblModelBadge.Top);
                 PopulateCategories();
             };
             mainPanel.Controls.Add(btnRefresh);
@@ -486,76 +481,6 @@ namespace PredatorControlApp.Bios
             finally
             {
                 _isUpdatingSafetyGates = false;
-            }
-        }
-
-        private void OnPasswordClicked(object? sender, EventArgs e)
-        {
-            if (IsDisposed || Disposing) return;
-
-            using var form = new Form
-            {
-                Text = "BIOS Supervisor Password",
-                Size = new Size(360, 160),
-                StartPosition = FormStartPosition.CenterParent,
-                FormBorderStyle = FormBorderStyle.FixedDialog,
-                MaximizeBox = false,
-                MinimizeBox = false,
-                BackColor = ThemeManager.FormBg,
-                ForeColor = ThemeManager.TextPrimary,
-                Font = s_fontMain
-            };
-
-            var lbl = new Label
-            {
-                Text = "Enter BIOS Supervisor Password (if set):",
-                Location = new Point(15, 15),
-                AutoSize = true
-            };
-            form.Controls.Add(lbl);
-
-            var txt = new TextBox
-            {
-                Location = new Point(15, 40),
-                Size = new Size(310, 26),
-                PasswordChar = '*'
-            };
-            form.Controls.Add(txt);
-
-            var btnOk = new PredatorButton
-            {
-                Text = "Save",
-                Location = new Point(150, 75),
-                Size = new Size(85, 30),
-                DialogResult = DialogResult.OK
-            };
-            btnOk.Click += (s, ev) =>
-            {
-                form.DialogResult = DialogResult.OK;
-                form.Close();
-            };
-            form.Controls.Add(btnOk);
-
-            var btnClear = new PredatorButton
-            {
-                Text = "Clear",
-                Location = new Point(240, 75),
-                Size = new Size(85, 30)
-            };
-            btnClear.Click += (s, ev) =>
-            {
-                _biosManager.SetSupervisorPassword(null);
-                form.DialogResult = DialogResult.Cancel;
-                form.Close();
-            };
-            form.Controls.Add(btnClear);
-
-            form.AcceptButton = btnOk;
-            form.CancelButton = btnClear;
-
-            if (form.ShowDialog(this) == DialogResult.OK)
-            {
-                _biosManager.SetSupervisorPassword(txt.Text);
             }
         }
 

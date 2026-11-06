@@ -465,12 +465,11 @@ namespace PredatorControlApp.Tests
         #region Bug Fix 8: Comprehensive Persistence & Hardware Safety Tests
 
         [Fact]
-        public void AppSettings_CreateSnapshot_PreservesDdsAndBlueLightAndBiosSettings()
+        public void AppSettings_CreateSnapshot_PreservesDdsAndBiosSettings()
         {
             var settings = new AppSettings
             {
                 DdsMode = 2,
-                BlueLightShieldMode = 3,
                 BiosModificationsEnabled = true,
                 BiosDangerousAllowed = true
             };
@@ -478,31 +477,26 @@ namespace PredatorControlApp.Tests
             var snapshot = settings.CreateSnapshot();
 
             Assert.Equal(2, snapshot.DdsMode);
-            Assert.Equal(3, snapshot.BlueLightShieldMode);
             Assert.True(snapshot.BiosModificationsEnabled);
             Assert.True(snapshot.BiosDangerousAllowed);
         }
 
         [Fact]
-        public void AppSettings_Sanitize_ClampsDdsAndBlueLight()
+        public void AppSettings_Sanitize_ClampsDds()
         {
             var settings = new AppSettings
             {
-                DdsMode = 99,
-                BlueLightShieldMode = -5
+                DdsMode = 99
             };
 
             settings.Sanitize();
 
             Assert.Equal(2, settings.DdsMode);
-            Assert.Equal(0, settings.BlueLightShieldMode);
 
             settings.DdsMode = -10;
-            settings.BlueLightShieldMode = 100;
             settings.Sanitize();
 
             Assert.Equal(0, settings.DdsMode);
-            Assert.Equal(3, settings.BlueLightShieldMode);
         }
 
         [Fact]

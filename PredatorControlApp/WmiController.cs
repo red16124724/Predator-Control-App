@@ -4175,6 +4175,12 @@ namespace PredatorControlApp
 
         }
 
+        /// <summary>Reads live queried device architecture, BIOS version, release date, and SMBIOS details dynamically with zero hardcoded values.</summary>
+        public DeviceBiosInfo GetDeviceBiosInfo(bool refresh = false) => HardwareIdentity.GetDeviceBiosInfo(refresh);
+
+        /// <summary>Returns formatted live dynamic BIOS & hardware architecture badge string.</summary>
+        public string GetBiosHardwareBadge() => HardwareIdentity.GetBiosHardwareBadge();
+
 
 
         public bool SetCoolBoost(bool on)

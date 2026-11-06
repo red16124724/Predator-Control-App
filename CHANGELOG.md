@@ -10,6 +10,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 
+## [1.5.5 Dedicated Embedded Menus, Dynamic Hardware Badge & Complete Pruning] - 2026-11-06
+
+- **Dedicated Embedded Menus ("BIOS Settings", "Display Settings", "Game Sync")**:
+  - Expanded sidebar navigation to 8 clean, dedicated views: Dashboard, Fans & Cooling, RGB Lighting, Display Settings, BIOS Settings, Game Sync, System & Power, and Settings & Info.
+  - Sized navigation buttons to `S(38)` with `S(4)` gaps starting at `y = S(12)`, ensuring all 8 views fit comfortably inside the sidebar without crowding or scrollbars.
+  - "Display Settings" page (`_pnlDisplay`): Hosts Graphics Working Mode (Automatic, Integrated Only, Dedicated Only) and Display Refresh Rate (60 Hz and Max Hz buttons, LCD Overdrive switch).
+  - "BIOS Settings" page (`_pnlBios`): Hosts live queried hardware architecture badge, two-tier safety gates (Enable Modifications & Allow Dangerous Settings), category tabs (System, Power & Battery, Boot & Setup), setting rows with risk levels, and Restore Defaults.
+  - "Game Sync" page (`_pnlGameSync`): Hosts global Game Sync master switch, active game detection status, profile list view (Game, Executable, Power Mode, Fan Mode, Refresh Rate, RGB), and profile actions (Add, Edit, Delete).
+  - Clean "System & Power" page (`_pnlSystem`): Streamlined to hold only Automatic Power Profiles & Mode Key (Col 1) and USB Charging & Battery Maintenance (Col 2).
+
+- **Dynamic Hardware Architecture & BIOS Badge**:
+  - Replaced all hardcoded model names and BIOS descriptions with live, real-time hardware inspection via `DeviceBiosInfo`.
+  - Dynamically queries `Win32_BIOS` (Manufacturer, SMBIOS version, release date, version), `Win32_ComputerSystem` (Model, system type, memory), `Win32_Processor` (Architecture, CPU name), with registry fallbacks (`HKLM\HARDWARE\DESCRIPTION\System\BIOS`, `CentralProcessor\0`) and `RuntimeInformation.OSArchitecture`.
+  - Produces formatted dynamic badge (e.g. `Acer Predator PHN14-51 | BIOS: V1.08 (06/13/2025) | SMBIOS v3.6 | x64`) displayed across BIOS settings headers with zero hardcoded values.
+
+- **100% Complete Feature Pruning**:
+  - Completely removed Acer BlueLight Shield™ across C# UI, DisplayManager, AppSettings, registry persistence, and unit tests.
+  - Completely removed GPU Overclock mentions and stubs.
+  - Completely removed Supervisor Password UI prompts, cached passwords, and dialogs.
+  - Completely removed dynamic refresh rate dropdown; retained strictly 60 Hz and Max Hz buttons.
+
+---
+
 ## [1.5.5 UI Embedded Redesign & Hardware Blinking Fix] - 2026-11-06
 
 - **Helios Neo Periodic RGB Blinking Elimination**:

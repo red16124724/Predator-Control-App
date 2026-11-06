@@ -416,7 +416,6 @@ namespace PredatorControlApp
         public int RefreshRate { get; set; } = 0;
         public bool LcdOverdrive { get; set; } = true;
         public int DdsMode { get; set; } = 1; // 0 = Optimus, 1 = Auto, 2 = dGPU
-        public int BlueLightShieldMode { get; set; } = 0; // 0 = Off, 1 = Low 18%, 2 = High 36%, 3 = Ultra 54%
         public bool BiosModificationsEnabled { get; set; } = false;
         public bool BiosDangerousAllowed { get; set; } = false;
         public bool BatteryLimit { get; set; } = false;
@@ -1132,7 +1131,6 @@ namespace PredatorControlApp
                     RefreshRate = this.RefreshRate,
                     LcdOverdrive = this.LcdOverdrive,
                     DdsMode = this.DdsMode,
-                    BlueLightShieldMode = this.BlueLightShieldMode,
                     BiosModificationsEnabled = this.BiosModificationsEnabled,
                     BiosDangerousAllowed = this.BiosDangerousAllowed,
                     BatteryLimit = this.BatteryLimit,
@@ -1379,7 +1377,6 @@ namespace PredatorControlApp
 
             RefreshRate = Math.Clamp(RefreshRate, 0, 1000);
             DdsMode = Math.Clamp(DdsMode, 0, 2);
-            BlueLightShieldMode = Math.Clamp(BlueLightShieldMode, 0, 3);
 
             RgbMode = Math.Clamp(RgbMode, 0, 33);
             RgbBrightness = Math.Clamp(RgbBrightness, 0, 100);
@@ -1843,7 +1840,6 @@ namespace PredatorControlApp
                             if (key.GetValue("RefreshRate") is int rr) settings.RefreshRate = rr;
                             if (key.GetValue("LcdOverdrive") is int od) settings.LcdOverdrive = od == 1;
                             if (key.GetValue("DdsMode") is int dds) settings.DdsMode = dds;
-                            if (key.GetValue("BlueLightShieldMode") is int bls) settings.BlueLightShieldMode = bls;
                             if (key.GetValue("BiosModificationsEnabled") is int bme) settings.BiosModificationsEnabled = bme == 1;
                             if (key.GetValue("BiosDangerousAllowed") is int bda) settings.BiosDangerousAllowed = bda == 1;
                             if (key.GetValue("BatteryLimit") is int bl) settings.BatteryLimit = bl == 1;
@@ -2218,7 +2214,6 @@ namespace PredatorControlApp
                         if (snapshot.RefreshRate > 0) key.SetValue("RefreshRate", snapshot.RefreshRate);
                         key.SetValue("LcdOverdrive", snapshot.LcdOverdrive ? 1 : 0);
                         key.SetValue("DdsMode", snapshot.DdsMode);
-                        key.SetValue("BlueLightShieldMode", snapshot.BlueLightShieldMode);
                         key.SetValue("BiosModificationsEnabled", snapshot.BiosModificationsEnabled ? 1 : 0);
                         key.SetValue("BiosDangerousAllowed", snapshot.BiosDangerousAllowed ? 1 : 0);
                         key.SetValue("BatteryLimit", snapshot.BatteryLimit ? 1 : 0);

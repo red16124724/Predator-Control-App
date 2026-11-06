@@ -76,34 +76,16 @@ namespace PredatorControlApp.Tests
                 using var form = new DisplaySettingsForm();
                 form.CreateControl();
 
-                var cboField = typeof(DisplaySettingsForm).GetField("_cboRefreshRates", BindingFlags.NonPublic | BindingFlags.Instance);
-                Assert.NotNull(cboField);
-                var cbo = (ComboBox)cboField.GetValue(form)!;
+                var applyMethod = typeof(DisplaySettingsForm).GetMethod("ApplyRefreshRate", BindingFlags.NonPublic | BindingFlags.Instance);
+                Assert.NotNull(applyMethod);
 
-                var onApplyMethod = typeof(DisplaySettingsForm).GetMethod("OnApplyRefreshClicked", BindingFlags.NonPublic | BindingFlags.Instance);
-                Assert.NotNull(onApplyMethod);
-
-                // Fuzz with adversarial selections
-                string[] fuzzedInputs = new[]
-                {
-                    "", "   ", "abc", "-60", "-144 Hz", "0", "0 Hz", "29 Hz", "invalid", "!@#$%", "9999999999999999999"
-                };
+                int[] fuzzedInputs = new[] { 0, -60, -144, 29, 999999 };
 
                 foreach (var input in fuzzedInputs)
                 {
-                    cbo.Items.Clear();
-                    cbo.Items.Add(input);
-                    cbo.SelectedIndex = 0;
-
-                    // Should handle gracefully without throwing unhandled exceptions
-                    var ex = Record.Exception(() => onApplyMethod.Invoke(form, new object[] { form, EventArgs.Empty }));
+                    var ex = Record.Exception(() => applyMethod.Invoke(form, new object[] { input }));
                     Assert.Null(ex);
                 }
-
-                // Null selection test
-                cbo.SelectedIndex = -1;
-                var nullEx = Record.Exception(() => onApplyMethod.Invoke(form, new object[] { form, EventArgs.Empty }));
-                Assert.Null(nullEx);
             });
         }
 
@@ -136,31 +118,6 @@ namespace PredatorControlApp.Tests
                 // Invoking when unsupported must not throw and must abort safely
                 var ex = Record.Exception(() => onApplyDds.Invoke(form, new object[] { form, EventArgs.Empty }));
                 Assert.Null(ex);
-            });
-        }
-
-        [Fact]
-        public void DisplaySettingsForm_BlueLightShield_RapidTrackbarSpam_500Events_DebouncedAndStable()
-        {
-            StaTestRunner.Run(() =>
-            {
-                using var form = new DisplaySettingsForm();
-                form.CreateControl();
-
-                var sliderField = typeof(DisplaySettingsForm).GetField("_sliderBlueLight", BindingFlags.NonPublic | BindingFlags.Instance);
-                Assert.NotNull(sliderField);
-                var slider = (TrackBar)sliderField.GetValue(form)!;
-
-                // Rapidly cycle values 500 times
-                for (int i = 0; i < 500; i++)
-                {
-                    slider.Value = i % 4;
-                }
-
-                Application.DoEvents();
-
-                // Form must still be responsive and not throw
-                Assert.InRange(slider.Value, 0, 3);
             });
         }
 
@@ -372,23 +329,6 @@ namespace PredatorControlApp.Tests
 
                 Assert.True(deltaGdi < 10, $"GDI leak on tab switching: delta = {deltaGdi}");
             });
-        }
-
-        [Fact]
-        public void BiosSettingsForm_SupervisorPassword_SanitizationAndLifecycle()
-        {
-            var mgr = BiosManager.Instance;
-
-            // Null password
-            mgr.SetSupervisorPassword(null);
-            // Whitespace password should sanitize to null
-            mgr.SetSupervisorPassword("   ");
-            
-            // Valid password
-            mgr.SetSupervisorPassword("MySecretBiosPass");
-
-            // Clear again
-            mgr.SetSupervisorPassword(null);
         }
 
         #endregion

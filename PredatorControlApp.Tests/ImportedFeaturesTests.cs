@@ -10,15 +10,25 @@ namespace PredatorControlApp.Tests
     public class ImportedFeaturesTests
     {
         [Fact]
-        public void DisplayManager_GetSupportedRefreshRates_ReturnsSortedPositiveRates()
+        public void DisplayManager_GetMaxRefreshRate_ReturnsPositiveRate()
         {
-            var mgr = new DisplayManager();
-            var rates = mgr.GetSupportedRefreshRates();
+            var orig = Form1.SetRefreshRateOverride;
+            try
+            {
+                Form1.SetRefreshRateOverride = hz => hz >= 30 && hz <= 1000;
+                var mgr = new DisplayManager();
+                int maxHz = mgr.GetMaxRefreshRate();
 
-            Assert.NotNull(rates);
-            Assert.NotEmpty(rates);
-            Assert.All(rates, r => Assert.True(r >= 60));
-            Assert.Equal(rates.OrderBy(r => r).ToArray(), rates);
+                Assert.True(maxHz >= 60);
+                Assert.True(mgr.SetRefreshRate60());
+                Assert.Equal(60, mgr.CurrentRefreshRate);
+                Assert.True(mgr.SetRefreshRateMax());
+                Assert.Equal(maxHz, mgr.CurrentRefreshRate);
+            }
+            finally
+            {
+                Form1.SetRefreshRateOverride = orig;
+            }
         }
 
         [Fact]
@@ -28,21 +38,6 @@ namespace PredatorControlApp.Tests
             Assert.False(mgr.SetRefreshRate(0));
             Assert.False(mgr.SetRefreshRate(29));
             Assert.False(mgr.SetRefreshRate(-144));
-        }
-
-        [Fact]
-        public void DisplayManager_SetBlueLightShield_ClampsAndFiresEvent()
-        {
-            var mgr = new DisplayManager();
-            int firedLevel = -1;
-            mgr.BlueLightShieldChanged += (lvl) => firedLevel = lvl;
-
-            Assert.True(mgr.SetBlueLightShield(2));
-            Assert.Equal(2, mgr.BlueLightMode);
-            Assert.Equal(2, firedLevel);
-
-            Assert.False(mgr.SetBlueLightShield(-1));
-            Assert.False(mgr.SetBlueLightShield(101));
         }
 
         [Fact]

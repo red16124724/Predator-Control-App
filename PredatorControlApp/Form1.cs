@@ -1114,10 +1114,6 @@ namespace PredatorControlApp
 
         private Panel? _cardBios;
         private Label? _lblGpuStatusSys;
-        private PredatorDropDown? _cboRefreshRateSys;
-        private PredatorButton? _btnApplyRefreshSys;
-        private Label? _lblBlueLightSys;
-        private TrackBar? _sliderBlueLightSys;
         private CheckBox? _chkEnableBiosModsSys;
         private CheckBox? _chkAllowDangerousBiosSys;
         private Panel? _pnlBiosItemsContainerSys;
@@ -1135,26 +1131,33 @@ namespace PredatorControlApp
         private Panel _pageContainer = null!;
 
         private DarkScrollPanel _pnlDashboard = null!;
-
         private DarkScrollPanel _pnlFans = null!;
-
         private DarkScrollPanel _pnlLighting = null!;
-
+        private DarkScrollPanel _pnlDisplay = null!;
+        private DarkScrollPanel _pnlBios = null!;
+        private DarkScrollPanel _pnlGameSync = null!;
         private DarkScrollPanel _pnlSystem = null!;
-
         private DarkScrollPanel _pnlSettings = null!;
 
-
+        // Navigation and panel aliases
+        private DarkScrollPanel _pnlDash => _pnlDashboard;
+        private DarkScrollPanel _pnlRgb => _pnlLighting;
 
         private PredatorButton _btnNavDashboard = null!;
-
         private PredatorButton _btnNavFans = null!;
-
         private PredatorButton _btnNavLighting = null!;
-
+        private PredatorButton _btnNavDisplay = null!;
+        private PredatorButton _btnNavBios = null!;
+        private PredatorButton _btnNavGameSync = null!;
         private PredatorButton _btnNavSystem = null!;
-
         private PredatorButton _btnNavSettings = null!;
+
+        // Button aliases
+        private PredatorButton _btnNavDash => _btnNavDashboard;
+        private PredatorButton _btnNavRgb => _btnNavLighting;
+
+        private ListView? _lvGameProfiles;
+        private PredatorButton? _btnGameSyncAdd, _btnGameSyncEdit, _btnGameSyncDelete;
 
         private PredatorButton? _activeNavBtn;
 
@@ -1726,11 +1729,12 @@ namespace PredatorControlApp
 
 
 
-            _gameSync = new GameSyncController();
-
-            _gameSync.GameDetected += OnGameDetected;
-
-            _gameSync.GameExited += OnGameExited;
+            if (_gameSync == null)
+            {
+                _gameSync = new GameSyncController();
+                _gameSync.GameDetected += OnGameDetected;
+                _gameSync.GameExited += OnGameExited;
+            }
 
 
 
@@ -1738,9 +1742,11 @@ namespace PredatorControlApp
 
             {
 
-                _switchGameSync.Checked = true;
+                if (_switchGameSync != null) _switchGameSync.Checked = true;
 
-                _lblGameSyncStatus.Text = "Active \u2014 Monitoring";
+                if (_lblGameSyncStatus != null) _lblGameSyncStatus.Text = "Active \u2014 Monitoring";
+            UpdateGameSyncStatusLabel();
+            PopulateGameSyncProfilesList();
 
             }
 
@@ -3498,6 +3504,8 @@ namespace PredatorControlApp
 
         {
 
+            if (SetRefreshRateOverride != null) return SetRefreshRateOverride(hz);
+
             if (displayIndex != 0) return false;
 
             if (hz <= 0) return false;
@@ -3655,16 +3663,14 @@ namespace PredatorControlApp
                 if (!this.Visible) this.Show();
                 if (this.WindowState == FormWindowState.Minimized) this.WindowState = FormWindowState.Normal;
                 this.Activate();
-                SwitchPage(_pnlSystem, _btnNavSystem);
-                _pnlSystem.AutoScrollPosition = new Point(0, 0);
+                SwitchPage(_pnlDisplay, _btnNavDisplay);
             });
             var trayBiosSettings = new ToolStripMenuItem("BIOS & Firmware Settings...", null, (s, e) =>
             {
                 if (!this.Visible) this.Show();
                 if (this.WindowState == FormWindowState.Minimized) this.WindowState = FormWindowState.Normal;
                 this.Activate();
-                SwitchPage(_pnlSystem, _btnNavSystem);
-                if (_cardBios != null) _pnlSystem.ScrollControlIntoView(_cardBios);
+                SwitchPage(_pnlBios, _btnNavBios);
             });
             displayMenu.DropDownItems.AddRange([_trayDisplay60, _trayDisplayMax, new ToolStripSeparator(), _trayLcdOverdrive, new ToolStripSeparator(), trayDisplaySettings, trayBiosSettings]);
 
@@ -3797,55 +3803,55 @@ namespace PredatorControlApp
 
 
         private void SwitchPage(DarkScrollPanel targetPage, PredatorButton targetBtn)
-
         {
-
             if (_pnlDashboard != null) _pnlDashboard.Visible = false;
-
             if (_pnlFans != null) _pnlFans.Visible = false;
-
             if (_pnlLighting != null) _pnlLighting.Visible = false;
-
+            if (_pnlDisplay != null) _pnlDisplay.Visible = false;
+            if (_pnlBios != null) _pnlBios.Visible = false;
+            if (_pnlGameSync != null) _pnlGameSync.Visible = false;
             if (_pnlSystem != null) _pnlSystem.Visible = false;
-
             if (_pnlSettings != null) _pnlSettings.Visible = false;
 
-
-
             targetPage.Visible = true;
-
             targetPage.BringToFront();
 
-
-
             if (_btnNavDashboard != null) _btnNavDashboard.IsActive = false;
-
             if (_btnNavFans != null) _btnNavFans.IsActive = false;
-
             if (_btnNavLighting != null) _btnNavLighting.IsActive = false;
-
+            if (_btnNavDisplay != null) _btnNavDisplay.IsActive = false;
+            if (_btnNavBios != null) _btnNavBios.IsActive = false;
+            if (_btnNavGameSync != null) _btnNavGameSync.IsActive = false;
             if (_btnNavSystem != null) _btnNavSystem.IsActive = false;
-
             if (_btnNavSettings != null) _btnNavSettings.IsActive = false;
 
-
-
             targetBtn.IsActive = true;
-
             _activeNavBtn = targetBtn;
-
             foreach (var r in _shortcutRows) { if (r.IsRecording) StopShortcutRecording(r); }
 
 
 
             if (_pnlCalibrationOverlay != null && _pnlCalibrationOverlay.Visible)
-
             {
-
                 _pnlCalibrationOverlay.BringToFront();
-
             }
+        }
 
+        private void SelectNavButton(PredatorButton targetBtn, DarkScrollPanel targetPage)
+        {
+            SwitchPage(targetPage, targetBtn);
+        }
+
+        private void SelectNavButton(PredatorButton targetBtn)
+        {
+            if (targetBtn == _btnNavDashboard) SwitchPage(_pnlDashboard, _btnNavDashboard);
+            else if (targetBtn == _btnNavFans) SwitchPage(_pnlFans, _btnNavFans);
+            else if (targetBtn == _btnNavLighting) SwitchPage(_pnlLighting, _btnNavLighting);
+            else if (targetBtn == _btnNavDisplay) SwitchPage(_pnlDisplay, _btnNavDisplay);
+            else if (targetBtn == _btnNavBios) SwitchPage(_pnlBios, _btnNavBios);
+            else if (targetBtn == _btnNavGameSync) SwitchPage(_pnlGameSync, _btnNavGameSync);
+            else if (targetBtn == _btnNavSystem) SwitchPage(_pnlSystem, _btnNavSystem);
+            else if (targetBtn == _btnNavSettings) SwitchPage(_pnlSettings, _btnNavSettings);
         }
 
 
@@ -4326,63 +4332,49 @@ namespace PredatorControlApp
 
 
             int navPad = S(10);
-
             int navBtnW = sidebarW - navPad * 2;
-
-            int navBtnH = S(44);
-
-            int navGap = S(6);
-
-            int y = S(14);
-
-
+            int navBtnH = S(38);
+            int navGap = S(4);
+            int y = S(12);
 
             _btnNavDashboard = CreateNavButton("📊  Dashboard", navPad, y, navBtnW, navBtnH);
-
             _btnNavDashboard.Click += (s, e) => SwitchPage(_pnlDashboard, _btnNavDashboard);
-
             y += navBtnH + navGap;
-
-
 
             _btnNavFans = CreateNavButton("💨  Fans & Cooling", navPad, y, navBtnW, navBtnH);
-
             _btnNavFans.Click += (s, e) => SwitchPage(_pnlFans, _btnNavFans);
-
             y += navBtnH + navGap;
-
-
 
             _btnNavLighting = CreateNavButton("✨  RGB Lighting", navPad, y, navBtnW, navBtnH);
-
             _btnNavLighting.Click += (s, e) => SwitchPage(_pnlLighting, _btnNavLighting);
-
             y += navBtnH + navGap;
 
+            _btnNavDisplay = CreateNavButton("🖥️  Display Settings", navPad, y, navBtnW, navBtnH);
+            _btnNavDisplay.Click += (s, e) => SwitchPage(_pnlDisplay, _btnNavDisplay);
+            y += navBtnH + navGap;
 
+            _btnNavBios = CreateNavButton("🔧  BIOS Settings", navPad, y, navBtnW, navBtnH);
+            _btnNavBios.Click += (s, e) => SwitchPage(_pnlBios, _btnNavBios);
+            y += navBtnH + navGap;
+
+            _btnNavGameSync = CreateNavButton("🎮  Game Sync", navPad, y, navBtnW, navBtnH);
+            _btnNavGameSync.Click += (s, e) => SwitchPage(_pnlGameSync, _btnNavGameSync);
+            y += navBtnH + navGap;
 
             _btnNavSystem = CreateNavButton("⚡  System & Power", navPad, y, navBtnW, navBtnH);
-
             _btnNavSystem.Click += (s, e) => SwitchPage(_pnlSystem, _btnNavSystem);
-
             y += navBtnH + navGap;
 
-
-
             _btnNavSettings = CreateNavButton("⚙️  Settings & Info", navPad, y, navBtnW, navBtnH);
-
             _btnNavSettings.Click += (s, e) => SwitchPage(_pnlSettings, _btnNavSettings);
 
-
-
             _sidebarPanel.Controls.Add(_btnNavDashboard);
-
             _sidebarPanel.Controls.Add(_btnNavFans);
-
             _sidebarPanel.Controls.Add(_btnNavLighting);
-
+            _sidebarPanel.Controls.Add(_btnNavDisplay);
+            _sidebarPanel.Controls.Add(_btnNavBios);
+            _sidebarPanel.Controls.Add(_btnNavGameSync);
             _sidebarPanel.Controls.Add(_btnNavSystem);
-
             _sidebarPanel.Controls.Add(_btnNavSettings);
 
 
@@ -4472,41 +4464,32 @@ namespace PredatorControlApp
 
 
             _pnlDashboard = CreatePagePanel(containerW, containerH);
-
             _pnlFans = CreatePagePanel(containerW, containerH);
-
             _pnlLighting = CreatePagePanel(containerW, containerH);
-
+            _pnlDisplay = CreatePagePanel(containerW, containerH);
+            _pnlBios = CreatePagePanel(containerW, containerH);
+            _pnlGameSync = CreatePagePanel(containerW, containerH);
             _pnlSystem = CreatePagePanel(containerW, containerH);
-
             _pnlSettings = CreatePagePanel(containerW, containerH);
-
-
 
             _contentPanel = _pnlDashboard;
 
-
-
             BuildDashboardPage();
-
             BuildFansPage();
-
             BuildLightingPage();
-
+            BuildDisplayPage();
+            BuildBiosPage();
+            BuildGameSyncPage();
             BuildSystemPage();
-
             BuildSettingsPage();
 
-
-
             _pageContainer.Controls.Add(_pnlDashboard);
-
             _pageContainer.Controls.Add(_pnlFans);
-
             _pageContainer.Controls.Add(_pnlLighting);
-
+            _pageContainer.Controls.Add(_pnlDisplay);
+            _pageContainer.Controls.Add(_pnlBios);
+            _pageContainer.Controls.Add(_pnlGameSync);
             _pageContainer.Controls.Add(_pnlSystem);
-
             _pageContainer.Controls.Add(_pnlSettings);
 
 
@@ -10270,6 +10253,434 @@ namespace PredatorControlApp
 
 
 
+        #region Dedicated Display, BIOS, and Game Sync Pages
+
+        private void BuildDisplayPage()
+        {
+            int pad = S(16);
+            int gap = S(16);
+            int usableW = _pageContainer.Width - pad * 2 - gap - DarkScrollPanel.NativeBarWidth;
+            int cardW = usableW / 2;
+            int col1X = pad;
+            int col2X = pad + cardW + gap;
+            int cPad = S(14);
+            int cInnerW = cardW - cPad * 2;
+
+            // ==========================================
+            // CARD 1: GRAPHICS WORKING MODE (ADVANCED OPTIMUS)
+            // ==========================================
+            var cardGpu = MakeCard(_pnlDisplay, "GRAPHICS WORKING MODE (ADVANCED OPTIMUS)", col1X, pad, cardW, S(300));
+            MakeLabel(cardGpu, "Display routing, MUX switch & discrete GPU architecture control", cPad, S(40), FontHeaderLight, SubHeaderColor);
+
+            _lblGpuStatusSys = MakeLabel(cardGpu, "Status: Detecting GPU display routing...", cPad, S(68), FontSectionHeader, ThemeManager.Accent);
+            UpdateGpuModeStatusLabel();
+
+            int muxBtnW = (cInnerW - 2 * S(8)) / 3;
+            int btnH = S(36);
+            _btnGpuAuto = MakeButton(cardGpu, "🔄  Automatic", cPad, S(104), muxBtnW, btnH);
+            _btnGpuHybrid = MakeButton(cardGpu, "🔋  Integrated Only", cPad + muxBtnW + S(8), S(104), muxBtnW, btnH);
+            _btnGpuDiscrete = MakeButton(cardGpu, "⚡  Dedicated Only", cPad + 2 * (muxBtnW + S(8)), S(104), muxBtnW, btnH);
+
+            var curGpuMode = _wmi.GetGpuMode() ?? GpuMode.Auto;
+            if (curGpuMode == GpuMode.dGpuOnly) HighlightBtn(_btnGpuDiscrete, ref _activeGpuModeBtn);
+            else if (curGpuMode == GpuMode.iGpuOnly) HighlightBtn(_btnGpuHybrid, ref _activeGpuModeBtn);
+            else HighlightBtn(_btnGpuAuto, ref _activeGpuModeBtn);
+
+            _btnGpuAuto.Click += (s, e) => ApplyGpuMode(GpuMode.Auto, _btnGpuAuto);
+            _btnGpuHybrid.Click += (s, e) => ApplyGpuMode(GpuMode.iGpuOnly, _btnGpuHybrid);
+            _btnGpuDiscrete.Click += (s, e) => ApplyGpuMode(GpuMode.dGpuOnly, _btnGpuDiscrete);
+
+            MakeLabel(cardGpu, "Dynamic Display Switch (DDS) applies instantly; hardware MUX switch changes require a system restart.", cPad, S(164), FontHeaderLight, SubHeaderColor);
+
+            // ==========================================
+            // CARD 2: DISPLAY REFRESH RATE & OVERDRIVE
+            // ==========================================
+            var cardRate = MakeCard(_pnlDisplay, "DISPLAY REFRESH RATE & OVERDRIVE", col2X, pad, cardW, S(300));
+            MakeLabel(cardRate, "Panel refresh frequency and liquid crystal response acceleration", cPad, S(40), FontHeaderLight, SubHeaderColor);
+
+            int dispBtnW = (cInnerW - S(8)) / 2;
+            _btnDisp60 = MakeButton(cardRate, "60 Hz", cPad, S(74), dispBtnW, S(36));
+            _btnDispMax = MakeButton(cardRate, $"{_maxHz} Hz (Maximum)", cPad + dispBtnW + S(8), S(74), dispBtnW, S(36));
+            _btnDisp60.Click += (s, e) => ApplyDisplayMode(60, _btnDisp60);
+            _btnDispMax.Click += (s, e) => ApplyDisplayMode(_maxHz, _btnDispMax);
+
+            // LCD Overdrive Switch
+            _lblOdStatusSys = MakeLabel(cardRate, "LCD Overdrive (Fast 3ms Response Time)", cPad, S(138), FontBody, ThemeManager.TextPrimary);
+            _swOdSys = new PredatorSwitch { Location = new Point(cardW - cPad - S(48), S(134)), Size = new Size(S(48), S(26)) };
+            _swOdSys.Checked = _switchLcdOverdrive.Checked;
+            _swOdSys.CheckedChanged += (s, e) => ApplyLcdOverdrive(_swOdSys.Checked);
+            cardRate.Controls.Add(_swOdSys);
+
+            MakeLabel(cardRate, "High refresh rates provide smoother gameplay animations and lower display input latency.", cPad, S(184), FontHeaderLight, SubHeaderColor);
+
+            _pnlDisplay.AutoScrollMinSize = new Size(0, S(420));
+        }
+
+        private void BuildBiosPage()
+        {
+            int pad = S(16);
+            int gap = S(16);
+            int usableW = _pageContainer.Width - pad * 2 - DarkScrollPanel.NativeBarWidth;
+            int cPad = S(14);
+            int cInnerW = usableW - cPad * 2;
+
+            // ==========================================
+            // CARD 1: DYNAMIC BIOS & HARDWARE ARCHITECTURE & SAFETY
+            // ==========================================
+            var cardBiosHeader = MakeCard(_pnlBios, "ACER BIOS & HARDWARE ARCHITECTURE", pad, pad, usableW, S(136));
+
+            string badgeText = HardwareIdentity.GetBiosHardwareBadge();
+            MakeLabel(cardBiosHeader, badgeText, cPad, S(40), FontSectionHeader, ThemeManager.Accent);
+
+            // Safety Interlocks CheckBoxes
+            _chkEnableBiosModsSys = new CheckBox
+            {
+                Text = "Enable BIOS Modifications",
+                Font = FontBodyBold,
+                ForeColor = ThemeManager.TextPrimary,
+                Location = new Point(cPad, S(74)),
+                AutoSize = true,
+                Checked = Bios.BiosManager.Instance.ModificationsEnabled
+            };
+            cardBiosHeader.Controls.Add(_chkEnableBiosModsSys);
+
+            _chkAllowDangerousBiosSys = new CheckBox
+            {
+                Text = "Allow Dangerous Settings",
+                Font = FontBody,
+                ForeColor = ThemeManager.RedStatus,
+                Location = new Point(cPad + S(260), S(74)),
+                AutoSize = true,
+                Enabled = _chkEnableBiosModsSys.Checked,
+                Checked = Bios.BiosManager.Instance.DangerousAllowed
+            };
+            cardBiosHeader.Controls.Add(_chkAllowDangerousBiosSys);
+
+            _chkEnableBiosModsSys.CheckedChanged += (s, e) =>
+            {
+                Bios.BiosManager.Instance.ModificationsEnabled = _chkEnableBiosModsSys.Checked;
+                _chkAllowDangerousBiosSys.Enabled = _chkEnableBiosModsSys.Checked;
+                if (!_chkEnableBiosModsSys.Checked)
+                {
+                    _chkAllowDangerousBiosSys.Checked = false;
+                    Bios.BiosManager.Instance.DangerousAllowed = false;
+                }
+                PopulateEmbeddedBiosRows();
+            };
+
+            _chkAllowDangerousBiosSys.CheckedChanged += (s, e) =>
+            {
+                Bios.BiosManager.Instance.DangerousAllowed = _chkAllowDangerousBiosSys.Checked;
+                PopulateEmbeddedBiosRows();
+            };
+
+            MakeLabel(cardBiosHeader, "Modifications unlock low-level ACPI/WMI hardware registers; dangerous settings can affect system stability.", cPad, S(106), FontHeaderLight, SubHeaderColor);
+
+            // ==========================================
+            // CARD 2: BIOS CONFIGURATION SETTINGS
+            // ==========================================
+            int cardSettingsTop = pad + S(136) + gap;
+            int cardSettingsH = S(560);
+            _cardBios = MakeCard(_pnlBios, "FIRMWARE CONFIGURATION SETTINGS", pad, cardSettingsTop, usableW, cardSettingsH);
+
+            // Category Selector Tabs/Buttons
+            int catBtnW = S(160);
+            int catBtnH = S(32);
+            _btnBiosCatSys = MakeButton(_cardBios, "System", cPad, S(40), catBtnW, catBtnH);
+            _btnBiosCatPower = MakeButton(_cardBios, "Power & Battery", cPad + catBtnW + S(8), S(40), catBtnW, catBtnH);
+            _btnBiosCatBoot = MakeButton(_cardBios, "Boot & Setup", cPad + 2 * (catBtnW + S(8)), S(40), catBtnW, catBtnH);
+
+            _btnBiosCatSys.IsActive = true;
+            _btnBiosCatSys.Click += (s, e) => SwitchBiosCategory(Bios.BiosCategory.System, _btnBiosCatSys);
+            _btnBiosCatPower.Click += (s, e) => SwitchBiosCategory(Bios.BiosCategory.PowerBattery, _btnBiosCatPower);
+            _btnBiosCatBoot.Click += (s, e) => SwitchBiosCategory(Bios.BiosCategory.BootSetup, _btnBiosCatBoot);
+
+            // Container Panel for setting rows
+            int containerY = S(82);
+            int containerH = cardSettingsH - containerY - S(56);
+            _pnlBiosItemsContainerSys = new Panel
+            {
+                Location = new Point(cPad, containerY),
+                Size = new Size(cInnerW, containerH),
+                BackColor = Color.Transparent,
+                AutoScroll = true
+            };
+            _cardBios.Controls.Add(_pnlBiosItemsContainerSys);
+
+            // Bottom action button: Restore Defaults (NO Supervisor Password button!)
+            var btnBiosRestore = MakeButton(_cardBios, "↺  Restore Factory Defaults", cPad, cardSettingsH - S(44), S(220), S(32));
+            btnBiosRestore.Click += (s, e) => RestoreBiosDefaults();
+
+            PopulateEmbeddedBiosRows();
+
+            _pnlBios.AutoScrollMinSize = new Size(0, cardSettingsTop + cardSettingsH + pad);
+        }
+
+        private void BuildGameSyncPage()
+        {
+            if (_gameSync == null)
+            {
+                _gameSync = new GameSyncController();
+                _gameSync.GameDetected += OnGameDetected;
+                _gameSync.GameExited += OnGameExited;
+            }
+            int pad = S(16);
+            int gap = S(16);
+            int usableW = _pageContainer.Width - pad * 2 - DarkScrollPanel.NativeBarWidth;
+            int cPad = S(14);
+
+            // ==========================================
+            // CARD 1: GAME SYNC ENGINE STATUS & ACTIVE DETECTION
+            // ==========================================
+            var cardStatus = MakeCard(_pnlGameSync, "GAME SYNC ENGINE & AUTOMATION", pad, pad, usableW, S(120));
+            MakeLabel(cardStatus, "Automatically triggers custom Acer power modes, fan curves, refresh rates & RGB keyboard profiles when gaming.", cPad, S(40), FontHeaderLight, SubHeaderColor);
+
+            _lblGameSyncStatus = MakeLabel(cardStatus, GetGameSyncStatusText(), cPad, S(74), FontSectionHeader, _gameSync.IsEnabled ? ThemeManager.SuccessGreen : SubHeaderColor);
+
+            _switchGameSync = new PredatorToggle
+            {
+                Location = new Point(usableW - cPad - S(52), S(70)),
+                Size = new Size(S(48), S(24)),
+                Checked = _gameSync.IsEnabled
+            };
+            _switchGameSync.CheckedChanged += (s, e) =>
+            {
+                _gameSync.IsEnabled = _switchGameSync.Checked;
+                UpdateGameSyncStatusLabel();
+            };
+            cardStatus.Controls.Add(_switchGameSync);
+
+            // ==========================================
+            // CARD 2: CONFIGURED GAME PROFILES
+            // ==========================================
+            int cardProfilesTop = pad + S(120) + gap;
+            int cardProfilesH = S(580);
+            var cardProfiles = MakeCard(_pnlGameSync, "CONFIGURED GAME PROFILES", pad, cardProfilesTop, usableW, cardProfilesH);
+
+            // Action buttons toolbar
+            int btnH = S(34);
+            int btnY = S(40);
+            int btnW = S(140);
+            int btnGap = S(8);
+
+            _btnGameSyncAdd = MakeButton(cardProfiles, "➕  Add Profile", cPad, btnY, btnW, btnH);
+            _btnGameSyncAdd.Click += (s, e) => OnAddGameSyncProfile();
+
+            _btnGameSyncEdit = MakeButton(cardProfiles, "✏️  Edit Profile", cPad + btnW + btnGap, btnY, btnW, btnH);
+            _btnGameSyncEdit.Click += (s, e) => OnEditGameSyncProfile();
+
+            _btnGameSyncDelete = MakeButton(cardProfiles, "🗑️  Delete Profile", cPad + (btnW + btnGap) * 2, btnY, btnW, btnH);
+            _btnGameSyncDelete.Click += (s, e) => OnDeleteGameSyncProfile();
+
+            _btnConfigureGames = MakeButton(cardProfiles, "🎮  Advanced Editor", cPad + (btnW + btnGap) * 3, btnY, S(160), btnH);
+            _btnConfigureGames.Click += (s, e) =>
+            {
+                using var form = new GameSyncForm(_gameSync, _maxHz);
+                if (!this.Visible || !this.IsHandleCreated || this.WindowState == FormWindowState.Minimized)
+                    form.ShowDialog();
+                else
+                    try { form.ShowDialog(this); } catch { form.ShowDialog(); }
+                PopulateGameSyncProfilesList();
+            };
+
+            // Profiles ListView
+            int listY = S(86);
+            int listW = usableW - cPad * 2;
+            int listH = cardProfilesH - listY - cPad;
+
+            _lvGameProfiles = new ListView
+            {
+                Location = new Point(cPad, listY),
+                Size = new Size(listW, listH),
+                View = View.Details,
+                FullRowSelect = true,
+                MultiSelect = false,
+                GridLines = true,
+                HeaderStyle = ColumnHeaderStyle.Nonclickable,
+                BackColor = ThemeManager.CardBg,
+                ForeColor = ThemeManager.TextPrimary,
+                Font = FontBody,
+                BorderStyle = BorderStyle.FixedSingle
+            };
+
+            _lvGameProfiles.Columns.Add("Game / App Name", S(220));
+            _lvGameProfiles.Columns.Add("Executable", S(160));
+            _lvGameProfiles.Columns.Add("Power Mode", S(120));
+            _lvGameProfiles.Columns.Add("Fan Mode", S(110));
+            _lvGameProfiles.Columns.Add("Refresh Rate", S(110));
+            _lvGameProfiles.Columns.Add("RGB Profile", S(130));
+            _lvGameProfiles.DoubleClick += (s, e) => OnEditGameSyncProfile();
+
+            cardProfiles.Controls.Add(_lvGameProfiles);
+
+            PopulateGameSyncProfilesList();
+
+            _pnlGameSync.AutoScrollMinSize = new Size(0, cardProfilesTop + cardProfilesH + pad);
+        }
+
+        private string GetGameSyncStatusText()
+        {
+            if (_gameSync == null || !_gameSync.IsEnabled) return "⚪ Game Sync Disabled";
+            if (!string.IsNullOrEmpty(_gameSync.ActiveGameExe))
+                return $"🟢 Active Game Detected: {_gameSync.ActiveGameExe}";
+            return "🟢 Game Sync Active (Monitoring Foreground Games)";
+        }
+
+        private void UpdateGameSyncStatusLabel()
+        {
+            if (_lblGameSyncStatus == null) return;
+            if (InvokeRequired)
+            {
+                SafeBeginInvoke(UpdateGameSyncStatusLabel);
+                return;
+            }
+            _lblGameSyncStatus.Text = GetGameSyncStatusText();
+            _lblGameSyncStatus.ForeColor = (_gameSync != null && _gameSync.IsEnabled) ? ThemeManager.SuccessGreen : SubHeaderColor;
+        }
+
+        private void PopulateGameSyncProfilesList()
+        {
+            if (_lvGameProfiles == null || _gameSync == null) return;
+            if (InvokeRequired)
+            {
+                SafeBeginInvoke(PopulateGameSyncProfilesList);
+                return;
+            }
+
+            _lvGameProfiles.BeginUpdate();
+            _lvGameProfiles.Items.Clear();
+
+            foreach (var p in _gameSync.Profiles)
+            {
+                string pwrName = p.PowerMode switch
+                {
+                    0x00 => "Quiet",
+                    0x01 => "Balanced",
+                    0x04 => "Performance",
+                    0x05 => "Turbo",
+                    0x06 => "Eco",
+                    _ => "Balanced"
+                };
+                string fanName = p.FanMode switch
+                {
+                    0x01 => "Auto",
+                    0x02 => "Max",
+                    0x03 => "Custom",
+                    _ => "Auto"
+                };
+                string hzName = p.RefreshRate > 0 ? $"{p.RefreshRate} Hz" : "Don't Change";
+                string rgbName = p.RgbMode switch
+                {
+                    1 => "Static",
+                    2 => "Breathing",
+                    3 => "Neon",
+                    4 => "Wave",
+                    5 => "Shifting",
+                    6 => "Zoom",
+                    7 => "Meteor",
+                    _ => "Don't Change"
+                };
+
+                var item = new ListViewItem(string.IsNullOrEmpty(p.DisplayName) ? p.ExecutableName : p.DisplayName);
+                item.SubItems.Add(p.ExecutableName);
+                item.SubItems.Add(pwrName);
+                item.SubItems.Add(fanName);
+                item.SubItems.Add(hzName);
+                item.SubItems.Add(rgbName);
+                item.Tag = p;
+
+                if (string.Equals(_gameSync.ActiveGameExe, p.ExecutableName, StringComparison.OrdinalIgnoreCase))
+                {
+                    item.BackColor = Color.FromArgb(0, 60, 40);
+                    item.ForeColor = ThemeManager.Accent;
+                }
+
+                _lvGameProfiles.Items.Add(item);
+            }
+
+            _lvGameProfiles.EndUpdate();
+        }
+
+        private void OnAddGameSyncProfile()
+        {
+            try
+            {
+                using var ofd = new OpenFileDialog
+                {
+                    Title = "Select Game Executable",
+                    Filter = "Executables (*.exe)|*.exe|All Files (*.*)|*.*",
+                    CheckFileExists = true
+                };
+                if (ofd.ShowDialog(this) == DialogResult.OK)
+                {
+                    string exeName = System.IO.Path.GetFileName(ofd.FileName);
+                    string displayName = System.IO.Path.GetFileNameWithoutExtension(ofd.FileName);
+
+                    if (_gameSync.Profiles.Any(p => p.ExecutableName.Equals(exeName, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        MessageBox.Show(this, $"Profile for '{exeName}' already exists.", "Game Sync", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        return;
+                    }
+
+                    var newProfile = new GameProfile
+                    {
+                        ExecutableName = exeName,
+                        ExecutablePath = ofd.FileName,
+                        DisplayName = displayName,
+                        PowerMode = 0x01,
+                        FanMode = 0x01,
+                        RefreshRate = _maxHz,
+                        RgbMode = -1
+                    };
+                    _gameSync.AddProfile(newProfile);
+                    PopulateGameSyncProfilesList();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"Failed to add game profile: {ex.Message}", "Game Sync Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void OnEditGameSyncProfile()
+        {
+            if (_lvGameProfiles == null || _lvGameProfiles.SelectedItems.Count == 0)
+            {
+                MessageBox.Show(this, "Please select a game profile to edit.", "Edit Game Profile", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using var form = new GameSyncForm(_gameSync, _maxHz);
+            if (!this.Visible || !this.IsHandleCreated || this.WindowState == FormWindowState.Minimized)
+                form.ShowDialog();
+            else
+                try { form.ShowDialog(this); } catch { form.ShowDialog(); }
+            PopulateGameSyncProfilesList();
+        }
+
+        private void OnDeleteGameSyncProfile()
+        {
+            if (_lvGameProfiles == null || _lvGameProfiles.SelectedItems.Count == 0)
+            {
+                MessageBox.Show(this, "Please select a game profile to delete.", "Delete Game Profile", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var selectedItem = _lvGameProfiles.SelectedItems[0];
+            if (selectedItem.Tag is GameProfile profile)
+            {
+                var res = MessageBox.Show(this, $"Are you sure you want to delete profile for '{profile.DisplayName}' ({profile.ExecutableName})?",
+                    "Confirm Delete Profile", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                if (res == DialogResult.Yes)
+                {
+                    _gameSync.RemoveProfile(profile.ExecutableName);
+                    PopulateGameSyncProfilesList();
+                }
+            }
+        }
+
+        #endregion
+
         private void BuildSystemPage()
         {
             int pad = S(16);
@@ -10282,108 +10693,9 @@ namespace PredatorControlApp
             int cInnerW = cardW - cPad * 2;
 
             // ==========================================
-            // COLUMN 1, CARD 1: DISPLAY & GPU SWITCHING
+            // COLUMN 1: AUTOMATIC POWER PROFILES & MODE KEY
             // ==========================================
-            var cardDisplayGpu = MakeCard(_pnlSystem, "DISPLAY & GPU SWITCHING (ADVANCED OPTIMUS)", col1X, pad, cardW, S(390));
-            MakeLabel(cardDisplayGpu, "Display routing, dynamic refresh rate & hardware BlueLight Shield™", cPad, S(40), FontHeaderLight, SubHeaderColor);
-
-            // Real-time DDS / MUX status label
-            _lblGpuStatusSys = MakeLabel(cardDisplayGpu, "Status: Detecting GPU display routing...", cPad, S(66), FontSectionHeader, ThemeManager.Accent);
-            UpdateGpuModeStatusLabel();
-
-            int muxBtnW = (cInnerW - 2 * S(8)) / 3;
-            int btnH = S(34);
-            _btnGpuAuto = MakeButton(cardDisplayGpu, "🔄  Automatic", cPad, S(92), muxBtnW, btnH);
-            _btnGpuHybrid = MakeButton(cardDisplayGpu, "🔋  Integrated", cPad + muxBtnW + S(8), S(92), muxBtnW, btnH);
-            _btnGpuDiscrete = MakeButton(cardDisplayGpu, "⚡  Dedicated", cPad + 2 * (muxBtnW + S(8)), S(92), muxBtnW, btnH);
-
-            var curGpuMode = _wmi.GetGpuMode() ?? GpuMode.Auto;
-            if (curGpuMode == GpuMode.dGpuOnly) HighlightBtn(_btnGpuDiscrete, ref _activeGpuModeBtn);
-            else if (curGpuMode == GpuMode.iGpuOnly) HighlightBtn(_btnGpuHybrid, ref _activeGpuModeBtn);
-            else HighlightBtn(_btnGpuAuto, ref _activeGpuModeBtn);
-
-            _btnGpuAuto.Click += (s, e) => ApplyGpuMode(GpuMode.Auto, _btnGpuAuto);
-            _btnGpuHybrid.Click += (s, e) => ApplyGpuMode(GpuMode.iGpuOnly, _btnGpuHybrid);
-            _btnGpuDiscrete.Click += (s, e) => ApplyGpuMode(GpuMode.dGpuOnly, _btnGpuDiscrete);
-
-            // Separator / Refresh Rate Section
-            MakeLabel(cardDisplayGpu, "DISPLAY REFRESH RATE & OVERDRIVE:", cPad, S(138), FontSectionHeader, SubHeaderColor);
-
-            int dispBtnW = S(68);
-            _btnDisp60 = MakeButton(cardDisplayGpu, "60 Hz", cPad, S(162), dispBtnW, S(30));
-            _btnDispMax = MakeButton(cardDisplayGpu, $"{_maxHz} Hz", cPad + dispBtnW + S(6), S(162), dispBtnW, S(30));
-            _btnDisp60.Click += (s, e) => ApplyDisplayMode(60, _btnDisp60);
-            _btnDispMax.Click += (s, e) => ApplyDisplayMode(_maxHz, _btnDispMax);
-
-            int cboRateX = cPad + dispBtnW * 2 + S(12);
-            int btnApplyRateW = S(68);
-            int cboRateW = cInnerW - (dispBtnW * 2 + S(12) + btnApplyRateW + S(6));
-
-            _cboRefreshRateSys = new PredatorDropDown { Location = new Point(cboRateX, S(162)), Size = new Size(cboRateW, S(30)) };
-            var supportedRates = Display.DisplayManager.Instance.GetSupportedRefreshRates();
-            foreach (var r in supportedRates) _cboRefreshRateSys.Items.Add($"{r} Hz");
-            int curRateIdx = Array.IndexOf(supportedRates, Display.DisplayManager.Instance.CurrentRefreshRate);
-            if (curRateIdx >= 0) _cboRefreshRateSys.SelectedIndex = curRateIdx;
-            else if (_cboRefreshRateSys.Items.Count > 0) _cboRefreshRateSys.SelectedIndex = 0;
-            cardDisplayGpu.Controls.Add(_cboRefreshRateSys);
-
-            _btnApplyRefreshSys = MakeButton(cardDisplayGpu, "Apply", cboRateX + cboRateW + S(6), S(162), btnApplyRateW, S(30));
-            _btnApplyRefreshSys.Click += (s, e) =>
-            {
-                string sel = _cboRefreshRateSys.SelectedText;
-                if (!string.IsNullOrEmpty(sel))
-                {
-                    var m = System.Text.RegularExpressions.Regex.Match(sel, @"\d+");
-                    if (m.Success && int.TryParse(m.Value, out int targetHz) && targetHz >= 30)
-                    {
-                        ApplyDisplayMode(targetHz, null);
-                    }
-                }
-            };
-
-            // LCD Overdrive Switch
-            _lblOdStatusSys = MakeLabel(cardDisplayGpu, "LCD Overdrive (Fast 3ms Response Time)", cPad, S(208), FontBody, ThemeManager.TextPrimary);
-            _swOdSys = new PredatorSwitch { Location = new Point(cardW - cPad - S(48), S(204)), Size = new Size(S(48), S(26)) };
-            _swOdSys.Checked = _switchLcdOverdrive.Checked;
-            _swOdSys.CheckedChanged += (s, e) => ApplyLcdOverdrive(_swOdSys.Checked);
-            cardDisplayGpu.Controls.Add(_swOdSys);
-
-            // BlueLight Shield Control
-            _lblBlueLightSys = MakeLabel(cardDisplayGpu, "Acer BlueLight Shield™: Off (Natural Colors - 0% Reduction)", cPad, S(246), FontSectionHeader, SubHeaderColor);
-            _sliderBlueLightSys = new TrackBar
-            {
-                Location = new Point(cPad, S(272)),
-                Size = new Size(cInnerW - S(80), S(34)),
-                Minimum = 0,
-                Maximum = 4,
-                Value = Math.Clamp(Display.DisplayManager.Instance.BlueLightMode, 0, 4),
-                TickStyle = TickStyle.BottomRight,
-                BackColor = ThemeManager.CardBg
-            };
-            cardDisplayGpu.Controls.Add(_sliderBlueLightSys);
-
-            var btnResetBlueLight = MakeButton(cardDisplayGpu, "Reset", cPad + cInnerW - S(74), S(272), S(74), S(28));
-            btnResetBlueLight.Click += (s, e) =>
-            {
-                _sliderBlueLightSys.Value = 0;
-                Display.DisplayManager.Instance.SetBlueLightShield(0);
-                UpdateBlueLightShieldLabel(0);
-            };
-
-            _sliderBlueLightSys.Scroll += (s, e) =>
-            {
-                int val = _sliderBlueLightSys.Value;
-                Display.DisplayManager.Instance.SetBlueLightShield(val);
-                UpdateBlueLightShieldLabel(val);
-            };
-            UpdateBlueLightShieldLabel(_sliderBlueLightSys.Value);
-
-            MakeLabel(cardDisplayGpu, "Dynamic Display Switch (DDS) applies instantly; MUX changes require restart.", cPad, S(322), FontHeaderLight, SubHeaderColor);
-
-            // ==========================================
-            // COLUMN 1, CARD 2: AUTOMATIC POWER PROFILES
-            // ==========================================
-            var cardPowerAuto = MakeCard(_pnlSystem, "AUTOMATIC POWER PROFILES & MODE KEY", col1X, pad + S(402), cardW, S(250));
+            var cardPowerAuto = MakeCard(_pnlSystem, "AUTOMATIC POWER PROFILES & MODE KEY", col1X, pad, cardW, S(250));
             int pDropW = (cInnerW - S(10)) / 2;
             _lblAcProfileHdr = MakeLabel(cardPowerAuto, "ON AC POWER:", cPad, S(44), FontSectionHeader, SubHeaderColor);
             _lblBatteryProfileHdr = MakeLabel(cardPowerAuto, "ON BATTERY:", cPad + pDropW + S(10), S(44), FontSectionHeader, SubHeaderColor);
@@ -10450,124 +10762,9 @@ namespace PredatorControlApp
             MakeLabel(cardPowerAuto, "Profiles switch automatically on AC/Battery. Mode key cycles or toggles Turbo.", cPad, S(180), FontHeaderLight, SubHeaderColor);
 
             // ==========================================
-            // COLUMN 1, CARD 3: GAME SYNC PROFILES
+            // COLUMN 2: USB CHARGING & BATTERY MAINTENANCE
             // ==========================================
-            var cardGame = MakeCard(_pnlSystem, "GAME SYNC PROFILES", col1X, pad + S(664), cardW, S(150));
-            _lblGameSyncStatus = MakeLabel(cardGame, "Disabled", cPad, S(48), FontBody, SubHeaderColor);
-            _switchGameSync = new PredatorToggle { Location = new Point(cardW - cPad - S(48), S(44)), Size = new Size(S(48), S(24)) };
-            _switchGameSync.CheckedChanged += (s, e) =>
-            {
-                _gameSync.IsEnabled = _switchGameSync.Checked;
-                _lblGameSyncStatus.Text = _switchGameSync.Checked ? "Active (Monitoring)" : "Disabled";
-            };
-            cardGame.Controls.Add(_switchGameSync);
-
-            _btnConfigureGames = MakeButton(cardGame, "🎮  Configure Game Profiles", cPad, S(84), cInnerW, S(34));
-            _btnConfigureGames.Click += (s, e) =>
-            {
-                using var form = new GameSyncForm(_gameSync, _maxHz);
-                if (!this.Visible || !this.IsHandleCreated || this.WindowState == FormWindowState.Minimized)
-                {
-                    form.ShowDialog();
-                }
-                else
-                {
-                    try { form.ShowDialog(this); } catch { form.ShowDialog(); }
-                }
-            };
-
-            // ==========================================
-            // COLUMN 2, CARD 1: ACER BIOS & FIRMWARE SETTINGS
-            // ==========================================
-            _cardBios = MakeCard(_pnlSystem, "ACER BIOS & FIRMWARE SETTINGS", col2X, pad, cardW, S(520));
-            
-            string modelText = "Hardware: " + Bios.BiosManager.Instance.ModelName + " | " + (Bios.BiosManager.Instance.SupportMode switch
-            {
-                Bios.BiosSupportMode.WmiModern2025 => "2025+ Native WMI",
-                Bios.BiosSupportMode.AcpiWmiFallback2020 => "ACPI-WMI Mapping",
-                Bios.BiosSupportMode.UefiNvramDirect => "InsydeH2O UEFI",
-                _ => "Universal Direct"
-            });
-            MakeLabel(_cardBios, modelText, cPad, S(40), FontSectionHeader, ThemeManager.Accent);
-
-            // Safety Interlocks CheckBoxes
-            _chkEnableBiosModsSys = new CheckBox
-            {
-                Text = "Enable BIOS Modifications",
-                Font = FontBodyBold,
-                ForeColor = ThemeManager.TextPrimary,
-                Location = new Point(cPad, S(66)),
-                AutoSize = true,
-                Checked = Bios.BiosManager.Instance.ModificationsEnabled
-            };
-            _cardBios.Controls.Add(_chkEnableBiosModsSys);
-
-            _chkAllowDangerousBiosSys = new CheckBox
-            {
-                Text = "Allow Dangerous Settings",
-                Font = FontBody,
-                ForeColor = ThemeManager.RedStatus,
-                Location = new Point(cPad + S(220), S(66)),
-                AutoSize = true,
-                Enabled = _chkEnableBiosModsSys.Checked,
-                Checked = Bios.BiosManager.Instance.DangerousAllowed
-            };
-            _cardBios.Controls.Add(_chkAllowDangerousBiosSys);
-
-            _chkEnableBiosModsSys.CheckedChanged += (s, e) =>
-            {
-                Bios.BiosManager.Instance.ModificationsEnabled = _chkEnableBiosModsSys.Checked;
-                _chkAllowDangerousBiosSys.Enabled = _chkEnableBiosModsSys.Checked;
-                if (!_chkEnableBiosModsSys.Checked)
-                {
-                    _chkAllowDangerousBiosSys.Checked = false;
-                    Bios.BiosManager.Instance.DangerousAllowed = false;
-                }
-                PopulateEmbeddedBiosRows();
-            };
-
-            _chkAllowDangerousBiosSys.CheckedChanged += (s, e) =>
-            {
-                Bios.BiosManager.Instance.DangerousAllowed = _chkAllowDangerousBiosSys.Checked;
-                PopulateEmbeddedBiosRows();
-            };
-
-            // Category Selector Tabs/Buttons
-            int catBtnW = (cInnerW - 2 * S(6)) / 3;
-            int catBtnH = S(30);
-            _btnBiosCatSys = MakeButton(_cardBios, "System", cPad, S(98), catBtnW, catBtnH);
-            _btnBiosCatPower = MakeButton(_cardBios, "Power & Battery", cPad + catBtnW + S(6), S(98), catBtnW, catBtnH);
-            _btnBiosCatBoot = MakeButton(_cardBios, "Boot & Setup", cPad + 2 * (catBtnW + S(6)), S(98), catBtnW, catBtnH);
-
-            _btnBiosCatSys.IsActive = true;
-            _btnBiosCatSys.Click += (s, e) => SwitchBiosCategory(Bios.BiosCategory.System, _btnBiosCatSys);
-            _btnBiosCatPower.Click += (s, e) => SwitchBiosCategory(Bios.BiosCategory.PowerBattery, _btnBiosCatPower);
-            _btnBiosCatBoot.Click += (s, e) => SwitchBiosCategory(Bios.BiosCategory.BootSetup, _btnBiosCatBoot);
-
-            // Container Panel for setting rows
-            _pnlBiosItemsContainerSys = new Panel
-            {
-                Location = new Point(cPad, S(134)),
-                Size = new Size(cInnerW, S(330)),
-                BackColor = Color.Transparent,
-                AutoScroll = true
-            };
-            _cardBios.Controls.Add(_pnlBiosItemsContainerSys);
-
-            // Bottom action buttons: Password and Restore Defaults
-            int actBtnW = (cInnerW - S(8)) / 2;
-            var btnBiosPwd = MakeButton(_cardBios, "🔑 Supervisor Password", cPad, S(474), actBtnW, S(32));
-            btnBiosPwd.Click += (s, e) => PromptBiosPassword();
-
-            var btnBiosRestore = MakeButton(_cardBios, "↺ Restore Defaults", cPad + actBtnW + S(8), S(474), actBtnW, S(32));
-            btnBiosRestore.Click += (s, e) => RestoreBiosDefaults();
-
-            PopulateEmbeddedBiosRows();
-
-            // ==========================================
-            // COLUMN 2, CARD 2: USB CHARGING & BATTERY MAINTENANCE
-            // ==========================================
-            var cardUsb = MakeCard(_pnlSystem, "USB CHARGING & BATTERY MAINTENANCE", col2X, pad + S(532), cardW, S(282));
+            var cardUsb = MakeCard(_pnlSystem, "USB CHARGING & BATTERY MAINTENANCE", col2X, pad, cardW, S(282));
             MakeLabel(cardUsb, "Charge USB Devices While Laptop is Off", cPad, S(44), FontBody, ThemeManager.TextPrimary);
             _switchUsbCharging = new PredatorSwitch { Location = new Point(cardW - cPad - S(48), S(40)), Size = new Size(S(48), S(26)) };
             var curUsb = _wmi.GetUsbCharging();
@@ -10600,7 +10797,7 @@ namespace PredatorControlApp
 
             MakeLabel(cardUsb, "Maintains healthy lithium battery chemistry via hardware threshold limits.", cPad, S(224), FontHeaderLight, SubHeaderColor);
 
-            _pnlSystem.AutoScrollMinSize = new Size(0, S(840));
+            _pnlSystem.AutoScrollMinSize = new Size(0, S(350));
         }
 
         private void BuildSettingsPage()
@@ -10755,18 +10952,16 @@ namespace PredatorControlApp
                     "Detailed diagnostics", MessageBoxButtons.OK, copied ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
             };
 
-            var btnDisplaySettings = MakeButton(cardDiag, "Display & GPU Switch", cPad, S(88), (cInnerW - S(8)) / 2, S(36));
+            var btnDisplaySettings = MakeButton(cardDiag, "Display Settings", cPad, S(88), (cInnerW - S(8)) / 2, S(36));
             btnDisplaySettings.Click += (s, e) =>
             {
-                SwitchPage(_pnlSystem, _btnNavSystem);
-                _pnlSystem.AutoScrollPosition = new Point(0, 0);
+                SwitchPage(_pnlDisplay, _btnNavDisplay);
             };
 
             var btnBiosSettings = MakeButton(cardDiag, "BIOS & Firmware", cPad + (cInnerW + S(8)) / 2, S(88), (cInnerW - S(8)) / 2, S(36));
             btnBiosSettings.Click += (s, e) =>
             {
-                SwitchPage(_pnlSystem, _btnNavSystem);
-                if (_cardBios != null) _pnlSystem.ScrollControlIntoView(_cardBios);
+                SwitchPage(_pnlBios, _btnNavBios);
             };
 
 
@@ -12064,20 +12259,6 @@ namespace PredatorControlApp
             }
         }
 
-        private void UpdateBlueLightShieldLabel(int level)
-        {
-            if (_lblBlueLightSys == null) return;
-            string text = level switch
-            {
-                1 => "Acer BlueLight Shield™: Low (18% Reduction)",
-                2 => "Acer BlueLight Shield™: Medium (36% Reduction)",
-                3 => "Acer BlueLight Shield™: High (45% Reduction)",
-                4 => "Acer BlueLight Shield™: Ultra (54% Reduction - Warm Amber)",
-                _ => "Acer BlueLight Shield™: Off (Natural Colors - 0% Reduction)"
-            };
-            _lblBlueLightSys.Text = text;
-        }
-
         private void SwitchBiosCategory(Bios.BiosCategory cat, PredatorButton activeBtn)
         {
             _currentBiosCategory = cat;
@@ -12186,32 +12367,6 @@ namespace PredatorControlApp
                 }
             }
             _pnlBiosItemsContainerSys.ResumeLayout();
-        }
-
-        private void PromptBiosPassword()
-        {
-            using var form = new Form
-            {
-                Text = "Set BIOS Supervisor Password",
-                Size = new Size(S(420), S(200)),
-                StartPosition = FormStartPosition.CenterParent,
-                FormBorderStyle = FormBorderStyle.FixedDialog,
-                MaximizeBox = false,
-                MinimizeBox = false,
-                BackColor = ThemeManager.FormBg,
-                ForeColor = ThemeManager.TextPrimary
-            };
-            var lbl = new Label { Text = "Enter BIOS Supervisor Password:", Location = new Point(S(20), S(20)), AutoSize = true, Font = FontBody };
-            var txt = new TextBox { Location = new Point(S(20), S(50)), Size = new Size(S(360), S(30)), UseSystemPasswordChar = true };
-            var btnOk = MakeButton(form, "Apply Password", S(120), S(100), S(160), S(32));
-            btnOk.Click += (s, e) =>
-            {
-                Bios.BiosManager.Instance.SetSupervisorPassword(txt.Text);
-                form.DialogResult = DialogResult.OK;
-                form.Close();
-            };
-            form.Controls.AddRange(new Control[] { lbl, txt, btnOk });
-            form.ShowDialog(this);
         }
 
         private void RestoreBiosDefaults()
@@ -14484,7 +14639,9 @@ namespace PredatorControlApp
 
         {
 
-            _lblGameSyncStatus.Text = $"Active \u2014 {profile.DisplayName}";
+            if (_lblGameSyncStatus != null) _lblGameSyncStatus.Text = $"Active \u2014 {profile.DisplayName}";
+            UpdateGameSyncStatusLabel();
+            PopulateGameSyncProfilesList();
 
 
 
@@ -17796,13 +17953,12 @@ namespace PredatorControlApp
             {
 
                 _pnlDashboard?.SetDpiScale(_dpiScale);
-
                 _pnlFans?.SetDpiScale(_dpiScale);
-
                 _pnlLighting?.SetDpiScale(_dpiScale);
-
+                _pnlDisplay?.SetDpiScale(_dpiScale);
+                _pnlBios?.SetDpiScale(_dpiScale);
+                _pnlGameSync?.SetDpiScale(_dpiScale);
                 _pnlSystem?.SetDpiScale(_dpiScale);
-
                 _pnlSettings?.SetDpiScale(_dpiScale);
 
             }

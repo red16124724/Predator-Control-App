@@ -58,8 +58,7 @@ namespace PredatorControlApp.Bios
         private BiosSupportMode _supportMode = BiosSupportMode.Unsupported;
         private string _modelName = "Universal Acer Predator / Nitro";
         private readonly List<BiosSettingItem> _settings = new();
-        private string? _cachedPassword = null;
-
+        
         public bool ModificationsEnabled
         {
             get { lock (_lock) return _modificationsEnabled; }
@@ -95,6 +94,10 @@ namespace PredatorControlApp.Bios
         }
         private bool _dangerousAllowed = false;
 
+        private DeviceBiosInfo _biosInfo = HardwareIdentity.GetDeviceBiosInfo();
+        public DeviceBiosInfo BiosInfo { get { lock (_lock) return _biosInfo; } }
+        public string BiosBadgeText { get { lock (_lock) return _biosInfo.ToBadgeString(); } }
+
         public BiosSupportMode SupportMode { get { lock (_lock) return _supportMode; } }
         public string ModelName { get { lock (_lock) return _modelName; } }
         public IReadOnlyList<BiosSettingItem> Settings
@@ -104,6 +107,11 @@ namespace PredatorControlApp.Bios
 
         public BiosManager()
         {
+            _biosInfo = HardwareIdentity.GetDeviceBiosInfo();
+            if (!string.IsNullOrWhiteSpace(_biosInfo.FullModelName) && _biosInfo.FullModelName != "Unknown System")
+            {
+                _modelName = _biosInfo.FullModelName;
+            }
             ProbeAndLoad();
         }
 
@@ -112,6 +120,11 @@ namespace PredatorControlApp.Bios
             lock (_lock)
             {
                 _settings.Clear();
+                _biosInfo = HardwareIdentity.GetDeviceBiosInfo(refresh: true);
+                if (!string.IsNullOrWhiteSpace(_biosInfo.FullModelName) && _biosInfo.FullModelName != "Unknown System")
+                {
+                    _modelName = _biosInfo.FullModelName;
+                }
 
                 if (PredatorNativeCore.IsNativeCoreAvailable)
                 {
@@ -169,7 +182,7 @@ namespace PredatorControlApp.Bios
                 return BiosCategory.BootSetup;
             if (lower.Contains("power") || lower.Contains("charge") || lower.Contains("battery") || lower.Contains("sleep"))
                 return BiosCategory.PowerBattery;
-            if (lower.Contains("mux") || lower.Contains("overdrive") || lower.Contains("display") || lower.Contains("gpu") || lower.Contains("overclock"))
+            if (lower.Contains("mux") || lower.Contains("overdrive") || lower.Contains("display") || lower.Contains("gpu") )
                 return BiosCategory.DisplayPerformance;
             return BiosCategory.System;
         }
@@ -177,7 +190,12 @@ namespace PredatorControlApp.Bios
         private void LoadFallbackAcerSettings()
         {
             _supportMode = BiosSupportMode.AcpiWmiFallback2020;
-            _modelName = "Acer Predator / Nitro Universal";
+            if (string.IsNullOrWhiteSpace(_modelName) || _modelName == "Universal Acer Predator / Nitro")
+            {
+                _modelName = !string.IsNullOrWhiteSpace(_biosInfo.FullModelName) && _biosInfo.FullModelName != "Unknown System"
+                    ? _biosInfo.FullModelName
+                    : "Acer Predator / Nitro Universal";
+            }
 
             var defaults = new List<BiosSettingItem>
             {
@@ -314,6 +332,7 @@ namespace PredatorControlApp.Bios
                 _cachedPassword = string.IsNullOrWhiteSpace(password) ? null : password;
             }
         }
+        private string? _cachedPassword = null;
 
         public bool ApplySetting(BiosSettingItem item, out string error) => ApplySetting(item, out error, false);
 
@@ -335,7 +354,6 @@ namespace PredatorControlApp.Bios
                 error = "Setting value cannot be empty.";
                 return false;
             }
-            string? password;
             bool dangerousAllowed;
             lock (_lock)
             {
@@ -354,7 +372,6 @@ namespace PredatorControlApp.Bios
                     }
                 }
 
-                password = _cachedPassword;
                 dangerousAllowed = bypassSafetyGates || _dangerousAllowed;
             }
 
@@ -367,17 +384,13 @@ namespace PredatorControlApp.Bios
 
             if (PredatorNativeCore.IsNativeCoreAvailable)
             {
-                int ret = PredatorNativeCore.BiosApplySetting(item.Name, item.PendingValue, password, dangerousAllowed);
+                int ret = PredatorNativeCore.BiosApplySetting(item.Name, item.PendingValue, null, dangerousAllowed);
                 if (ret == 0)
                 {
                     lock (_lock) { item.CurrentValue = item.PendingValue; }
                     return true;
                 }
-                else if (ret == 2)
-                {
-                    error = "Invalid supervisor password required by BIOS.";
-                    return false;
-                }
+
                 else if (ret == 8)
                 {
                     lock (_lock) { item.CurrentValue = item.PendingValue; }
@@ -404,7 +417,6 @@ namespace PredatorControlApp.Bios
         public bool RestoreDefaults(bool userDefaults, out string error)
         {
             error = "";
-            string? password;
             lock (_lock)
             {
                 if (!_modificationsEnabled)
@@ -412,12 +424,11 @@ namespace PredatorControlApp.Bios
                     error = "BIOS modifications are disabled.";
                     return false;
                 }
-                password = _cachedPassword;
             }
 
             if (PredatorNativeCore.IsNativeCoreAvailable)
             {
-                int ret = PredatorNativeCore.BiosRestoreDefaults(password, userDefaults);
+                int ret = PredatorNativeCore.BiosRestoreDefaults(null, userDefaults);
                 if (ret == 0 || ret == 8)
                 {
                     ProbeAndLoad();

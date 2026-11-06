@@ -800,8 +800,316 @@ namespace PredatorControlApp
     }
 
     [SupportedOSPlatform("windows")]
+    public sealed record DeviceBiosInfo
+    {
+        public string Manufacturer { get; init; } = string.Empty;
+        public string Model { get; init; } = string.Empty;
+        public string BiosVendor { get; init; } = string.Empty;
+        public string BiosVersion { get; init; } = string.Empty;
+        public string ReleaseDate { get; init; } = string.Empty;
+        public string SmbiosVersion { get; init; } = string.Empty;
+        public string Architecture { get; init; } = string.Empty;
+        public string CpuName { get; init; } = string.Empty;
+        public string SystemType { get; init; } = string.Empty;
+        public ulong TotalPhysicalMemory { get; init; }
+
+        public string FullModelName
+        {
+            get
+            {
+                string mfg = (Manufacturer ?? string.Empty).Trim();
+                string mdl = (Model ?? string.Empty).Trim();
+
+                if (string.IsNullOrWhiteSpace(mfg))
+                    return string.IsNullOrWhiteSpace(mdl) ? "Unknown System" : mdl;
+                if (string.IsNullOrWhiteSpace(mdl))
+                    return mfg;
+                if (mdl.StartsWith(mfg, StringComparison.OrdinalIgnoreCase))
+                    return mdl;
+
+                return $"{mfg} {mdl}";
+            }
+        }
+
+        public string ToBadgeString(bool includeModelPrefix = false)
+        {
+            string modelPart = FullModelName;
+            string biosVer = !string.IsNullOrWhiteSpace(BiosVersion) ? BiosVersion : "Unknown";
+            string relDate = !string.IsNullOrWhiteSpace(ReleaseDate) ? $" ({ReleaseDate})" : "";
+            string smbiosPart = !string.IsNullOrWhiteSpace(SmbiosVersion)
+                ? $" | SMBIOS v{SmbiosVersion.TrimStart('v', 'V')}"
+                : "";
+            string archPart = !string.IsNullOrWhiteSpace(Architecture) ? $" | {Architecture}" : "";
+
+            if (includeModelPrefix)
+            {
+                return $"Model: {modelPart} | BIOS: {biosVer}{relDate}{smbiosPart}{archPart}";
+            }
+            return $"{modelPart} | BIOS: {biosVer}{relDate}{smbiosPart}{archPart}";
+        }
+
+        public override string ToString() => ToBadgeString();
+    }
+
+    [SupportedOSPlatform("windows")]
     public static class HardwareIdentity
     {
+        private static DeviceBiosInfo? s_cachedBiosInfo;
+        private static readonly object s_biosInfoLock = new();
+
+        public static DeviceBiosInfo GetDeviceBiosInfo(bool refresh = false)
+        {
+            if (!refresh && s_cachedBiosInfo != null)
+                return s_cachedBiosInfo;
+
+            lock (s_biosInfoLock)
+            {
+                if (!refresh && s_cachedBiosInfo != null)
+                    return s_cachedBiosInfo;
+
+                string mfg = string.Empty;
+                string model = string.Empty;
+                string biosVendor = string.Empty;
+                string biosVersion = string.Empty;
+                string releaseDate = string.Empty;
+                string smbiosVersion = string.Empty;
+                string architecture = string.Empty;
+                string cpuName = string.Empty;
+                string systemType = string.Empty;
+                ulong totalMemory = 0;
+
+                // 1. Query Win32_BIOS
+                try
+                {
+                    using var searcher = new ManagementObjectSearcher(
+                        "SELECT Manufacturer, SMBIOSBIOSVersion, ReleaseDate, Version, SMBIOSMajorVersion, SMBIOSMinorVersion FROM Win32_BIOS");
+                    using var coll = searcher.Get();
+                    foreach (ManagementObject obj in coll)
+                    {
+                        using (obj)
+                        {
+                            biosVendor = obj["Manufacturer"]?.ToString()?.Trim() ?? string.Empty;
+                            biosVersion = obj["SMBIOSBIOSVersion"]?.ToString()?.Trim() ?? string.Empty;
+
+                            var rd = obj["ReleaseDate"];
+                            if (rd != null)
+                            {
+                                string rawDate = rd.ToString()?.Trim() ?? string.Empty;
+                                if (!string.IsNullOrEmpty(rawDate))
+                                {
+                                    try
+                                    {
+                                        DateTime dt = ManagementDateTimeConverter.ToDateTime(rawDate);
+                                        releaseDate = dt.ToString("MM/dd/yyyy", CultureInfo.InvariantCulture);
+                                    }
+                                    catch
+                                    {
+                                        if (DateTime.TryParse(rawDate, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt) ||
+                                            DateTime.TryParse(rawDate, out dt))
+                                        {
+                                            releaseDate = dt.ToString("MM/dd/yyyy", CultureInfo.InvariantCulture);
+                                        }
+                                        else
+                                        {
+                                            releaseDate = rawDate;
+                                        }
+                                    }
+                                }
+                            }
+
+                            var maj = obj["SMBIOSMajorVersion"];
+                            var min = obj["SMBIOSMinorVersion"];
+                            if (maj != null && min != null)
+                            {
+                                smbiosVersion = $"{maj}.{min}";
+                            }
+                        }
+                        break;
+                    }
+                }
+                catch { }
+
+                // 2. Query Win32_ComputerSystem
+                try
+                {
+                    using var searcher = new ManagementObjectSearcher(
+                        "SELECT Manufacturer, Model, SystemType, TotalPhysicalMemory FROM Win32_ComputerSystem");
+                    using var coll = searcher.Get();
+                    foreach (ManagementObject obj in coll)
+                    {
+                        using (obj)
+                        {
+                            mfg = obj["Manufacturer"]?.ToString()?.Trim() ?? string.Empty;
+                            model = obj["Model"]?.ToString()?.Trim() ?? string.Empty;
+                            systemType = obj["SystemType"]?.ToString()?.Trim() ?? string.Empty;
+                            if (obj["TotalPhysicalMemory"] != null &&
+                                ulong.TryParse(obj["TotalPhysicalMemory"]?.ToString(), out ulong mem))
+                            {
+                                totalMemory = mem;
+                            }
+                        }
+                        break;
+                    }
+                }
+                catch { }
+
+                // 3. Query Win32_Processor
+                try
+                {
+                    using var searcher = new ManagementObjectSearcher(
+                        "SELECT Architecture, Name FROM Win32_Processor");
+                    using var coll = searcher.Get();
+                    foreach (ManagementObject obj in coll)
+                    {
+                        using (obj)
+                        {
+                            cpuName = obj["Name"]?.ToString()?.Trim() ?? string.Empty;
+                            if (obj["Architecture"] != null &&
+                                int.TryParse(obj["Architecture"]?.ToString(), out int archCode))
+                            {
+                                architecture = archCode switch
+                                {
+                                    0 => "x86",
+                                    1 => "MIPS",
+                                    2 => "Alpha",
+                                    3 => "PowerPC",
+                                    5 => "ARM",
+                                    6 => "ia64",
+                                    9 => "x64",
+                                    12 => "ARM64",
+                                    _ => "x64"
+                                };
+                            }
+                        }
+                        break;
+                    }
+                }
+                catch { }
+
+                // 4. Safe Registry Fallback: HKLM\\HARDWARE\\DESCRIPTION\\System\\BIOS
+                try
+                {
+                    using var biosKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"HARDWARE\DESCRIPTION\System\BIOS");
+                    if (biosKey != null)
+                    {
+                        if (string.IsNullOrWhiteSpace(mfg))
+                            mfg = (biosKey.GetValue("SystemManufacturer") as string)?.Trim() ?? string.Empty;
+                        if (string.IsNullOrWhiteSpace(mfg))
+                            mfg = (biosKey.GetValue("BaseBoardManufacturer") as string)?.Trim() ?? string.Empty;
+
+                        if (string.IsNullOrWhiteSpace(model))
+                            model = (biosKey.GetValue("SystemProductName") as string)?.Trim() ?? string.Empty;
+                        if (string.IsNullOrWhiteSpace(model))
+                            model = (biosKey.GetValue("BaseBoardProduct") as string)?.Trim() ?? string.Empty;
+
+                        if (string.IsNullOrWhiteSpace(biosVendor))
+                            biosVendor = (biosKey.GetValue("BIOSVendor") as string)?.Trim() ?? string.Empty;
+
+                        if (string.IsNullOrWhiteSpace(biosVersion))
+                            biosVersion = (biosKey.GetValue("BIOSVersion") as string)?.Trim() ?? string.Empty;
+
+                        if (string.IsNullOrWhiteSpace(releaseDate))
+                            releaseDate = (biosKey.GetValue("BIOSReleaseDate") as string)?.Trim() ?? string.Empty;
+
+                        if (string.IsNullOrWhiteSpace(smbiosVersion))
+                        {
+                            var maj = biosKey.GetValue("BiosMajorRelease");
+                            var min = biosKey.GetValue("BiosMinorRelease");
+                            if (maj != null && min != null)
+                            {
+                                smbiosVersion = $"{maj}.{min}";
+                            }
+                        }
+                    }
+                }
+                catch { }
+
+                // 5. Safe Registry Fallback: HKLM\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0
+                try
+                {
+                    using var cpuKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"HARDWARE\DESCRIPTION\System\CentralProcessor ");
+                    if (cpuKey != null)
+                    {
+                        if (string.IsNullOrWhiteSpace(cpuName))
+                            cpuName = (cpuKey.GetValue("ProcessorNameString") as string)?.Trim() ?? string.Empty;
+
+                        if (string.IsNullOrWhiteSpace(architecture))
+                        {
+                            string? identifier = cpuKey.GetValue("Identifier") as string;
+                            if (!string.IsNullOrWhiteSpace(identifier))
+                            {
+                                if (identifier.Contains("Intel64", StringComparison.OrdinalIgnoreCase) ||
+                                    identifier.Contains("AMD64", StringComparison.OrdinalIgnoreCase))
+                                    architecture = "x64";
+                                else if (identifier.Contains("ARM64", StringComparison.OrdinalIgnoreCase))
+                                    architecture = "ARM64";
+                                else if (identifier.Contains("x86", StringComparison.OrdinalIgnoreCase))
+                                    architecture = "x86";
+                            }
+                        }
+                    }
+                }
+                catch { }
+
+                // 6. Runtime OS fallback for architecture if still empty
+                if (string.IsNullOrWhiteSpace(architecture))
+                {
+                    if (!string.IsNullOrWhiteSpace(systemType))
+                    {
+                        if (systemType.Contains("x64", StringComparison.OrdinalIgnoreCase)) architecture = "x64";
+                        else if (systemType.Contains("ARM64", StringComparison.OrdinalIgnoreCase)) architecture = "ARM64";
+                        else if (systemType.Contains("x86", StringComparison.OrdinalIgnoreCase)) architecture = "x86";
+                    }
+                    if (string.IsNullOrWhiteSpace(architecture))
+                    {
+                        architecture = RuntimeInformation.OSArchitecture switch
+                        {
+                            Architecture.X64 => "x64",
+                            Architecture.Arm64 => "ARM64",
+                            Architecture.X86 => "x86",
+                            Architecture.Arm => "ARM",
+                            _ => "x64"
+                        };
+                    }
+                }
+
+                // 7. SMBIOS Fallback from AcerSmbios if still empty
+                if (string.IsNullOrWhiteSpace(smbiosVersion))
+                {
+                    try
+                    {
+                        var acerSmbios = AcerSmbios.Read();
+                        if (acerSmbios.GamingVersion.HasValue)
+                        {
+                            smbiosVersion = acerSmbios.GamingVersion.Value.ToString("0.0", CultureInfo.InvariantCulture);
+                        }
+                    }
+                    catch { }
+                }
+
+                if (!string.IsNullOrWhiteSpace(cpuName))
+                {
+                    cpuName = CleanCpuModelString(cpuName);
+                }
+
+                s_cachedBiosInfo = new DeviceBiosInfo
+                {
+                    Manufacturer = mfg,
+                    Model = model,
+                    BiosVendor = biosVendor,
+                    BiosVersion = biosVersion,
+                    ReleaseDate = releaseDate,
+                    SmbiosVersion = smbiosVersion,
+                    Architecture = architecture,
+                    CpuName = cpuName,
+                    SystemType = systemType,
+                    TotalPhysicalMemory = totalMemory
+                };
+
+                return s_cachedBiosInfo;
+            }
+        }
+
         public static string ReadCpuModel()
         {
             try
@@ -842,39 +1150,24 @@ namespace PredatorControlApp
 
         public static string ReadModel()
         {
-            try
-            {
-                using var searcher = new ManagementObjectSearcher("SELECT Manufacturer, Model FROM Win32_ComputerSystem");
-                using var coll = searcher.Get();
-                foreach (ManagementObject obj in coll)
-                {
-                    using (obj)
-                    {
-                        string mfg = obj["Manufacturer"]?.ToString() ?? "";
-                        string model = obj["Model"]?.ToString() ?? "";
-                        return $"{mfg} {model}".Trim();
-                    }
-                }
-            }
-            catch { }
+            var info = GetDeviceBiosInfo();
+            if (!string.IsNullOrWhiteSpace(info.FullModelName) && info.FullModelName != "Unknown System")
+                return info.FullModelName;
+
             return "Acer Predator Gaming Device";
+        }
+
+        public static string GetBiosHardwareBadge()
+        {
+            return GetDeviceBiosInfo().ToBadgeString();
         }
 
         public static string ReadBiosVersion()
         {
-            try
-            {
-                using var searcher = new ManagementObjectSearcher("SELECT SMBIOSBIOSVersion FROM Win32_BIOS");
-                using var coll = searcher.Get();
-                foreach (ManagementObject obj in coll)
-                {
-                    using (obj)
-                    {
-                        return obj["SMBIOSBIOSVersion"]?.ToString() ?? "Unknown";
-                    }
-                }
-            }
-            catch { }
+            var info = GetDeviceBiosInfo();
+            if (!string.IsNullOrWhiteSpace(info.BiosVersion))
+                return info.BiosVersion;
+
             return "Unknown";
         }
 

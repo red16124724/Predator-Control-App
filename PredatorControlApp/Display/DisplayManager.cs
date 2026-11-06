@@ -75,6 +75,22 @@ namespace PredatorControlApp.Display
             }
         }
 
+        public int GetMaxRefreshRate()
+        {
+            try
+            {
+                int coreMax = Form1.GetMaxRefreshRateCore();
+                if (coreMax >= 60) return coreMax;
+            }
+            catch { }
+
+            var rates = GetSupportedRefreshRates();
+            return (rates != null && rates.Length > 0) ? rates.Max() : 144;
+        }
+
+        public bool SetRefreshRate60() => SetRefreshRate(60);
+        public bool SetRefreshRateMax() => SetRefreshRate(GetMaxRefreshRate());
+
         public int[] GetSupportedRefreshRates()
         {
             if (PredatorNativeCore.DisplayGetSupportedRefreshRates(out int[] rates) && rates != null && rates.Length > 0)
@@ -89,6 +105,17 @@ namespace PredatorControlApp.Display
         public bool SetRefreshRate(int hz)
         {
             if (hz < 30 || hz > 1000) return false;
+
+            if (Form1.SetRefreshRateOverride != null)
+            {
+                bool ovr = Form1.SetRefreshRateOverride(hz);
+                if (ovr)
+                {
+                    lock (_lock) { _currentRefreshRate = hz; }
+                    SafeInvoke(RefreshRateChanged, hz);
+                }
+                return ovr;
+            }
 
             bool success = false;
             if (PredatorNativeCore.IsNativeCoreAvailable)

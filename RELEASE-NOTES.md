@@ -10,6 +10,23 @@ Current local 1.5.5 improvements: one update check on startup, including hidden 
 Version 1.5.5 brings a comprehensive codebase audit, bug fix, and stabilization overhaul across the C# .NET 10 WinForms UI, native Rust Core (predator_core.dll), Ring-0 PawnIO hardware drivers, and the complete 2,460-test suite (285 Rust + 2,175 .NET).
 
 
+### Dedicated Embedded Menus, Dynamic Hardware Architecture Badge & Complete Pruning (Update 2026-11-06)
+- **Dedicated Embedded Menus ("BIOS Settings", "Display Settings", "Game Sync")**:
+  - Re-architected sidebar navigation with 8 dedicated page tabs: Dashboard, Fans & Cooling, RGB Lighting, Display Settings, BIOS Settings, Game Sync, System & Power, and Settings & Info.
+  - Sized buttons to 38px with 4px gap starting at y = 12px, providing an uncluttered, legible navigation experience that fits completely inside standard 600px+ laptop viewports.
+  - "Display Settings" (`_pnlDisplay`): Hosts Graphics Working Mode (Automatic, Integrated Only, Dedicated Only) and Display Refresh Rate (60 Hz and Max Hz buttons, LCD Overdrive switch).
+  - "BIOS Settings" (`_pnlBios`): Features dynamic hardware architecture badge, two-tier safety interlocks, category tabs, setting rows, and defaults restoration.
+  - "Game Sync" (`_pnlGameSync`): Features master switch, active game detection badge, profile table, and full profile CRUD workflows.
+  - "System & Power" (`_pnlSystem`): Pruned and streamlined to host only Automatic Power Profiles & Mode Key and USB Charging & Battery Maintenance.
+- **Dynamic Hardware Architecture & BIOS Badge**:
+  - Zero hardcoded values: dynamically queries `Win32_BIOS`, `Win32_ComputerSystem`, `Win32_Processor`, system registry (`HKLM\HARDWARE\DESCRIPTION\System\BIOS`, `CentralProcessor\0`), and runtime architecture.
+  - Live queried values reflect the exact host device (e.g., `Acer Predator PHN14-51 | BIOS: V1.08 (06/13/2025) | SMBIOS v3.6 | x64`).
+- **Complete 100% Feature Pruning**:
+  - Pruned Acer BlueLight Shield™ across UI, backend, settings, registry, and tests.
+  - Pruned GPU overclocking controls.
+  - Pruned Supervisor Password prompts and state.
+  - Pruned dynamic refresh rate dropdown (retained 60 Hz and Max Hz).
+
 ### UI Embedded Redesign & Helios Neo RGB Blinking Remediation (Update 2026-11-06)
 - **Helios Neo Periodic RGB Blinking Elimination**:
   - Eliminated unconditional 30-second firmware reassertion timer loop in Form1 telemetry tick, which repeatedly triggered Embedded Controller (EC) mode-change lighting animations on Acer Predator Helios Neo 16 / 16s / 16 AI / 18 models.
