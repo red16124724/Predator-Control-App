@@ -315,7 +315,9 @@ namespace PredatorControlApp.Bios
             }
         }
 
-        public bool ApplySetting(BiosSettingItem item, out string error)
+        public bool ApplySetting(BiosSettingItem item, out string error) => ApplySetting(item, out error, false);
+
+        public bool ApplySetting(BiosSettingItem item, out string error, bool bypassSafetyGates)
         {
             error = "";
             if (item == null)
@@ -337,20 +339,23 @@ namespace PredatorControlApp.Bios
             bool dangerousAllowed;
             lock (_lock)
             {
-                if (!_modificationsEnabled)
+                if (!bypassSafetyGates)
                 {
-                    error = "BIOS modifications are disabled. Toggle 'Enable BIOS Modifications' in the toolbar first.";
-                    return false;
-                }
+                    if (!_modificationsEnabled)
+                    {
+                        error = "BIOS modifications are disabled. Toggle 'Enable BIOS Modifications' in the toolbar first.";
+                        return false;
+                    }
 
-                if (item.Risk == BiosSettingRisk.Dangerous && !_dangerousAllowed)
-                {
-                    error = "This setting carries hardware or display risk and is blocked. Enable 'Allow Dangerous Settings' first.";
-                    return false;
+                    if (item.Risk == BiosSettingRisk.Dangerous && !_dangerousAllowed)
+                    {
+                        error = "This setting carries hardware or display risk and is blocked. Enable 'Allow Dangerous Settings' first.";
+                        return false;
+                    }
                 }
 
                 password = _cachedPassword;
-                dangerousAllowed = _dangerousAllowed;
+                dangerousAllowed = bypassSafetyGates || _dangerousAllowed;
             }
 
             // Validate allowed options if defined for this setting item

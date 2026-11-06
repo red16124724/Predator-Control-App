@@ -99,8 +99,8 @@ namespace PredatorControlApp.Display
         private void InitializeComponent()
         {
             this.Text = "Display & GPU Switching";
-            this.Size = new Size(580, 660);
-            this.MinimumSize = new Size(540, 600);
+            this.Size = new Size(720, 720);
+            this.MinimumSize = new Size(680, 680);
             this.StartPosition = FormStartPosition.CenterParent;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
@@ -142,7 +142,7 @@ namespace PredatorControlApp.Display
             y += 35;
 
             // Card 1: Refresh Rate
-            var cardRefresh = CreateCard(20, y, 520, 110, "Display Refresh Rate");
+            var cardRefresh = CreateCard(20, y, 660, 110, "Display Refresh Rate");
             mainPanel.Controls.Add(cardRefresh);
 
             _lblCurrentHz = new Label
@@ -166,7 +166,7 @@ namespace PredatorControlApp.Display
             _cboRefreshRates = new ComboBox
             {
                 Location = new Point(110, 64),
-                Size = new Size(130, 28),
+                Size = new Size(160, 28),
                 DropDownStyle = ComboBoxStyle.DropDownList
             };
             cardRefresh.Controls.Add(_cboRefreshRates);
@@ -174,8 +174,8 @@ namespace PredatorControlApp.Display
             _btnApplyRefresh = new PredatorButton
             {
                 Text = "Apply Hz",
-                Location = new Point(260, 63),
-                Size = new Size(110, 30)
+                Location = new Point(290, 63),
+                Size = new Size(120, 30)
             };
             _btnApplyRefresh.Click += OnApplyRefreshClicked;
             cardRefresh.Controls.Add(_btnApplyRefresh);
@@ -183,7 +183,7 @@ namespace PredatorControlApp.Display
             y += 125;
 
             // Card 2: NVIDIA Advanced Optimus / DDS
-            var cardDds = CreateCard(20, y, 520, 150, "NVIDIA Advanced Optimus (Dynamic Display Switch)");
+            var cardDds = CreateCard(20, y, 660, 150, "NVIDIA Advanced Optimus (Dynamic Display Switch)");
             mainPanel.Controls.Add(cardDds);
 
             _lblDdsStatus = new Label
@@ -207,7 +207,7 @@ namespace PredatorControlApp.Display
             _cboDdsMode = new ComboBox
             {
                 Location = new Point(110, 64),
-                Size = new Size(240, 28),
+                Size = new Size(350, 28),
                 DropDownStyle = ComboBoxStyle.DropDownList
             };
             _cboDdsMode.Items.AddRange(new object[]
@@ -221,8 +221,8 @@ namespace PredatorControlApp.Display
             _btnApplyDds = new PredatorButton
             {
                 Text = "Switch Mode",
-                Location = new Point(365, 63),
-                Size = new Size(135, 30)
+                Location = new Point(480, 63),
+                Size = new Size(145, 30)
             };
             _btnApplyDds.Click += OnApplyDdsClicked;
             cardDds.Controls.Add(_btnApplyDds);
@@ -231,7 +231,7 @@ namespace PredatorControlApp.Display
             {
                 Text = "Note: Switching GPU mode takes effect immediately without reboot.",
                 Location = new Point(16, 108),
-                Size = new Size(485, 34),
+                Size = new Size(610, 34),
                 ForeColor = ThemeManager.TextSecondary,
                 Font = s_fontDdsNotice
             };
@@ -240,7 +240,7 @@ namespace PredatorControlApp.Display
             y += 165;
 
             // Card 3: BlueLight Shield
-            var cardBlueLight = CreateCard(20, y, 520, 130, "Acer BlueLight Shield™ (Hardware Gamma Ramp)");
+            var cardBlueLight = CreateCard(20, y, 660, 130, "Acer BlueLight Shield™ (Hardware Gamma Ramp)");
             mainPanel.Controls.Add(cardBlueLight);
 
             _lblBlueLightVal = new Label
@@ -255,7 +255,7 @@ namespace PredatorControlApp.Display
             _sliderBlueLight = new TrackBar
             {
                 Location = new Point(16, 62),
-                Size = new Size(360, 45),
+                Size = new Size(440, 45),
                 Minimum = 0,
                 Maximum = 3,
                 Value = 0,
@@ -267,7 +267,7 @@ namespace PredatorControlApp.Display
 
             var lblLevels = new Label
             {
-                Text = "Off       Low (18%)       High (36%)       Ultra (54%)",
+                Text = "Off             Low (18%)             High (36%)             Ultra (54%)",
                 Location = new Point(20, 102),
                 AutoSize = true,
                 ForeColor = ThemeManager.TextMuted,
@@ -278,7 +278,7 @@ namespace PredatorControlApp.Display
             var btnResetBlue = new PredatorButton
             {
                 Text = "Turn Off",
-                Location = new Point(395, 62),
+                Location = new Point(480, 62),
                 Size = new Size(105, 30)
             };
             btnResetBlue.Click += (s, e) => _sliderBlueLight.Value = 0;
@@ -287,7 +287,7 @@ namespace PredatorControlApp.Display
             y += 145;
 
             // Card 4: LCD Overdrive
-            var cardOverdrive = CreateCard(20, y, 520, 80, "Panel Response Time Acceleration");
+            var cardOverdrive = CreateCard(20, y, 660, 80, "Panel Response Time Acceleration");
             mainPanel.Controls.Add(cardOverdrive);
 
             var lblOverdrive = new Label
@@ -300,7 +300,7 @@ namespace PredatorControlApp.Display
 
             _switchOverdrive = new PredatorSwitch
             {
-                Location = new Point(445, 32),
+                Location = new Point(570, 32),
                 Size = new Size(50, 26)
             };
             _switchOverdrive.CheckedChanged += OnOverdriveChanged;
@@ -312,7 +312,7 @@ namespace PredatorControlApp.Display
             var btnClose = new PredatorButton
             {
                 Text = "Close",
-                Location = new Point(415, y),
+                Location = new Point(535, y),
                 Size = new Size(125, 36)
             };
             btnClose.Click += (s, e) => this.Close();

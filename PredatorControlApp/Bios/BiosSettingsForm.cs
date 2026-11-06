@@ -80,8 +80,8 @@ namespace PredatorControlApp.Bios
         private void InitializeComponent()
         {
             this.Text = "Acer BIOS & Firmware Settings";
-            this.Size = new Size(680, 720);
-            this.MinimumSize = new Size(620, 600);
+            this.Size = new Size(820, 800);
+            this.MinimumSize = new Size(760, 740);
             this.StartPosition = FormStartPosition.CenterParent;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
@@ -136,7 +136,7 @@ namespace PredatorControlApp.Bios
             var cardSafety = new Panel
             {
                 Location = new Point(16, y),
-                Size = new Size(630, 75),
+                Size = new Size(770, 75),
                 BackColor = ThemeManager.CardBg,
                 BorderStyle = BorderStyle.None
             };
@@ -172,7 +172,7 @@ namespace PredatorControlApp.Bios
             _chkAllowDangerous = new CheckBox
             {
                 Text = "Allow Dangerous Settings (GPU MUX / Boot)",
-                Location = new Point(210, 38),
+                Location = new Point(260, 38),
                 AutoSize = true,
                 ForeColor = ThemeManager.YellowStatus,
                 Checked = _biosManager.DangerousAllowed,
@@ -184,8 +184,8 @@ namespace PredatorControlApp.Bios
             _btnPassword = new PredatorButton
             {
                 Text = "Supervisor Pwd",
-                Location = new Point(505, 34),
-                Size = new Size(115, 28)
+                Location = new Point(625, 34),
+                Size = new Size(130, 28)
             };
             _btnPassword.Click += OnPasswordClicked;
             cardSafety.Controls.Add(_btnPassword);
@@ -196,18 +196,18 @@ namespace PredatorControlApp.Bios
             _tabControl = new TabControl
             {
                 Location = new Point(16, y),
-                Size = new Size(630, 480)
+                Size = new Size(770, 560)
             };
             mainPanel.Controls.Add(_tabControl);
 
-            y += 490;
+            y += 570;
 
             // Bottom action buttons
             _btnRestoreDefaults = new PredatorButton
             {
                 Text = "Restore Factory Defaults",
                 Location = new Point(16, y),
-                Size = new Size(180, 34)
+                Size = new Size(200, 34)
             };
             _btnRestoreDefaults.Click += OnRestoreDefaultsClicked;
             mainPanel.Controls.Add(_btnRestoreDefaults);
@@ -215,8 +215,8 @@ namespace PredatorControlApp.Bios
             var btnRefresh = new PredatorButton
             {
                 Text = "Re-scan BIOS",
-                Location = new Point(205, y),
-                Size = new Size(130, 34)
+                Location = new Point(230, y),
+                Size = new Size(140, 34)
             };
             btnRefresh.Click += (s, e) =>
             {
@@ -228,8 +228,8 @@ namespace PredatorControlApp.Bios
             var btnClose = new PredatorButton
             {
                 Text = "Close",
-                Location = new Point(526, y),
-                Size = new Size(120, 34)
+                Location = new Point(656, y),
+                Size = new Size(130, 34)
             };
             btnClose.Click += (s, e) => this.Close();
             mainPanel.Controls.Add(btnClose);
@@ -303,9 +303,9 @@ namespace PredatorControlApp.Bios
                 {
                     foreach (var item in items)
                     {
-                        var row = CreateSettingRow(item, rowY, 580);
+                        var row = CreateSettingRow(item, rowY, 680);
                         scrollPanel.Controls.Add(row);
-                        rowY += 68;
+                        rowY += 80;
                     }
                 }
 
@@ -323,14 +323,14 @@ namespace PredatorControlApp.Bios
             var panel = new Panel
             {
                 Location = new Point(10, y),
-                Size = new Size(width, 60),
+                Size = new Size(width, 74),
                 BackColor = ThemeManager.CardBg
             };
             panel.Paint += (s, e) =>
             {
                 if (panel.Width <= 1 || panel.Height <= 1) return;
                 using var pen = new Pen(ThemeManager.CardBorder, 1);
-                e.Graphics.DrawRectangle(pen, 0, 0, panel.Width - 1, 59);
+                e.Graphics.DrawRectangle(pen, 0, 0, panel.Width - 1, 73);
             };
 
             // Setting Name
@@ -358,8 +358,8 @@ namespace PredatorControlApp.Bios
             // Options ComboBox
             var cbo = new ComboBox
             {
-                Location = new Point(12, 30),
-                Size = new Size(240, 26),
+                Location = new Point(12, 36),
+                Size = new Size(320, 28),
                 DropDownStyle = ComboBoxStyle.DropDownList
             };
             foreach (var opt in item.Options)
@@ -379,7 +379,7 @@ namespace PredatorControlApp.Bios
                 Text = $"Current: {item.CurrentValue}",
                 Font = s_fontCurrentVal,
                 ForeColor = ThemeManager.TextSecondary,
-                Location = new Point(270, 33),
+                Location = new Point(350, 36),
                 AutoSize = true
             };
             panel.Controls.Add(lblCurrent);
@@ -391,8 +391,8 @@ namespace PredatorControlApp.Bios
             var btnApply = new PredatorButton
             {
                 Text = "Apply",
-                Location = new Point(485, 26),
-                Size = new Size(80, 28),
+                Location = new Point(605, 28),
+                Size = new Size(95, 30),
                 Enabled = canApply
             };
             btnApply.Click += (s, e) =>

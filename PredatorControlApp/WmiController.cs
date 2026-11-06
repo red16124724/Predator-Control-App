@@ -1595,6 +1595,12 @@ namespace PredatorControlApp
 
             {
 
+                // Prevent redundant EC/WMI reassertions that cause RGB keyboard blinking on Helios Neo / AI models
+                if (!forceRetry && _lastAppliedPowerMode.HasValue && _lastAppliedPowerMode.Value == mode)
+                {
+                    return true;
+                }
+
                 var ecHid = EcHid;
 
                 bool ecSuccess = false;
@@ -4350,7 +4356,42 @@ namespace PredatorControlApp
 
                 var res = SendCommandUnderLock("SetGamingMiscSetting", AcerProtocol.MiscSetInput(MiscSetting.GpuMode, (byte)mode));
 
-                return res.success;
+                if (res.success) return true;
+
+                // Fallback for modern Predator/Nitro laptops: try DisplayManager DDS mode
+                try
+                {
+                    int targetDds = mode switch
+                    {
+                        GpuMode.Auto => 1,
+                        GpuMode.iGpuOnly => 0,
+                        GpuMode.dGpuOnly => 2,
+                        _ => 1
+                    };
+                    if (Display.DisplayManager.Instance.SetDdsMode(targetDds)) return true;
+                }
+                catch { }
+
+                // Fallback: try BIOS manager Display MUX
+                try
+                {
+                    string biosOption = mode switch
+                    {
+                        GpuMode.Auto => "Auto",
+                        GpuMode.iGpuOnly => "Optimus",
+                        GpuMode.dGpuOnly => "Discrete GPU only",
+                        _ => "Auto"
+                    };
+                    var biosItem = Bios.BiosManager.Instance.Settings.FirstOrDefault(s => s.Name.Contains("Display MUX", StringComparison.OrdinalIgnoreCase));
+                    if (biosItem != null)
+                    {
+                        biosItem.PendingValue = biosOption;
+                        if (Bios.BiosManager.Instance.ApplySetting(biosItem, out _, bypassSafetyGates: true)) return true;
+                    }
+                }
+                catch { }
+
+                return false;
 
             }
 

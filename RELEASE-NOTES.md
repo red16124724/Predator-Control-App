@@ -10,6 +10,20 @@ Current local 1.5.5 improvements: one update check on startup, including hidden 
 Version 1.5.5 brings a comprehensive codebase audit, bug fix, and stabilization overhaul across the C# .NET 10 WinForms UI, native Rust Core (predator_core.dll), Ring-0 PawnIO hardware drivers, and the complete 2,460-test suite (285 Rust + 2,175 .NET).
 
 
+### UI Embedded Redesign & Helios Neo RGB Blinking Remediation (Update 2026-11-06)
+- **Helios Neo Periodic RGB Blinking Elimination**:
+  - Eliminated unconditional 30-second firmware reassertion timer loop in Form1 telemetry tick, which repeatedly triggered Embedded Controller (EC) mode-change lighting animations on Acer Predator Helios Neo 16 / 16s / 16 AI / 18 models.
+  - Added duplicate mode deduplication guard in WmiController.TrySetPowerMode: redundant calls return true immediately without dispatching EC HID feature reports or ACPI WMI commands.
+- **GPU Switching Multi-Tier Fallback Pipeline**:
+  - Replaced legacy WMI-only call with multi-tier fallback: Tier 1 NVIDIA Advanced Optimus (DDS) -> Tier 2 BIOS Display MUX -> Tier 3 ACPI WMI.
+  - Added active mode verification: selecting the currently active GPU mode succeeds instantly without triggering the 'Failed to switch GPU working mode via ACPI/WMI' error dialog.
+  - NVIDIA Advanced Optimus switches apply dynamically in real time without requiring a system restart.
+- **Embedded System & Power Section UI Redesign**:
+  - Embedded comprehensive 'Display & GPU Switching (Advanced Optimus)' card directly in System & Power: real-time DDS status badge, dynamic refresh rate list, quick 60Hz/MaxHz buttons, LCD Overdrive switch, and Acer BlueLight Shield hardware slider.
+  - Embedded full 'Acer BIOS & Firmware Settings' card directly in System & Power: hardware model badge, two-tier safety gates (Enable Modifications & Allow Dangerous Settings), categorized tabs (System, Power & Battery, Boot & Setup), dynamic setting rows with risk badges, Supervisor Password dialog, and Restore Defaults button.
+  - Modernized cardDiag and tray shortcuts to smoothly navigate to the embedded cards in System & Power.
+  - Resized standalone DisplaySettingsForm and BiosSettingsForm dialogs to 720-820px with spacious control margins, completely resolving font clipping and combobox overlap.
+
 ### Imported OpenSense/PreySense Features & Exhaustive Stress Hardening (Update 2026-11-06)
 - **Acer BIOS & Firmware Settings GUI**: Native multi-tier firmware access (Mode 1 ACPI-WMI, Mode 2 Direct ACPI, Mode 3 UEFI NVRAM) with two-tier hardware safety gates ('Enable Modifications' and 'Allow Dangerous Settings' warnings). Zeroization of supervisor passwords.
 - **Advanced Display & GPU Switching**: NVIDIA Advanced Optimus (Dynamic Display Switch / DDS) mode switching, BlueLight Shield gamma computation in native Rust, refresh-rate mode switches (30-360Hz+), and LCD Overdrive toggling.

@@ -634,6 +634,8 @@ namespace PredatorControlApp
 
         private static readonly Font FontCalibrationPercent = new("Segoe UI", 20f, FontStyle.Bold);
 
+        private static readonly Font FontRiskBadge = new("Segoe UI", 7.5f, FontStyle.Bold);
+
 
 
         private Label _lblTitle = null!, _lblCpuTemp = null!, _lblGpuTemp = null!;
@@ -1011,8 +1013,6 @@ namespace PredatorControlApp
 
         private int _cpuSensorMisses;
 
-        private DateTime _lastFirmwareReassert = DateTime.UtcNow;
-
         private readonly object _dampingLock = new();
 
         private readonly Queue<int> _cpuDampingQueue = new();
@@ -1111,6 +1111,20 @@ namespace PredatorControlApp
         private PredatorDropDown? _cboTheme;
 
         private PredatorButton? _btnDiagnostics;
+
+        private Panel? _cardBios;
+        private Label? _lblGpuStatusSys;
+        private PredatorDropDown? _cboRefreshRateSys;
+        private PredatorButton? _btnApplyRefreshSys;
+        private Label? _lblBlueLightSys;
+        private TrackBar? _sliderBlueLightSys;
+        private CheckBox? _chkEnableBiosModsSys;
+        private CheckBox? _chkAllowDangerousBiosSys;
+        private Panel? _pnlBiosItemsContainerSys;
+        private PredatorButton? _btnBiosCatSys;
+        private PredatorButton? _btnBiosCatPower;
+        private PredatorButton? _btnBiosCatBoot;
+        private Bios.BiosCategory _currentBiosCategory = Bios.BiosCategory.System;
 
 
 
@@ -3638,13 +3652,19 @@ namespace PredatorControlApp
 
             var trayDisplaySettings = new ToolStripMenuItem("Display & GPU Switching...", null, (s, e) =>
             {
-                using var dialog = new Display.DisplaySettingsForm(Display.DisplayManager.Instance, _appSettings);
-                dialog.ShowDialog();
+                if (!this.Visible) this.Show();
+                if (this.WindowState == FormWindowState.Minimized) this.WindowState = FormWindowState.Normal;
+                this.Activate();
+                SwitchPage(_pnlSystem, _btnNavSystem);
+                _pnlSystem.AutoScrollPosition = new Point(0, 0);
             });
             var trayBiosSettings = new ToolStripMenuItem("BIOS & Firmware Settings...", null, (s, e) =>
             {
-                using var dialog = new Bios.BiosSettingsForm(Bios.BiosManager.Instance, _appSettings);
-                dialog.ShowDialog();
+                if (!this.Visible) this.Show();
+                if (this.WindowState == FormWindowState.Minimized) this.WindowState = FormWindowState.Normal;
+                this.Activate();
+                SwitchPage(_pnlSystem, _btnNavSystem);
+                if (_cardBios != null) _pnlSystem.ScrollControlIntoView(_cardBios);
             });
             displayMenu.DropDownItems.AddRange([_trayDisplay60, _trayDisplayMax, new ToolStripSeparator(), _trayLcdOverdrive, new ToolStripSeparator(), trayDisplaySettings, trayBiosSettings]);
 
@@ -10251,350 +10271,337 @@ namespace PredatorControlApp
 
 
         private void BuildSystemPage()
-
         {
-
             int pad = S(16);
-
             int gap = S(16);
-
             int usableW = _pageContainer.Width - pad * 2 - gap - DarkScrollPanel.NativeBarWidth;
-
             int cardW = usableW / 2;
-
             int col1X = pad;
-
             int col2X = pad + cardW + gap;
-
             int cPad = S(14);
-
             int cInnerW = cardW - cPad * 2;
 
+            // ==========================================
+            // COLUMN 1, CARD 1: DISPLAY & GPU SWITCHING
+            // ==========================================
+            var cardDisplayGpu = MakeCard(_pnlSystem, "DISPLAY & GPU SWITCHING (ADVANCED OPTIMUS)", col1X, pad, cardW, S(390));
+            MakeLabel(cardDisplayGpu, "Display routing, dynamic refresh rate & hardware BlueLight Shield™", cPad, S(40), FontHeaderLight, SubHeaderColor);
 
-
-            // Card 1: Graphics Working Mode (Display Switch)
-
-            var cardMux = MakeCard(_pnlSystem, "GRAPHICS WORKING MODE (DISPLAY SWITCH)", col1X, pad, cardW, S(200));
-
-            MakeLabel(cardMux, "Display routing: Dedicated connects GPU directly for best gaming performance; Integrated saves battery.", cPad, S(44), FontHeaderLight, SubHeaderColor);
-
-
+            // Real-time DDS / MUX status label
+            _lblGpuStatusSys = MakeLabel(cardDisplayGpu, "Status: Detecting GPU display routing...", cPad, S(66), FontSectionHeader, ThemeManager.Accent);
+            UpdateGpuModeStatusLabel();
 
             int muxBtnW = (cInnerW - 2 * S(8)) / 3;
-
-            int btnH = S(36);
-
-            _btnGpuAuto = MakeButton(cardMux, "🔄  Automatic (Dynamic)", cPad, S(76), muxBtnW, btnH);
-
-            _btnGpuHybrid = MakeButton(cardMux, "🔋  Integrated Only", cPad + muxBtnW + S(8), S(76), muxBtnW, btnH);
-
-            _btnGpuDiscrete = MakeButton(cardMux, "⚡  Dedicated Only", cPad + 2 * (muxBtnW + S(8)), S(76), muxBtnW, btnH);
-
-
+            int btnH = S(34);
+            _btnGpuAuto = MakeButton(cardDisplayGpu, "🔄  Automatic", cPad, S(92), muxBtnW, btnH);
+            _btnGpuHybrid = MakeButton(cardDisplayGpu, "🔋  Integrated", cPad + muxBtnW + S(8), S(92), muxBtnW, btnH);
+            _btnGpuDiscrete = MakeButton(cardDisplayGpu, "⚡  Dedicated", cPad + 2 * (muxBtnW + S(8)), S(92), muxBtnW, btnH);
 
             var curGpuMode = _wmi.GetGpuMode() ?? GpuMode.Auto;
-
             if (curGpuMode == GpuMode.dGpuOnly) HighlightBtn(_btnGpuDiscrete, ref _activeGpuModeBtn);
-
             else if (curGpuMode == GpuMode.iGpuOnly) HighlightBtn(_btnGpuHybrid, ref _activeGpuModeBtn);
-
             else HighlightBtn(_btnGpuAuto, ref _activeGpuModeBtn);
 
-
-
             _btnGpuAuto.Click += (s, e) => ApplyGpuMode(GpuMode.Auto, _btnGpuAuto);
-
             _btnGpuHybrid.Click += (s, e) => ApplyGpuMode(GpuMode.iGpuOnly, _btnGpuHybrid);
-
             _btnGpuDiscrete.Click += (s, e) => ApplyGpuMode(GpuMode.dGpuOnly, _btnGpuDiscrete);
 
+            // Separator / Refresh Rate Section
+            MakeLabel(cardDisplayGpu, "DISPLAY REFRESH RATE & OVERDRIVE:", cPad, S(138), FontSectionHeader, SubHeaderColor);
 
+            int dispBtnW = S(68);
+            _btnDisp60 = MakeButton(cardDisplayGpu, "60 Hz", cPad, S(162), dispBtnW, S(30));
+            _btnDispMax = MakeButton(cardDisplayGpu, $"{_maxHz} Hz", cPad + dispBtnW + S(6), S(162), dispBtnW, S(30));
+            _btnDisp60.Click += (s, e) => ApplyDisplayMode(60, _btnDisp60);
+            _btnDispMax.Click += (s, e) => ApplyDisplayMode(_maxHz, _btnDispMax);
 
-            MakeLabel(cardMux, "Switching graphics working mode requires a restart to reinitialize display hardware.", cPad, S(132), FontHeaderLight, SubHeaderColor);
+            int cboRateX = cPad + dispBtnW * 2 + S(12);
+            int btnApplyRateW = S(68);
+            int cboRateW = cInnerW - (dispBtnW * 2 + S(12) + btnApplyRateW + S(6));
 
+            _cboRefreshRateSys = new PredatorDropDown { Location = new Point(cboRateX, S(162)), Size = new Size(cboRateW, S(30)) };
+            var supportedRates = Display.DisplayManager.Instance.GetSupportedRefreshRates();
+            foreach (var r in supportedRates) _cboRefreshRateSys.Items.Add($"{r} Hz");
+            int curRateIdx = Array.IndexOf(supportedRates, Display.DisplayManager.Instance.CurrentRefreshRate);
+            if (curRateIdx >= 0) _cboRefreshRateSys.SelectedIndex = curRateIdx;
+            else if (_cboRefreshRateSys.Items.Count > 0) _cboRefreshRateSys.SelectedIndex = 0;
+            cardDisplayGpu.Controls.Add(_cboRefreshRateSys);
 
+            _btnApplyRefreshSys = MakeButton(cardDisplayGpu, "Apply", cboRateX + cboRateW + S(6), S(162), btnApplyRateW, S(30));
+            _btnApplyRefreshSys.Click += (s, e) =>
+            {
+                string sel = _cboRefreshRateSys.SelectedText;
+                if (!string.IsNullOrEmpty(sel))
+                {
+                    var m = System.Text.RegularExpressions.Regex.Match(sel, @"\d+");
+                    if (m.Success && int.TryParse(m.Value, out int targetHz) && targetHz >= 30)
+                    {
+                        ApplyDisplayMode(targetHz, null);
+                    }
+                }
+            };
 
-            // Card 2: Power Profile Auto-Switching & Mode Key
+            // LCD Overdrive Switch
+            _lblOdStatusSys = MakeLabel(cardDisplayGpu, "LCD Overdrive (Fast 3ms Response Time)", cPad, S(208), FontBody, ThemeManager.TextPrimary);
+            _swOdSys = new PredatorSwitch { Location = new Point(cardW - cPad - S(48), S(204)), Size = new Size(S(48), S(26)) };
+            _swOdSys.Checked = _switchLcdOverdrive.Checked;
+            _swOdSys.CheckedChanged += (s, e) => ApplyLcdOverdrive(_swOdSys.Checked);
+            cardDisplayGpu.Controls.Add(_swOdSys);
 
-            var cardPowerAuto = MakeCard(_pnlSystem, "AUTOMATIC POWER PROFILES & MODE KEY", col1X, pad + S(212), cardW, S(250));
+            // BlueLight Shield Control
+            _lblBlueLightSys = MakeLabel(cardDisplayGpu, "Acer BlueLight Shield™: Off (Natural Colors - 0% Reduction)", cPad, S(246), FontSectionHeader, SubHeaderColor);
+            _sliderBlueLightSys = new TrackBar
+            {
+                Location = new Point(cPad, S(272)),
+                Size = new Size(cInnerW - S(80), S(34)),
+                Minimum = 0,
+                Maximum = 4,
+                Value = Math.Clamp(Display.DisplayManager.Instance.BlueLightMode, 0, 4),
+                TickStyle = TickStyle.BottomRight,
+                BackColor = ThemeManager.CardBg
+            };
+            cardDisplayGpu.Controls.Add(_sliderBlueLightSys);
 
+            var btnResetBlueLight = MakeButton(cardDisplayGpu, "Reset", cPad + cInnerW - S(74), S(272), S(74), S(28));
+            btnResetBlueLight.Click += (s, e) =>
+            {
+                _sliderBlueLightSys.Value = 0;
+                Display.DisplayManager.Instance.SetBlueLightShield(0);
+                UpdateBlueLightShieldLabel(0);
+            };
+
+            _sliderBlueLightSys.Scroll += (s, e) =>
+            {
+                int val = _sliderBlueLightSys.Value;
+                Display.DisplayManager.Instance.SetBlueLightShield(val);
+                UpdateBlueLightShieldLabel(val);
+            };
+            UpdateBlueLightShieldLabel(_sliderBlueLightSys.Value);
+
+            MakeLabel(cardDisplayGpu, "Dynamic Display Switch (DDS) applies instantly; MUX changes require restart.", cPad, S(322), FontHeaderLight, SubHeaderColor);
+
+            // ==========================================
+            // COLUMN 1, CARD 2: AUTOMATIC POWER PROFILES
+            // ==========================================
+            var cardPowerAuto = MakeCard(_pnlSystem, "AUTOMATIC POWER PROFILES & MODE KEY", col1X, pad + S(402), cardW, S(250));
             int pDropW = (cInnerW - S(10)) / 2;
-
             _lblAcProfileHdr = MakeLabel(cardPowerAuto, "ON AC POWER:", cPad, S(44), FontSectionHeader, SubHeaderColor);
-
             _lblBatteryProfileHdr = MakeLabel(cardPowerAuto, "ON BATTERY:", cPad + pDropW + S(10), S(44), FontSectionHeader, SubHeaderColor);
 
-
-
             _cboAcProfile = new PredatorDropDown { Location = new Point(cPad, S(68)), Size = new Size(pDropW, S(30)) };
-
             _cboAcProfile.Items.AddRange(new[] { "Don't Change", "Quiet", "Balanced", "Performance", "Turbo" });
-
             _cboAcProfile.SelectedIndex = 0;
-
             cardPowerAuto.Controls.Add(_cboAcProfile);
 
-
-
             _cboBatteryProfile = new PredatorDropDown { Location = new Point(cPad + pDropW + S(10), S(68)), Size = new Size(pDropW, S(30)) };
-
             _cboBatteryProfile.Items.AddRange(new[] { "Don't Change", "Quiet", "Balanced", "Eco" });
-
             _cboBatteryProfile.SelectedIndex = 0;
-
             cardPowerAuto.Controls.Add(_cboBatteryProfile);
 
-
-
             _cboAcProfile.SelectedIndexChanged += (s, e) =>
-
             {
-
                 if (_isInitializing) return;
-
                 int idx = _cboAcProfile.SelectedIndex;
-
                 SaveState("AutoPowerAC", idx);
-
                 SaveStateToHklm("AutoPowerAC", idx);
-
                 if (idx > 0 && idx < AcProfileValues.Length)
-
                 {
-
                     byte mode = AcProfileValues[idx];
-
                     SaveState("Power_AC", mode);
-
                     SaveStateToHklm("Power_AC", mode);
-
                 }
-
                 if (_isPluggedIn == true) ApplyPowerRules(true);
-
                 Task.Run(() => EnsureBootPowerTaskRegistered());
-
             };
-
             _cboBatteryProfile.SelectedIndexChanged += (s, e) =>
-
             {
-
                 if (_isInitializing) return;
-
                 int idx = _cboBatteryProfile.SelectedIndex;
-
                 SaveState("AutoPowerBattery", idx);
-
                 SaveStateToHklm("AutoPowerBattery", idx);
-
                 if (idx > 0 && idx < BatteryProfileValues.Length)
-
                 {
-
                     byte mode = BatteryProfileValues[idx];
-
                     SaveState("Power_Battery", mode);
-
                     SaveStateToHklm("Power_Battery", mode);
-
                 }
-
                 if (_isPluggedIn == false) ApplyPowerRules(false);
-
                 Task.Run(() => EnsureBootPowerTaskRegistered());
-
             };
-
-
 
             MakeLabel(cardPowerAuto, "PHYSICAL MODE KEY ACTION:", cPad, S(112), FontSectionHeader, SubHeaderColor);
-
             _cboModeKeyActionSys = new PredatorDropDown
-
             {
-
                 Location = new Point(cPad, S(136)),
-
                 Size = new Size(cInnerW, S(30))
-
             };
-
             _cboModeKeyActionSys.Items.AddRange(new[] { "Cycle Power Modes", "Toggle Turbo Mode (Return to Previous)" });
-
             _cboModeKeyActionSys.SelectedIndex = _modeKeyAction;
-
             _cboModeKeyActionSys.SelectedIndexChanged += (s, e) =>
-
             {
-
                 if (_isInitializing) return;
-
                 _modeKeyAction = _cboModeKeyActionSys.SelectedIndex;
-
                 if (_cboModeKeyAction != null && _cboModeKeyAction.SelectedIndex != _modeKeyAction)
-
                     _cboModeKeyAction.SelectedIndex = _modeKeyAction;
-
                 SaveState("ModeKeyAction", _modeKeyAction);
-
             };
-
             cardPowerAuto.Controls.Add(_cboModeKeyActionSys);
-
-
 
             MakeLabel(cardPowerAuto, "Profiles switch automatically on AC/Battery. Mode key cycles or toggles Turbo.", cPad, S(180), FontHeaderLight, SubHeaderColor);
 
-
-
-            // Card 3: Display & LCD Overdrive
-
-            var cardDisp = MakeCard(_pnlSystem, "DISPLAY REFRESH RATE & OVERDRIVE", col2X, pad, cardW, S(160));
-
-            int dispBtnW = (cInnerW - S(8)) / 2;
-
-            _btnDisp60 = MakeButton(cardDisp, "60 Hz", cPad, S(44), dispBtnW, S(34));
-
-            _btnDispMax = MakeButton(cardDisp, $"{_maxHz} Hz (Maximum)", cPad + dispBtnW + S(8), S(44), dispBtnW, S(34));
-
-            _btnDisp60.Click += (s, e) => ApplyDisplayMode(60, _btnDisp60);
-
-            _btnDispMax.Click += (s, e) => ApplyDisplayMode(_maxHz, _btnDispMax);
-
-
-
-            _lblOdStatusSys = MakeLabel(cardDisp, "LCD Overdrive (Fast Response Time)", cPad, S(98), FontBody, ThemeManager.TextPrimary);
-
-            _swOdSys = new PredatorSwitch { Location = new Point(cardW - cPad - S(48), S(94)), Size = new Size(S(48), S(26)) };
-
-            _swOdSys.Checked = _switchLcdOverdrive.Checked;
-
-            _swOdSys.CheckedChanged += (s, e) => ApplyLcdOverdrive(_swOdSys.Checked);
-
-            cardDisp.Controls.Add(_swOdSys);
-
-
-
-            // Card 4: USB Charging & Battery Maintenance
-
-            var cardUsb = MakeCard(_pnlSystem, "USB CHARGING & BATTERY MAINTENANCE", col2X, pad + S(172), cardW, S(240));
-
-            MakeLabel(cardUsb, "Charge USB Devices While Laptop is Off", cPad, S(48), FontBody, ThemeManager.TextPrimary);
-
-            _switchUsbCharging = new PredatorSwitch { Location = new Point(cardW - cPad - S(48), S(44)), Size = new Size(S(48), S(26)) };
-
-            var curUsb = _wmi.GetUsbCharging();
-
-            _switchUsbCharging.Checked = curUsb?.Enabled ?? true;
-
-            cardUsb.Controls.Add(_switchUsbCharging);
-
-
-
-            MakeLabel(cardUsb, "STOP CHARGING WHEN BATTERY REACHES:", cPad, S(84), FontSectionHeader, SubHeaderColor);
-
-            _cboUsbFloor = new PredatorDropDown { Location = new Point(cPad, S(108)), Size = new Size(cInnerW, S(30)) };
-
-            _cboUsbFloor.Items.AddRange(new[] { "Stop at 10% Battery", "Stop at 20% Battery", "Stop at 30% Battery" });
-
-            int floorIdx = curUsb?.FloorPercent switch { 10 => 0, 20 => 1, _ => 2 };
-
-            _cboUsbFloor.SelectedIndex = floorIdx;
-
-            cardUsb.Controls.Add(_cboUsbFloor);
-
-
-
-            _switchUsbCharging.CheckedChanged += (s, e) =>
-
-            {
-
-                bool isChecked = _switchUsbCharging.Checked;
-
-                int floor = _cboUsbFloor.SelectedIndex switch { 0 => 10, 1 => 20, _ => 30 };
-
-                Task.Run(() => _wmi.SetUsbCharging(isChecked, floor));
-
-            };
-
-            _cboUsbFloor.SelectedIndexChanged += (s, e) =>
-
-            {
-
-                bool isChecked = _switchUsbCharging.Checked;
-
-                int floor = _cboUsbFloor.SelectedIndex switch { 0 => 10, 1 => 20, _ => 30 };
-
-                Task.Run(() => _wmi.SetUsbCharging(isChecked, floor));
-
-            };
-
-
-
-            _btnBatteryCalibration = MakeButton(cardUsb, "⚡  Start Battery Calibration", cPad, S(156), cInnerW, S(34));
-
-            _btnBatteryCalibration.Click += (s, e) => StartBatteryCalibration();
-
-            _lblLastCalibratedMain = MakeLabel(cardUsb, UiLabelFormatter.FormatLastCalibrated(_appSettings.LastBatteryCalibrationUtcTicks), cPad, S(196), FontBody, SubHeaderColor);
-
-
-
-            // Card 5: Game Sync
-
-            var cardGame = MakeCard(_pnlSystem, "GAME SYNC PROFILES", col2X, pad + S(424), cardW, S(150));
-
+            // ==========================================
+            // COLUMN 1, CARD 3: GAME SYNC PROFILES
+            // ==========================================
+            var cardGame = MakeCard(_pnlSystem, "GAME SYNC PROFILES", col1X, pad + S(664), cardW, S(150));
             _lblGameSyncStatus = MakeLabel(cardGame, "Disabled", cPad, S(48), FontBody, SubHeaderColor);
-
             _switchGameSync = new PredatorToggle { Location = new Point(cardW - cPad - S(48), S(44)), Size = new Size(S(48), S(24)) };
-
             _switchGameSync.CheckedChanged += (s, e) =>
-
             {
-
                 _gameSync.IsEnabled = _switchGameSync.Checked;
-
                 _lblGameSyncStatus.Text = _switchGameSync.Checked ? "Active (Monitoring)" : "Disabled";
-
             };
-
             cardGame.Controls.Add(_switchGameSync);
 
-
-
             _btnConfigureGames = MakeButton(cardGame, "🎮  Configure Game Profiles", cPad, S(84), cInnerW, S(34));
-
             _btnConfigureGames.Click += (s, e) =>
-
             {
-
                 using var form = new GameSyncForm(_gameSync, _maxHz);
-
                 if (!this.Visible || !this.IsHandleCreated || this.WindowState == FormWindowState.Minimized)
-
                 {
-
                     form.ShowDialog();
-
                 }
-
                 else
-
                 {
-
                     try { form.ShowDialog(this); } catch { form.ShowDialog(); }
-
                 }
-
             };
 
+            // ==========================================
+            // COLUMN 2, CARD 1: ACER BIOS & FIRMWARE SETTINGS
+            // ==========================================
+            _cardBios = MakeCard(_pnlSystem, "ACER BIOS & FIRMWARE SETTINGS", col2X, pad, cardW, S(520));
+            
+            string modelText = "Hardware: " + Bios.BiosManager.Instance.ModelName + " | " + (Bios.BiosManager.Instance.SupportMode switch
+            {
+                Bios.BiosSupportMode.WmiModern2025 => "2025+ Native WMI",
+                Bios.BiosSupportMode.AcpiWmiFallback2020 => "ACPI-WMI Mapping",
+                Bios.BiosSupportMode.UefiNvramDirect => "InsydeH2O UEFI",
+                _ => "Universal Direct"
+            });
+            MakeLabel(_cardBios, modelText, cPad, S(40), FontSectionHeader, ThemeManager.Accent);
 
+            // Safety Interlocks CheckBoxes
+            _chkEnableBiosModsSys = new CheckBox
+            {
+                Text = "Enable BIOS Modifications",
+                Font = FontBodyBold,
+                ForeColor = ThemeManager.TextPrimary,
+                Location = new Point(cPad, S(66)),
+                AutoSize = true,
+                Checked = Bios.BiosManager.Instance.ModificationsEnabled
+            };
+            _cardBios.Controls.Add(_chkEnableBiosModsSys);
 
-            _pnlSystem.AutoScrollMinSize = new Size(0, S(600));
+            _chkAllowDangerousBiosSys = new CheckBox
+            {
+                Text = "Allow Dangerous Settings",
+                Font = FontBody,
+                ForeColor = ThemeManager.RedStatus,
+                Location = new Point(cPad + S(220), S(66)),
+                AutoSize = true,
+                Enabled = _chkEnableBiosModsSys.Checked,
+                Checked = Bios.BiosManager.Instance.DangerousAllowed
+            };
+            _cardBios.Controls.Add(_chkAllowDangerousBiosSys);
 
+            _chkEnableBiosModsSys.CheckedChanged += (s, e) =>
+            {
+                Bios.BiosManager.Instance.ModificationsEnabled = _chkEnableBiosModsSys.Checked;
+                _chkAllowDangerousBiosSys.Enabled = _chkEnableBiosModsSys.Checked;
+                if (!_chkEnableBiosModsSys.Checked)
+                {
+                    _chkAllowDangerousBiosSys.Checked = false;
+                    Bios.BiosManager.Instance.DangerousAllowed = false;
+                }
+                PopulateEmbeddedBiosRows();
+            };
+
+            _chkAllowDangerousBiosSys.CheckedChanged += (s, e) =>
+            {
+                Bios.BiosManager.Instance.DangerousAllowed = _chkAllowDangerousBiosSys.Checked;
+                PopulateEmbeddedBiosRows();
+            };
+
+            // Category Selector Tabs/Buttons
+            int catBtnW = (cInnerW - 2 * S(6)) / 3;
+            int catBtnH = S(30);
+            _btnBiosCatSys = MakeButton(_cardBios, "System", cPad, S(98), catBtnW, catBtnH);
+            _btnBiosCatPower = MakeButton(_cardBios, "Power & Battery", cPad + catBtnW + S(6), S(98), catBtnW, catBtnH);
+            _btnBiosCatBoot = MakeButton(_cardBios, "Boot & Setup", cPad + 2 * (catBtnW + S(6)), S(98), catBtnW, catBtnH);
+
+            _btnBiosCatSys.IsActive = true;
+            _btnBiosCatSys.Click += (s, e) => SwitchBiosCategory(Bios.BiosCategory.System, _btnBiosCatSys);
+            _btnBiosCatPower.Click += (s, e) => SwitchBiosCategory(Bios.BiosCategory.PowerBattery, _btnBiosCatPower);
+            _btnBiosCatBoot.Click += (s, e) => SwitchBiosCategory(Bios.BiosCategory.BootSetup, _btnBiosCatBoot);
+
+            // Container Panel for setting rows
+            _pnlBiosItemsContainerSys = new Panel
+            {
+                Location = new Point(cPad, S(134)),
+                Size = new Size(cInnerW, S(330)),
+                BackColor = Color.Transparent,
+                AutoScroll = true
+            };
+            _cardBios.Controls.Add(_pnlBiosItemsContainerSys);
+
+            // Bottom action buttons: Password and Restore Defaults
+            int actBtnW = (cInnerW - S(8)) / 2;
+            var btnBiosPwd = MakeButton(_cardBios, "🔑 Supervisor Password", cPad, S(474), actBtnW, S(32));
+            btnBiosPwd.Click += (s, e) => PromptBiosPassword();
+
+            var btnBiosRestore = MakeButton(_cardBios, "↺ Restore Defaults", cPad + actBtnW + S(8), S(474), actBtnW, S(32));
+            btnBiosRestore.Click += (s, e) => RestoreBiosDefaults();
+
+            PopulateEmbeddedBiosRows();
+
+            // ==========================================
+            // COLUMN 2, CARD 2: USB CHARGING & BATTERY MAINTENANCE
+            // ==========================================
+            var cardUsb = MakeCard(_pnlSystem, "USB CHARGING & BATTERY MAINTENANCE", col2X, pad + S(532), cardW, S(282));
+            MakeLabel(cardUsb, "Charge USB Devices While Laptop is Off", cPad, S(44), FontBody, ThemeManager.TextPrimary);
+            _switchUsbCharging = new PredatorSwitch { Location = new Point(cardW - cPad - S(48), S(40)), Size = new Size(S(48), S(26)) };
+            var curUsb = _wmi.GetUsbCharging();
+            _switchUsbCharging.Checked = curUsb?.Enabled ?? true;
+            cardUsb.Controls.Add(_switchUsbCharging);
+
+            MakeLabel(cardUsb, "STOP CHARGING WHEN BATTERY REACHES:", cPad, S(80), FontSectionHeader, SubHeaderColor);
+            _cboUsbFloor = new PredatorDropDown { Location = new Point(cPad, S(104)), Size = new Size(cInnerW, S(30)) };
+            _cboUsbFloor.Items.AddRange(new[] { "Stop at 10% Battery", "Stop at 20% Battery", "Stop at 30% Battery" });
+            int floorIdx = curUsb?.FloorPercent switch { 10 => 0, 20 => 1, _ => 2 };
+            _cboUsbFloor.SelectedIndex = floorIdx;
+            cardUsb.Controls.Add(_cboUsbFloor);
+
+            _switchUsbCharging.CheckedChanged += (s, e) =>
+            {
+                bool isChecked = _switchUsbCharging.Checked;
+                int floor = _cboUsbFloor.SelectedIndex switch { 0 => 10, 1 => 20, _ => 30 };
+                Task.Run(() => _wmi.SetUsbCharging(isChecked, floor));
+            };
+            _cboUsbFloor.SelectedIndexChanged += (s, e) =>
+            {
+                bool isChecked = _switchUsbCharging.Checked;
+                int floor = _cboUsbFloor.SelectedIndex switch { 0 => 10, 1 => 20, _ => 30 };
+                Task.Run(() => _wmi.SetUsbCharging(isChecked, floor));
+            };
+
+            _btnBatteryCalibration = MakeButton(cardUsb, "⚡  Start Battery Calibration", cPad, S(152), cInnerW, S(34));
+            _btnBatteryCalibration.Click += (s, e) => StartBatteryCalibration();
+            _lblLastCalibratedMain = MakeLabel(cardUsb, UiLabelFormatter.FormatLastCalibrated(_appSettings.LastBatteryCalibrationUtcTicks), cPad, S(192), FontBody, SubHeaderColor);
+
+            MakeLabel(cardUsb, "Maintains healthy lithium battery chemistry via hardware threshold limits.", cPad, S(224), FontHeaderLight, SubHeaderColor);
+
+            _pnlSystem.AutoScrollMinSize = new Size(0, S(840));
         }
-
-
 
         private void BuildSettingsPage()
 
@@ -10751,15 +10758,15 @@ namespace PredatorControlApp
             var btnDisplaySettings = MakeButton(cardDiag, "Display & GPU Switch", cPad, S(88), (cInnerW - S(8)) / 2, S(36));
             btnDisplaySettings.Click += (s, e) =>
             {
-                using var dialog = new Display.DisplaySettingsForm(Display.DisplayManager.Instance, _appSettings);
-                dialog.ShowDialog(this);
+                SwitchPage(_pnlSystem, _btnNavSystem);
+                _pnlSystem.AutoScrollPosition = new Point(0, 0);
             };
 
             var btnBiosSettings = MakeButton(cardDiag, "BIOS & Firmware", cPad + (cInnerW + S(8)) / 2, S(88), (cInnerW - S(8)) / 2, S(36));
             btnBiosSettings.Click += (s, e) =>
             {
-                using var dialog = new Bios.BiosSettingsForm(Bios.BiosManager.Instance, _appSettings);
-                dialog.ShowDialog(this);
+                SwitchPage(_pnlSystem, _btnNavSystem);
+                if (_cardBios != null) _pnlSystem.ScrollControlIntoView(_cardBios);
             };
 
 
@@ -11909,88 +11916,322 @@ namespace PredatorControlApp
 
 
         private async void ApplyGpuMode(GpuMode mode, PredatorButton btn)
-
         {
-
             try
-
             {
-
                 HighlightBtn(btn, ref _activeGpuModeBtn);
 
-                bool ok = await Task.Run(() => _wmi.SetGpuMode(mode));
-
-                if (!ok)
-
+                // Map to DDS mode
+                int targetDds = mode switch
                 {
+                    GpuMode.Auto => 1,
+                    GpuMode.iGpuOnly => 0,
+                    GpuMode.dGpuOnly => 2,
+                    _ => 1
+                };
 
-                    MessageBox.Show(this, "Failed to switch GPU working mode via ACPI/WMI.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                // Check if already in requested mode
+                var curDds = Display.DisplayManager.Instance.GetDdsStatus();
+                bool alreadyInMode = false;
+                if (curDds.IsSupported)
+                {
+                    if (targetDds == 1 && curDds.IsAutomatic) alreadyInMode = true;
+                    else if (targetDds == 0 && !curDds.IsAutomatic && curDds.ActiveMux != 2) alreadyInMode = true;
+                    else if (targetDds == 2 && !curDds.IsAutomatic && curDds.ActiveMux == 2) alreadyInMode = true;
+                }
+                else
+                {
+                    var curGpu = _wmi.GetGpuMode();
+                    if (curGpu.HasValue && curGpu.Value == mode) alreadyInMode = true;
+                }
 
+                if (alreadyInMode)
+                {
+                    UpdateGpuModeStatusLabel();
                     return;
+                }
 
+                bool applied = false;
+                bool requiresRestart = false;
+
+                // Tier 1: NVIDIA Advanced Optimus (Dynamic Display Switch / DDS) - Instant, no reboot!
+                if (curDds.IsSupported)
+                {
+                    applied = await Task.Run(() => Display.DisplayManager.Instance.SwitchDdsMode(targetDds));
+                }
+
+                // Tier 2: BIOS Display MUX via BiosManager
+                if (!applied)
+                {
+                    string biosOption = mode switch
+                    {
+                        GpuMode.Auto => "Auto",
+                        GpuMode.iGpuOnly => "Optimus",
+                        GpuMode.dGpuOnly => "Discrete GPU only",
+                        _ => "Auto"
+                    };
+                    var biosItem = Bios.BiosManager.Instance.Settings.FirstOrDefault(s => s.Name.Contains("Display MUX", StringComparison.OrdinalIgnoreCase));
+                    if (biosItem != null)
+                    {
+                        biosItem.PendingValue = biosOption;
+                        applied = await Task.Run(() => Bios.BiosManager.Instance.ApplySetting(biosItem, out _, bypassSafetyGates: true));
+                        if (applied) requiresRestart = true;
+                    }
+                }
+
+                // Tier 3: Legacy ACPI/WMI
+                if (!applied)
+                {
+                    applied = await Task.Run(() => _wmi.SetGpuMode(mode));
+                    if (applied) requiresRestart = true;
                 }
 
                 string modeName = mode switch
-
                 {
-
                     GpuMode.Auto => "Automatic (Dynamic)",
-
                     GpuMode.iGpuOnly => "Integrated Only",
-
                     GpuMode.dGpuOnly => "Dedicated Only",
-
                     _ => mode.ToString()
-
                 };
 
-                var res = MessageBox.Show(this,
+                UpdateGpuModeStatusLabel();
 
-                    $"Graphics Working Mode switched to {modeName}.\r\n\r\nA system restart is required for the display switch to take effect. Would you like to restart now?",
-
-                    "Graphics Mode Restart Required", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-
-                if (res == DialogResult.Yes)
-
+                if (!applied && !curDds.IsSupported)
                 {
-
-                    await Task.Run(() =>
-
-                    {
-
-                        try
-
-                        {
-
-                            Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 5") { CreateNoWindow = true, UseShellExecute = false });
-
-                        }
-
-                        catch (Exception ex)
-
-                        {
-
-                            Program.Report(ex, false);
-
-                        }
-
-                    });
-
+                    MessageBox.Show(this,
+                        $"GPU mode switching is not directly controllable via ACPI on this model.\r\nYour system may be configured directly in BIOS or Windows Graphics Settings.",
+                        "GPU Switching Notice", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
                 }
 
-            }
+                if (requiresRestart)
+                {
+                    var res = MessageBox.Show(this,
+                        $"Graphics Working Mode switched to {modeName}.\r\n\r\nA system restart is required for the display switch to take effect. Would you like to restart now?",
+                        "Graphics Mode Restart Required", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
 
+                    if (res == DialogResult.Yes)
+                    {
+                        await Task.Run(() =>
+                        {
+                            try
+                            {
+                                Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 5") { CreateNoWindow = true, UseShellExecute = false });
+                            }
+                            catch (Exception ex)
+                            {
+                                Program.Report(ex, false);
+                            }
+                        });
+                    }
+                }
+            }
             catch (Exception ex)
-
             {
-
                 Program.Report(ex, false);
-
             }
-
         }
 
+        private void UpdateGpuModeStatusLabel()
+        {
+            if (_lblGpuStatusSys == null) return;
+            try
+            {
+                var ddsStatus = Display.DisplayManager.Instance.GetDdsStatus();
+                if (ddsStatus.IsSupported)
+                {
+                    if (ddsStatus.IsAutomatic)
+                        _lblGpuStatusSys.Text = "Status: NVIDIA Advanced Optimus Active (Seamless Dynamic Switching)";
+                    else if (ddsStatus.ActiveMux == 2)
+                        _lblGpuStatusSys.Text = "Status: Dedicated GPU Direct (dGPU MUX Active)";
+                    else
+                        _lblGpuStatusSys.Text = "Status: Integrated Graphics (iGPU Optimus Active)";
+                }
+                else
+                {
+                    var curGpu = _wmi.GetGpuMode() ?? GpuMode.Auto;
+                    _lblGpuStatusSys.Text = curGpu switch
+                    {
+                        GpuMode.dGpuOnly => "Status: Dedicated GPU Mode (ACPI MUX Active)",
+                        GpuMode.iGpuOnly => "Status: Integrated Graphics Mode (Optimus Active)",
+                        _ => "Status: Automatic GPU Mode"
+                    };
+                }
+            }
+            catch
+            {
+                _lblGpuStatusSys.Text = "Status: GPU Display Routing Active";
+            }
+        }
 
+        private void UpdateBlueLightShieldLabel(int level)
+        {
+            if (_lblBlueLightSys == null) return;
+            string text = level switch
+            {
+                1 => "Acer BlueLight Shield™: Low (18% Reduction)",
+                2 => "Acer BlueLight Shield™: Medium (36% Reduction)",
+                3 => "Acer BlueLight Shield™: High (45% Reduction)",
+                4 => "Acer BlueLight Shield™: Ultra (54% Reduction - Warm Amber)",
+                _ => "Acer BlueLight Shield™: Off (Natural Colors - 0% Reduction)"
+            };
+            _lblBlueLightSys.Text = text;
+        }
+
+        private void SwitchBiosCategory(Bios.BiosCategory cat, PredatorButton activeBtn)
+        {
+            _currentBiosCategory = cat;
+            if (_btnBiosCatSys != null) _btnBiosCatSys.IsActive = (activeBtn == _btnBiosCatSys);
+            if (_btnBiosCatPower != null) _btnBiosCatPower.IsActive = (activeBtn == _btnBiosCatPower);
+            if (_btnBiosCatBoot != null) _btnBiosCatBoot.IsActive = (activeBtn == _btnBiosCatBoot);
+            PopulateEmbeddedBiosRows();
+        }
+
+        private void PopulateEmbeddedBiosRows()
+        {
+            if (_pnlBiosItemsContainerSys == null) return;
+            _pnlBiosItemsContainerSys.SuspendLayout();
+            _pnlBiosItemsContainerSys.Controls.Clear();
+
+            var items = Bios.BiosManager.Instance.Settings.Where(s => s.Category == _currentBiosCategory).ToList();
+            if (items.Count == 0)
+            {
+                var lblEmpty = new Label
+                {
+                    Text = "No settings available in this category for this laptop model.",
+                    Font = FontHeaderLight,
+                    ForeColor = SubHeaderColor,
+                    Location = new Point(S(10), S(20)),
+                    AutoSize = true
+                };
+                _pnlBiosItemsContainerSys.Controls.Add(lblEmpty);
+            }
+            else
+            {
+                int rowY = 0;
+                int rowW = _pnlBiosItemsContainerSys.Width - S(16);
+                int rowH = S(68);
+                foreach (var item in items)
+                {
+                    var rowPanel = new Panel
+                    {
+                        Location = new Point(0, rowY),
+                        Size = new Size(rowW, rowH),
+                        BackColor = ThemeManager.CardBg
+                    };
+                    rowPanel.Paint += (s, e) =>
+                    {
+                        using var pen = new Pen(ThemeManager.CardBorder, 1);
+                        e.Graphics.DrawRectangle(pen, 0, 0, rowPanel.Width - 1, rowPanel.Height - 1);
+                    };
+
+                    // Setting Name
+                    var lblItemName = new Label
+                    {
+                        Text = item.Name,
+                        Font = FontBodyBold,
+                        ForeColor = ThemeManager.TextPrimary,
+                        Location = new Point(S(10), S(8)),
+                        AutoSize = true
+                    };
+                    rowPanel.Controls.Add(lblItemName);
+
+                    // Risk Badge
+                    var lblRisk = new Label
+                    {
+                        Text = item.Risk == Bios.BiosSettingRisk.Dangerous ? "[DANGEROUS]" : "[SAFE]",
+                        Font = FontRiskBadge,
+                        ForeColor = item.Risk == Bios.BiosSettingRisk.Dangerous ? ThemeManager.RedStatus : ThemeManager.SuccessGreen,
+                        Location = new Point(lblItemName.Right + S(8), S(10)),
+                        AutoSize = true
+                    };
+                    rowPanel.Controls.Add(lblRisk);
+
+                    // DropDown for options
+                    var cboOpt = new PredatorDropDown
+                    {
+                        Location = new Point(S(10), S(32)),
+                        Size = new Size(rowW - S(110), S(28))
+                    };
+                    foreach (var opt in item.Options) cboOpt.Items.Add(opt);
+                    int selIdx = item.Options.IndexOf(item.CurrentValue);
+                    if (selIdx >= 0) cboOpt.SelectedIndex = selIdx;
+                    else if (cboOpt.Items.Count > 0) cboOpt.SelectedIndex = 0;
+                    rowPanel.Controls.Add(cboOpt);
+
+                    // Apply Button
+                    bool canApply = Bios.BiosManager.Instance.ModificationsEnabled &&
+                                   (item.Risk != Bios.BiosSettingRisk.Dangerous || Bios.BiosManager.Instance.DangerousAllowed);
+                    var btnApply = MakeButton(rowPanel, "Apply", rowW - S(95), S(32), S(85), S(28));
+                    btnApply.Enabled = canApply;
+                    btnApply.Click += (s, e) =>
+                    {
+                        string sel = cboOpt.SelectedText;
+                        if (string.IsNullOrEmpty(sel)) return;
+                        item.PendingValue = sel;
+                        if (Bios.BiosManager.Instance.ApplySetting(item, out string err))
+                        {
+                            MessageBox.Show(this, $"BIOS setting '{item.Name}' applied successfully to '{item.CurrentValue}'.",
+                                "BIOS Setting Updated", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                        else
+                        {
+                            MessageBox.Show(this, $"Failed to apply BIOS setting '{item.Name}':\n{err}",
+                                "BIOS Setting Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        }
+                    };
+
+                    _pnlBiosItemsContainerSys.Controls.Add(rowPanel);
+                    rowY += rowH + S(6);
+                }
+            }
+            _pnlBiosItemsContainerSys.ResumeLayout();
+        }
+
+        private void PromptBiosPassword()
+        {
+            using var form = new Form
+            {
+                Text = "Set BIOS Supervisor Password",
+                Size = new Size(S(420), S(200)),
+                StartPosition = FormStartPosition.CenterParent,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false,
+                MinimizeBox = false,
+                BackColor = ThemeManager.FormBg,
+                ForeColor = ThemeManager.TextPrimary
+            };
+            var lbl = new Label { Text = "Enter BIOS Supervisor Password:", Location = new Point(S(20), S(20)), AutoSize = true, Font = FontBody };
+            var txt = new TextBox { Location = new Point(S(20), S(50)), Size = new Size(S(360), S(30)), UseSystemPasswordChar = true };
+            var btnOk = MakeButton(form, "Apply Password", S(120), S(100), S(160), S(32));
+            btnOk.Click += (s, e) =>
+            {
+                Bios.BiosManager.Instance.SetSupervisorPassword(txt.Text);
+                form.DialogResult = DialogResult.OK;
+                form.Close();
+            };
+            form.Controls.AddRange(new Control[] { lbl, txt, btnOk });
+            form.ShowDialog(this);
+        }
+
+        private void RestoreBiosDefaults()
+        {
+            var res = MessageBox.Show(this,
+                "Are you sure you want to restore all Acer BIOS and Firmware settings to factory defaults?\r\n\r\nThis will re-initialize firmware settings safely.",
+                "Restore BIOS Defaults", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            if (res == DialogResult.Yes)
+            {
+                if (Bios.BiosManager.Instance.RestoreDefaults(false, out string msg))
+                {
+                    MessageBox.Show(this, msg, "BIOS Defaults Restored", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    PopulateEmbeddedBiosRows();
+                }
+                else
+                {
+                    MessageBox.Show(this, msg, "Restore Defaults Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            }
+        }
 
         internal void ApplyLcdOverdrive(bool enable)
 
@@ -16366,38 +16607,6 @@ namespace PredatorControlApp
                                 {
 
                                     ApplyPowerMode(probedHwMode, PowerByteToBtn(probedHwMode));
-
-                                }
-
-                            }
-
-
-
-                            if (!onBattery && _isPluggedIn == true && _currentPowerMode != 0x06 && (DateTime.UtcNow - _lastFirmwareReassert).TotalSeconds >= 30)
-
-                            {
-
-                                if (DateTime.UtcNow >= _powerModeTransitionLockUntilUtc)
-
-                                {
-
-                                    _lastFirmwareReassert = DateTime.UtcNow;
-
-                                    byte pMode = GetCurrentPowerByte();
-
-                                    byte fMode = GetCurrentFanByte();
-
-                                    if (fMode == 0x03)
-
-                                        _ = Task.Run(() => _wmi.SetPowerMode(pMode));
-
-                                    else
-
-                                        _ = _fanCommandQueue.Enqueue(FanCommandKind.Mode, () =>
-                                        {
-                                            _wmi.SetPowerMode(pMode);
-                                            _wmi.SetFanBehavior(fMode, false);
-                                        });
 
                                 }
 

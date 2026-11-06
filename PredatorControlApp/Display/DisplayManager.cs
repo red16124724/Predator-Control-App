@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using PredatorControlApp;
 
 namespace PredatorControlApp.Display
 {
@@ -95,6 +96,15 @@ namespace PredatorControlApp.Display
                 success = PredatorNativeCore.DisplaySetRefreshRate(hz);
             }
 
+            if (!success)
+            {
+                try
+                {
+                    success = Form1.SetRefreshRateCore(hz);
+                }
+                catch { }
+            }
+
             if (success || !PredatorNativeCore.IsNativeCoreAvailable)
             {
                 lock (_lock) { _currentRefreshRate = hz; }
@@ -160,6 +170,23 @@ namespace PredatorControlApp.Display
             }
 
             return false;
+        }
+
+        public bool SwitchDdsMode(int mode)
+        {
+            return SetDdsMode(mode);
+        }
+
+        public bool SwitchDdsMode(GpuMode mode)
+        {
+            int ddsMode = mode switch
+            {
+                GpuMode.Auto => (int)DdsMode.Automatic,    // 1
+                GpuMode.iGpuOnly => (int)DdsMode.Optimus,  // 0
+                GpuMode.dGpuOnly => (int)DdsMode.NvidiaGpuOnly, // 2
+                _ => (int)DdsMode.Automatic
+            };
+            return SetDdsMode(ddsMode);
         }
 
         public bool SetLcdOverdrive(bool enabled)

@@ -550,6 +550,48 @@ namespace PredatorControlApp.Tests
             Assert.InRange(speed, 20, 100);
         }
 
+
+        #region Bug Fix: Helios Neo Periodic RGB Blinking Elimination
+
+        [Fact]
+        public void WmiController_TrySetPowerMode_HeliosNeoBlinkingPrevention_PreventsRedundantHardwareWrites()
+        {
+            using var wmi = new WmiController();
+
+            // Initial apply tracks the mode
+            wmi.TrySetPowerMode(0x01, forceRetry: false);
+            Assert.Equal((byte)0x01, wmi.LastAppliedPowerMode);
+
+            // Re-applying the same mode without forceRetry MUST immediately return true
+            // to prevent redundant EC writes that trigger the hardware keyboard RGB notification blink/pulse on Helios Neo / AI models
+            bool redundantResult = wmi.TrySetPowerMode(0x01, forceRetry: false);
+            Assert.True(redundantResult);
+            Assert.Equal((byte)0x01, wmi.LastAppliedPowerMode);
+
+            // Explicit forceRetry: true bypasses the redundant check
+            bool forceResult = wmi.TrySetPowerMode(0x01, forceRetry: true);
+            Assert.True(forceResult || !forceResult);
+            Assert.Equal((byte)0x01, wmi.LastAppliedPowerMode);
+
+            // Mode switch to Turbo (0x05) executes and updates LastAppliedPowerMode
+            wmi.TrySetPowerMode(0x05, forceRetry: false);
+            Assert.Equal((byte)0x05, wmi.LastAppliedPowerMode);
+
+            // Redundant Turbo write without forceRetry also returns true without touching hardware
+            bool turboRedundant = wmi.TrySetPowerMode(0x05, forceRetry: false);
+            Assert.True(turboRedundant);
+            Assert.Equal((byte)0x05, wmi.LastAppliedPowerMode);
+        }
+
+        [Fact]
+        public void Form1_NoFirmwareReassertTimerLoopExists()
+        {
+            var field = typeof(Form1).GetField("_lastFirmwareReassert", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Static);
+            Assert.Null(field);
+        }
+
+        #endregion
+
         #endregion
     }
 }

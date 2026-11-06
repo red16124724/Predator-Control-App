@@ -10,6 +10,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 
+## [1.5.5 UI Embedded Redesign & Hardware Blinking Fix] - 2026-11-06
+
+- **Helios Neo Periodic RGB Blinking Elimination**:
+  - Eliminated unconditional 30-second firmware reassertion timer loop in Form1 telemetry tick, which repeatedly triggered Embedded Controller (EC) mode-change lighting animations on Acer Predator Helios Neo 16 / 16s / 16 AI / 18 models.
+  - Added same-mode early exit in WmiController.TrySetPowerMode: redundant calls return true immediately without dispatching EC HID feature reports or ACPI WMI commands.
+- **GPU Switching Multi-Tier Fallback Pipeline**:
+  - Replaced legacy WMI-only call with multi-tier fallback: Tier 1 NVIDIA Advanced Optimus (DDS) -> Tier 2 BIOS Display MUX -> Tier 3 ACPI WMI.
+  - Added active mode verification: selecting the currently active GPU mode succeeds instantly without triggering the 'Failed to switch GPU working mode via ACPI/WMI' error dialog.
+  - NVIDIA Advanced Optimus switches apply dynamically in real time without requiring a system restart.
+- **Embedded System & Power Section UI Redesign**:
+  - Embedded comprehensive 'Display & GPU Switching (Advanced Optimus)' card directly in System & Power: real-time DDS status badge, dynamic refresh rate list, quick 60Hz/MaxHz buttons, LCD Overdrive switch, and Acer BlueLight Shield hardware slider.
+  - Embedded full 'Acer BIOS & Firmware Settings' card directly in System & Power: hardware model badge, two-tier safety gates (Enable Modifications & Allow Dangerous Settings), categorized tabs (System, Power & Battery, Boot & Setup), dynamic setting rows with risk badges, Supervisor Password dialog, and Restore Defaults button.
+  - Modernized cardDiag and tray shortcuts to smoothly navigate to the embedded cards in System & Power.
+  - Resized standalone DisplaySettingsForm and BiosSettingsForm dialogs to 720-820px with spacious control margins, completely resolving font clipping and combobox overlap.
+
+---
+
 ## [1.5.5 Imported Features, Hardware Stress Hardening & Full Bug Remediation] - 2026-11-06
 
 Exhaustive stress testing, full codebase bug remediation, and advanced feature consolidation from OpenSense and PreySense across native Rust (predator_core.dll) and managed C# WinForms (PredatorControlApp):
