@@ -39,8 +39,10 @@ struct NvUsages {
 
 type NvApiQueryInterfaceFn = unsafe extern "C" fn(id: u32) -> *mut c_void;
 type NvApiInitializeFn = unsafe extern "C" fn() -> i32;
-type NvApiEnumPhysicalGpusFn = unsafe extern "C" fn(gpu_handles: *mut *mut c_void, gpu_count: *mut i32) -> i32;
-type NvApiGpuGetUsagesFn = unsafe extern "C" fn(gpu_handle: *mut c_void, usages: *mut NvUsages) -> i32;
+type NvApiEnumPhysicalGpusFn =
+    unsafe extern "C" fn(gpu_handles: *mut *mut c_void, gpu_count: *mut i32) -> i32;
+type NvApiGpuGetUsagesFn =
+    unsafe extern "C" fn(gpu_handle: *mut c_void, usages: *mut NvUsages) -> i32;
 
 #[link(name = "kernel32")]
 #[link(name = "winmm")]
@@ -48,7 +50,11 @@ extern "system" {
     fn LoadLibraryW(lpLibFileName: *const u16) -> *mut c_void;
     fn FreeLibrary(hLibModule: *mut c_void) -> i32;
     fn GetProcAddress(hModule: *mut c_void, lpProcName: *const i8) -> *mut c_void;
-    fn GetSystemTimes(lpIdleTime: *mut FileTime, lpKernelTime: *mut FileTime, lpUserTime: *mut FileTime) -> i32;
+    fn GetSystemTimes(
+        lpIdleTime: *mut FileTime,
+        lpKernelTime: *mut FileTime,
+        lpUserTime: *mut FileTime,
+    ) -> i32;
     fn timeBeginPeriod(uPeriod: u32) -> u32;
     fn timeEndPeriod(uPeriod: u32) -> u32;
 }
@@ -196,9 +202,18 @@ impl CpuUsageSampler {
     }
 
     pub fn sample(&mut self) -> Option<f64> {
-        let mut idle = FileTime { dw_low_date_time: 0, dw_high_date_time: 0 };
-        let mut kernel = FileTime { dw_low_date_time: 0, dw_high_date_time: 0 };
-        let mut user = FileTime { dw_low_date_time: 0, dw_high_date_time: 0 };
+        let mut idle = FileTime {
+            dw_low_date_time: 0,
+            dw_high_date_time: 0,
+        };
+        let mut kernel = FileTime {
+            dw_low_date_time: 0,
+            dw_high_date_time: 0,
+        };
+        let mut user = FileTime {
+            dw_low_date_time: 0,
+            dw_high_date_time: 0,
+        };
 
         let res = unsafe { GetSystemTimes(&mut idle, &mut kernel, &mut user) };
         if res == 0 {
@@ -217,9 +232,21 @@ impl CpuUsageSampler {
             return None;
         }
 
-        let idle_delta = if idle_u >= self.prev_idle { idle_u - self.prev_idle } else { 0 };
-        let kernel_delta = if kernel_u >= self.prev_kernel { kernel_u - self.prev_kernel } else { 0 };
-        let user_delta = if user_u >= self.prev_user { user_u - self.prev_user } else { 0 };
+        let idle_delta = if idle_u >= self.prev_idle {
+            idle_u - self.prev_idle
+        } else {
+            0
+        };
+        let kernel_delta = if kernel_u >= self.prev_kernel {
+            kernel_u - self.prev_kernel
+        } else {
+            0
+        };
+        let user_delta = if user_u >= self.prev_user {
+            user_u - self.prev_user
+        } else {
+            0
+        };
 
         self.prev_idle = idle_u;
         self.prev_kernel = kernel_u;
@@ -286,7 +313,9 @@ impl TelemetryWorker {
 
                 // Sample CPU temperature and power limits via PawnIO
                 {
-                    let mut p_guard = crate::GLOBAL_PAWNIO.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut p_guard = crate::GLOBAL_PAWNIO
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
                     if let Some(ref mut driver) = *p_guard {
                         if let Ok(tj) = driver.controller().read_temperature_target() {
                             let tj_max = tj.target_temp_celsius;
@@ -351,7 +380,8 @@ impl TelemetryWorker {
     }
 
     pub fn set_interval(&self, ms: u32) {
-        self.interval_ms.store(ms.clamp(250, 10000), Ordering::Release);
+        self.interval_ms
+            .store(ms.clamp(250, 10000), Ordering::Release);
     }
 
     pub fn get_snapshot(&self) -> NativeTelemetrySnapshot {

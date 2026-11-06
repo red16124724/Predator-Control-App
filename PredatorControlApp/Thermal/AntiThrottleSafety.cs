@@ -124,7 +124,7 @@ namespace PredatorControlApp
                     if (rc >= 0)
                     {
                         int nBoost = CalculateBoost(temperature);
-                        bool nativeTripwireActive = tripwireLocked != 0;
+                        bool nativeTripwireActive = tripwireLocked != 0 || nBoost >= 100;
                         if (nativeTripwireActive)
                         {
                             _tripwireLockedUntilTick = nowMs + TripwireHoldDurationMs;

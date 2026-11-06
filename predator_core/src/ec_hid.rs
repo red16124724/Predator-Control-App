@@ -131,7 +131,12 @@ extern "system" {
 
 #[link(name = "setupapi")]
 extern "system" {
-    fn SetupDiGetClassDevsW(class_guid: *const Guid, enumerator: *const u16, parent: *mut c_void, flags: u32) -> *mut c_void;
+    fn SetupDiGetClassDevsW(
+        class_guid: *const Guid,
+        enumerator: *const u16,
+        parent: *mut c_void,
+        flags: u32,
+    ) -> *mut c_void;
     fn SetupDiEnumDeviceInterfaces(
         device_info_set: *mut c_void,
         device_info_data: *mut c_void,
@@ -219,11 +224,7 @@ thread_local! {
 }
 
 fn with_hid_api<R>(f: impl FnOnce(&HidApi) -> R) -> Option<R> {
-    HID_API.with(|cell| {
-        cell.get_or_init(HidApi::load)
-            .as_ref()
-            .map(f)
-    })
+    HID_API.with(|cell| cell.get_or_init(HidApi::load).as_ref().map(f))
 }
 
 fn read_report_length(handle: *mut c_void, api: &HidApi) -> usize {
@@ -231,7 +232,9 @@ fn read_report_length(handle: *mut c_void, api: &HidApi) -> usize {
     let mut length = DEFAULT_REPORT_LENGTH;
     if unsafe { (api.get_preparsed_data)(handle, &mut preparsed) } != 0 {
         let mut caps = HidpCaps::default();
-        if unsafe { (api.get_caps)(preparsed, &mut caps) } >= 0 && caps.feature_report_byte_length > 0 {
+        if unsafe { (api.get_caps)(preparsed, &mut caps) } >= 0
+            && caps.feature_report_byte_length > 0
+        {
             length = caps.feature_report_byte_length as usize;
         }
         unsafe { (api.free_preparsed_data)(preparsed) };
@@ -299,7 +302,13 @@ impl EcHid {
         'outer: while index < 64 {
             let mut did = SpDeviceInterfaceData::default();
             let ok = unsafe {
-                SetupDiEnumDeviceInterfaces(info_set, std::ptr::null_mut(), &hid_guid, index, &mut did)
+                SetupDiEnumDeviceInterfaces(
+                    info_set,
+                    std::ptr::null_mut(),
+                    &hid_guid,
+                    index,
+                    &mut did,
+                )
             };
             if ok == 0 {
                 break;
@@ -325,7 +334,11 @@ impl EcHid {
             let mut buf: Vec<u64> = vec![0; words];
             let header = buf.as_mut_ptr() as *mut SpDeviceInterfaceDetailHeader;
             unsafe {
-                (*header).cb_size = if cfg!(target_pointer_width = "64") { 8 } else { 6 };
+                (*header).cb_size = if cfg!(target_pointer_width = "64") {
+                    8
+                } else {
+                    6
+                };
             }
             let ok = unsafe {
                 SetupDiGetDeviceInterfaceDetailW(
@@ -401,7 +414,8 @@ impl EcHid {
             let rep_len = read_report_length(handle, api);
             let usage_match = usage_matches(handle, api, ENEK_USAGE_PAGE, ENEK_USAGE);
 
-            let is_enek = has_enek_tag || (vid_match && pid_match && (usage_match || rep_len == 17 || rep_len >= 11));
+            let is_enek = has_enek_tag
+                || (vid_match && pid_match && (usage_match || rep_len == 17 || rep_len >= 11));
 
             if !is_enek {
                 unsafe { CloseHandle(handle) };
@@ -419,9 +433,12 @@ impl EcHid {
             return None;
         }
 
-        let mutex_name: Vec<u16> = format!("Global\\ECHIDFeatureVID_{:04X}&PID_{:04X}\0", vendor_id, product_id)
-            .encode_utf16()
-            .collect();
+        let mutex_name: Vec<u16> = format!(
+            "Global\\ECHIDFeatureVID_{:04X}&PID_{:04X}\0",
+            vendor_id, product_id
+        )
+        .encode_utf16()
+        .collect();
         let mutex = unsafe { CreateMutexW(std::ptr::null_mut(), 0, mutex_name.as_ptr()) };
 
         Some(EcHid {
@@ -459,8 +476,15 @@ impl EcHid {
         let mut index = 0u32;
         'outer: while index < 64 {
             let mut did = SpDeviceInterfaceData::default();
-            let ok =
-                unsafe { SetupDiEnumDeviceInterfaces(info_set, std::ptr::null_mut(), &hid_guid, index, &mut did) };
+            let ok = unsafe {
+                SetupDiEnumDeviceInterfaces(
+                    info_set,
+                    std::ptr::null_mut(),
+                    &hid_guid,
+                    index,
+                    &mut did,
+                )
+            };
             if ok == 0 {
                 break;
             }
@@ -486,7 +510,11 @@ impl EcHid {
             let mut buf: Vec<u64> = vec![0; words];
             let header = buf.as_mut_ptr() as *mut SpDeviceInterfaceDetailHeader;
             unsafe {
-                (*header).cb_size = if cfg!(target_pointer_width = "64") { 8 } else { 6 };
+                (*header).cb_size = if cfg!(target_pointer_width = "64") {
+                    8
+                } else {
+                    6
+                };
             }
             let ok = unsafe {
                 SetupDiGetDeviceInterfaceDetailW(
@@ -516,7 +544,8 @@ impl EcHid {
                 continue;
             }
 
-            let mut wide: Vec<u16> = unsafe { std::slice::from_raw_parts(path_ptr, path_len) }.to_vec();
+            let mut wide: Vec<u16> =
+                unsafe { std::slice::from_raw_parts(path_ptr, path_len) }.to_vec();
             wide.push(0);
 
             // Try read/write first, then read-only (some EC HID stacks reject write access).
@@ -554,7 +583,9 @@ impl EcHid {
                 ..Default::default()
             };
             let attrs_ok = unsafe { (api.get_attributes)(handle, &mut attributes) } != 0;
-            if attrs_ok && (attributes.vendor_id != vendor_id || attributes.product_id != product_id) {
+            if attrs_ok
+                && (attributes.vendor_id != vendor_id || attributes.product_id != product_id)
+            {
                 unsafe { CloseHandle(handle) };
                 continue;
             }
@@ -576,9 +607,12 @@ impl EcHid {
         }
 
         // Global named mutex shared with any other process talking to the same EC.
-        let mutex_name: Vec<u16> = format!("Global\\ECHIDFeatureVID_{:04X}&PID_{:04X}\0", vendor_id, product_id)
-            .encode_utf16()
-            .collect();
+        let mutex_name: Vec<u16> = format!(
+            "Global\\ECHIDFeatureVID_{:04X}&PID_{:04X}\0",
+            vendor_id, product_id
+        )
+        .encode_utf16()
+        .collect();
         let mutex = unsafe { CreateMutexW(std::ptr::null_mut(), 0, mutex_name.as_ptr()) };
         // A null mutex just means no cross-process arbitration; keep going.
 
@@ -620,7 +654,10 @@ impl EcHid {
         if !self.is_open() || report.is_empty() {
             return false;
         }
-        let len = self.report_length.max(report.len()).clamp(11, MAX_REPORT_LENGTH);
+        let len = self
+            .report_length
+            .max(report.len())
+            .clamp(11, MAX_REPORT_LENGTH);
         let mut buf = vec![0u8; len];
         let copy_len = report.len().min(len);
         buf[..copy_len].copy_from_slice(&report[..copy_len]);
@@ -637,18 +674,21 @@ impl EcHid {
     /// Sets 4 keyboard zone colors on ENEK5130 hardware via direct HID feature reports.
     pub fn set_enek_zones(
         &self,
-        r1: u8, g1: u8, b1: u8,
-        r2: u8, g2: u8, b2: u8,
-        r3: u8, g3: u8, b3: u8,
-        r4: u8, g4: u8, b4: u8,
+        r1: u8,
+        g1: u8,
+        b1: u8,
+        r2: u8,
+        g2: u8,
+        b2: u8,
+        r3: u8,
+        g3: u8,
+        b3: u8,
+        r4: u8,
+        g4: u8,
+        b4: u8,
         brightness: u8,
     ) -> bool {
-        let colors = [
-            (r1, g1, b1),
-            (r2, g2, b2),
-            (r3, g3, b3),
-            (r4, g4, b4),
-        ];
+        let colors = [(r1, g1, b1), (r2, g2, b2), (r3, g3, b3), (r4, g4, b4)];
         let b = brightness.min(100);
         let mut all_ok = true;
         for i in 0..4 {
@@ -665,7 +705,9 @@ impl EcHid {
         if !self.is_open() || request.is_empty() {
             return None;
         }
-        let rep_len = self.report_length.clamp(DEFAULT_REPORT_LENGTH, MAX_REPORT_LENGTH);
+        let rep_len = self
+            .report_length
+            .clamp(DEFAULT_REPORT_LENGTH, MAX_REPORT_LENGTH);
         if out.len() < rep_len {
             return None;
         }
@@ -692,11 +734,14 @@ impl EcHid {
                 let copy = request.len().min(rep_len);
                 req[..copy].copy_from_slice(&request[..copy]);
 
-                if unsafe { (api.set_feature)(self.device, req.as_mut_ptr(), rep_len as u32) } != 0 {
+                if unsafe { (api.set_feature)(self.device, req.as_mut_ptr(), rep_len as u32) } != 0
+                {
                     unsafe { Sleep(20) };
                     let mut reply = vec![0u8; rep_len];
                     reply[0] = request[0];
-                    if unsafe { (api.get_feature)(self.device, reply.as_mut_ptr(), rep_len as u32) } != 0 {
+                    if unsafe { (api.get_feature)(self.device, reply.as_mut_ptr(), rep_len as u32) }
+                        != 0
+                    {
                         out[..rep_len].copy_from_slice(&reply);
                         result = Some(rep_len);
                     }
@@ -731,7 +776,11 @@ pub fn build_enek_zone_report(zone_index: usize, r: u8, g: u8, b: u8, brightness
     let mut pkt = [0u8; 11];
     pkt[0] = ENEK_REPORT_ID;
     pkt[1] = ENEK_TARGET_KEYBOARD;
-    pkt[2] = if brightness == 0 { 0x02 } else { ENEK_EFFECT_STATIC };
+    pkt[2] = if brightness == 0 {
+        0x02
+    } else {
+        ENEK_EFFECT_STATIC
+    };
     pkt[3] = brightness.min(100);
     pkt[4] = 0;
     pkt[5] = 0;
@@ -772,7 +821,11 @@ pub unsafe extern "C" fn predator_enek_is_open() -> i32 {
     crate::safe_ffi(0, || {
         let guard = GLOBAL_ENEK.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(dev) = guard.as_ref() {
-            if dev.is_open() { 1 } else { 0 }
+            if dev.is_open() {
+                1
+            } else {
+                0
+            }
         } else {
             0
         }
@@ -801,10 +854,18 @@ pub unsafe extern "C" fn predator_enek_send_report(report_bytes: *const u8, len:
 
 #[no_mangle]
 pub unsafe extern "C" fn predator_enek_set_zones(
-    r1: u8, g1: u8, b1: u8,
-    r2: u8, g2: u8, b2: u8,
-    r3: u8, g3: u8, b3: u8,
-    r4: u8, g4: u8, b4: u8,
+    r1: u8,
+    g1: u8,
+    b1: u8,
+    r2: u8,
+    g2: u8,
+    b2: u8,
+    r3: u8,
+    g3: u8,
+    b3: u8,
+    r4: u8,
+    g4: u8,
+    b4: u8,
     brightness: u8,
 ) -> i32 {
     crate::safe_ffi(-1, || {
@@ -841,7 +902,16 @@ pub fn enumerate_hid_paths(limit: usize) -> usize {
         let mut count = 0;
         for index in 0..limit.min(MAX_DEVICE_PATHS) as u32 {
             let mut did = SpDeviceInterfaceData::default();
-            if unsafe { SetupDiEnumDeviceInterfaces(info_set, std::ptr::null_mut(), &hid_guid, index, &mut did) } == 0 {
+            if unsafe {
+                SetupDiEnumDeviceInterfaces(
+                    info_set,
+                    std::ptr::null_mut(),
+                    &hid_guid,
+                    index,
+                    &mut did,
+                )
+            } == 0
+            {
                 break;
             }
             count += 1;
@@ -897,7 +967,11 @@ mod tests {
         // SP_DEVICE_INTERFACE_DATA: cbSize + GUID + flags + reserved pointer.
         assert_eq!(
             std::mem::size_of::<SpDeviceInterfaceData>(),
-            if cfg!(target_pointer_width = "64") { 32 } else { 28 }
+            if cfg!(target_pointer_width = "64") {
+                32
+            } else {
+                28
+            }
         );
         // HIDP_CAPS: 5 + 17 + 10 USHORTs = 32 * 2 = 64 bytes.
         assert_eq!(std::mem::size_of::<HidpCaps>(), 64);

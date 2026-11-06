@@ -63,7 +63,9 @@ pub struct AcpiTable {
 
 impl AcpiTable {
     pub fn signature_str(&self) -> String {
-        String::from_utf8_lossy(&self.signature).trim_end().to_string()
+        String::from_utf8_lossy(&self.signature)
+            .trim_end()
+            .to_string()
     }
 
     pub fn oem_table_id_str(&self) -> String {
@@ -94,22 +96,35 @@ pub fn read_pkg_length(aml: &[u8], pos: &mut usize) -> Option<usize> {
         1 => {
             let val = (lead & 0x0F) as usize | ((aml[*pos] as usize) << 4);
             *pos += 1;
-            if val >= 2 { Some(val) } else { None }
+            if val >= 2 {
+                Some(val)
+            } else {
+                None
+            }
         }
         2 => {
             let b1 = aml[*pos] as usize;
             let b2 = aml[*pos + 1] as usize;
             *pos += 2;
             let val = (lead & 0x0F) as usize | (b1 << 4) | (b2 << 12);
-            if val >= 3 { Some(val) } else { None }
+            if val >= 3 {
+                Some(val)
+            } else {
+                None
+            }
         }
         _ => {
             let b1 = aml[*pos] as usize;
             let b2 = aml[*pos + 1] as usize;
             let b3 = aml[*pos + 2] as usize;
             *pos += 3;
-            let val = ((lead & 0x0F) as usize | (b1 << 4) | (b2 << 12) | ((b3 & 0x0F) << 20)) & 0x0FFF_FFFF;
-            if val >= 4 { Some(val) } else { None }
+            let val = ((lead & 0x0F) as usize | (b1 << 4) | (b2 << 12) | ((b3 & 0x0F) << 20))
+                & 0x0FFF_FFFF;
+            if val >= 4 {
+                Some(val)
+            } else {
+                None
+            }
         }
     }
 }
@@ -148,7 +163,8 @@ pub fn read_aml_integer(aml: &[u8], pos: &mut usize, limit: usize) -> i64 {
         }
         AML_DWORD_PREFIX => {
             if *pos + 4 <= max_limit {
-                let v = u32::from_le_bytes([aml[*pos], aml[*pos + 1], aml[*pos + 2], aml[*pos + 3]]) as i64;
+                let v = u32::from_le_bytes([aml[*pos], aml[*pos + 1], aml[*pos + 2], aml[*pos + 3]])
+                    as i64;
                 *pos += 4;
                 v
             } else {
@@ -198,7 +214,9 @@ pub fn extract_aml_integers(aml: &[u8]) -> Vec<i64> {
             }
             AML_DWORD_PREFIX => {
                 if i + 3 < aml.len() {
-                    out.push(u32::from_le_bytes([aml[i], aml[i + 1], aml[i + 2], aml[i + 3]]) as i64);
+                    out.push(
+                        u32::from_le_bytes([aml[i], aml[i + 1], aml[i + 2], aml[i + 3]]) as i64,
+                    );
                     i += 4;
                 } else {
                     break;
@@ -289,9 +307,21 @@ fn try_parse_structured(aml: &[u8], pos: &mut usize) -> Vec<PpccEntry> {
                     && raw_max >= raw_min
                     && (1_000..=500_000).contains(&raw_max)
                 {
-                    let min_tw = if inner.len() > 3 { inner[3].clamp(1, 1_000_000) as i32 } else { 1000 };
-                    let max_tw = if inner.len() > 4 { inner[4].clamp(1, 1_000_000) as i32 } else { 32000 };
-                    let step = if inner.len() > 5 { inner[5].clamp(1, 50_000) as i32 } else { 500 };
+                    let min_tw = if inner.len() > 3 {
+                        inner[3].clamp(1, 1_000_000) as i32
+                    } else {
+                        1000
+                    };
+                    let max_tw = if inner.len() > 4 {
+                        inner[4].clamp(1, 1_000_000) as i32
+                    } else {
+                        32000
+                    };
+                    let step = if inner.len() > 5 {
+                        inner[5].clamp(1, 50_000) as i32
+                    } else {
+                        500
+                    };
                     list.push(PpccEntry {
                         index: raw_index as i32,
                         min_mw: raw_min as i32,
@@ -521,11 +551,7 @@ extern "system" {
         buffer: *mut u8,
         buffer_size: u32,
     ) -> u32;
-    fn EnumSystemFirmwareTables(
-        provider: u32,
-        buffer: *mut u8,
-        buffer_size: u32,
-    ) -> u32;
+    fn EnumSystemFirmwareTables(provider: u32, buffer: *mut u8, buffer_size: u32) -> u32;
 }
 
 pub fn fetch_and_parse_ppcc() -> Option<PpccSummary> {
@@ -549,7 +575,8 @@ pub fn fetch_and_parse_ppcc() -> Option<PpccSummary> {
         let enum_size = unsafe { EnumSystemFirmwareTables(acpi_provider, std::ptr::null_mut(), 0) };
         if enum_size >= 4 && enum_size <= 1024 * 1024 {
             let mut id_buf = vec![0u8; enum_size as usize];
-            let read_ids = unsafe { EnumSystemFirmwareTables(acpi_provider, id_buf.as_mut_ptr(), enum_size) };
+            let read_ids =
+                unsafe { EnumSystemFirmwareTables(acpi_provider, id_buf.as_mut_ptr(), enum_size) };
             if read_ids >= 4 {
                 let table_count = (read_ids / 4) as usize;
                 for i in 0..table_count {
@@ -559,12 +586,23 @@ pub fn fetch_and_parse_ppcc() -> Option<PpccSummary> {
                         id_buf[i * 4 + 2],
                         id_buf[i * 4 + 3],
                     ]);
-                    let table_size = unsafe { GetSystemFirmwareTable(acpi_provider, table_id, std::ptr::null_mut(), 0) };
+                    let table_size = unsafe {
+                        GetSystemFirmwareTable(acpi_provider, table_id, std::ptr::null_mut(), 0)
+                    };
                     if table_size >= 36 && table_size <= 16 * 1024 * 1024 {
                         let mut table_buf = vec![0u8; table_size as usize];
-                        let table_read = unsafe { GetSystemFirmwareTable(acpi_provider, table_id, table_buf.as_mut_ptr(), table_size) };
+                        let table_read = unsafe {
+                            GetSystemFirmwareTable(
+                                acpi_provider,
+                                table_id,
+                                table_buf.as_mut_ptr(),
+                                table_size,
+                            )
+                        };
                         if table_read >= 36 {
-                            if let Some(summary) = parse_ppcc_summary(&table_buf[..table_read as usize]) {
+                            if let Some(summary) =
+                                parse_ppcc_summary(&table_buf[..table_read as usize])
+                            {
                                 return Some(summary);
                             }
                         }
@@ -581,9 +619,7 @@ pub fn fetch_and_parse_ppcc() -> Option<PpccSummary> {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn predator_acpi_fetch_and_parse_ppcc(
-    out_summary: *mut PpccSummary,
-) -> i32 {
+pub unsafe extern "C" fn predator_acpi_fetch_and_parse_ppcc(out_summary: *mut PpccSummary) -> i32 {
     crate::safe_ffi(-1, || {
         if out_summary.is_null() || !crate::is_valid_mut_ptr(out_summary) {
             return -1;
@@ -742,7 +778,10 @@ mod tests {
         let mut pos = 0;
         assert_eq!(read_aml_integer(&[AML_BYTE_PREFIX, 0x7F], &mut pos, 2), 127);
         let mut pos = 0;
-        assert_eq!(read_aml_integer(&[AML_WORD_PREFIX, 0x88, 0x13], &mut pos, 3), 5000);
+        assert_eq!(
+            read_aml_integer(&[AML_WORD_PREFIX, 0x88, 0x13], &mut pos, 3),
+            5000
+        );
         let mut pos = 0;
         assert_eq!(
             read_aml_integer(&[AML_DWORD_PREFIX, 0xE8, 0xFD, 0x00, 0x00], &mut pos, 5),

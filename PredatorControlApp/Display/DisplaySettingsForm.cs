@@ -2,6 +2,7 @@ using System;
 using System.Drawing;
 using System.Linq;
 using System.Runtime.Versioning;
+using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
 namespace PredatorControlApp.Display
@@ -9,8 +10,25 @@ namespace PredatorControlApp.Display
     [SupportedOSPlatform("windows")]
     public class DisplaySettingsForm : Form
     {
+        public static Func<IWin32Window?, string, string, MessageBoxButtons, MessageBoxIcon, DialogResult> MessageBoxHandler { get; set; } =
+            (owner, text, caption, buttons, icon) => MessageBox.Show(owner, text, caption, buttons, icon);
+
+        private DialogResult ShowMessage(string text, string caption, MessageBoxButtons buttons, MessageBoxIcon icon)
+        {
+            return MessageBoxHandler(this, text, caption, buttons, icon);
+        }
+
         private readonly DisplayManager _displayManager;
         private readonly AppSettings _settings;
+
+        private static readonly Font s_fontMain = new("Segoe UI", 9.5f, FontStyle.Regular);
+        private static readonly Font s_fontTitle = new("Segoe UI", 16f, FontStyle.Bold);
+        private static readonly Font s_fontSubtitle = new("Segoe UI", 8.5f, FontStyle.Regular);
+        private static readonly Font s_fontCardTitle = new("Segoe UI", 9.5f, FontStyle.Bold);
+        private static readonly Font s_fontCurrentHz = new("Segoe UI", 10f, FontStyle.Bold);
+        private static readonly Font s_fontDdsStatus = new("Segoe UI", 9.5f, FontStyle.Regular);
+        private static readonly Font s_fontDdsNotice = new("Segoe UI", 8.25f, FontStyle.Italic);
+        private static readonly Font s_fontLevels = new("Segoe UI", 8f);
 
         private ComboBox _cboRefreshRates = null!;
         private Label _lblCurrentHz = null!;
@@ -23,14 +41,59 @@ namespace PredatorControlApp.Display
         private PredatorButton _btnApplyRefresh = null!;
         private PredatorButton _btnApplyDds = null!;
 
+        private readonly System.Windows.Forms.Timer _blueLightSaveTimer;
+        private readonly Action _themeHandler;
+
         public DisplaySettingsForm(DisplayManager? displayManager = null, AppSettings? settings = null)
         {
             _displayManager = displayManager ?? DisplayManager.Instance;
             _settings = settings ?? AppSettings.Load();
 
+            _blueLightSaveTimer = new System.Windows.Forms.Timer { Interval = 250 };
+            _blueLightSaveTimer.Tick += (s, e) =>
+            {
+                _blueLightSaveTimer.Stop();
+                try
+                {
+                    if (_sliderBlueLight != null && !_sliderBlueLight.IsDisposed)
+                    {
+                        _settings.BlueLightShieldMode = _sliderBlueLight.Value;
+                        _settings.Save();
+                    }
+                }
+                catch { }
+            };
+
             InitializeComponent();
             ApplyTheme();
             LoadCurrentValues();
+
+            _themeHandler = () => SafeBeginInvoke(ApplyTheme);
+            ThemeManager.ThemeChanged += _themeHandler;
+        }
+
+        private void SafeBeginInvoke(Action action)
+        {
+            try
+            {
+                if (IsDisposed || Disposing) return;
+                if (IsHandleCreated && InvokeRequired)
+                {
+                    BeginInvoke(new Action(() =>
+                    {
+                        try
+                        {
+                            if (!IsDisposed && !Disposing) action();
+                        }
+                        catch { }
+                    }));
+                }
+                else
+                {
+                    if (!IsDisposed && !Disposing) action();
+                }
+            }
+            catch { }
         }
 
         private void InitializeComponent()
@@ -43,7 +106,8 @@ namespace PredatorControlApp.Display
             this.MaximizeBox = false;
             this.MinimizeBox = false;
             this.ShowInTaskbar = false;
-            this.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
+            this.AutoScaleMode = AutoScaleMode.None;
+            this.Font = s_fontMain;
 
             var mainPanel = new DarkScrollPanel
             {
@@ -59,7 +123,7 @@ namespace PredatorControlApp.Display
             var lblTitle = new Label
             {
                 Text = "Display & GPU Switching",
-                Font = new Font("Segoe UI", 16f, FontStyle.Bold),
+                Font = s_fontTitle,
                 Location = new Point(20, y),
                 AutoSize = true
             };
@@ -69,7 +133,7 @@ namespace PredatorControlApp.Display
             var lblSubtitle = new Label
             {
                 Text = "Advanced Optimus (DDS), Dynamic Refresh Rate, BlueLight Shield™ & Overdrive",
-                Font = new Font("Segoe UI", 8.5f, FontStyle.Regular),
+                Font = s_fontSubtitle,
                 Location = new Point(22, y),
                 AutoSize = true,
                 ForeColor = ThemeManager.TextSecondary
@@ -87,7 +151,7 @@ namespace PredatorControlApp.Display
                 Location = new Point(16, 32),
                 AutoSize = true,
                 ForeColor = ThemeManager.Accent,
-                Font = new Font("Segoe UI", 10f, FontStyle.Bold)
+                Font = s_fontCurrentHz
             };
             cardRefresh.Controls.Add(_lblCurrentHz);
 
@@ -128,7 +192,7 @@ namespace PredatorControlApp.Display
                 Location = new Point(16, 32),
                 AutoSize = true,
                 ForeColor = ThemeManager.TextPrimary,
-                Font = new Font("Segoe UI", 9.5f, FontStyle.Regular)
+                Font = s_fontDdsStatus
             };
             cardDds.Controls.Add(_lblDdsStatus);
 
@@ -169,7 +233,7 @@ namespace PredatorControlApp.Display
                 Location = new Point(16, 108),
                 Size = new Size(485, 34),
                 ForeColor = ThemeManager.TextSecondary,
-                Font = new Font("Segoe UI", 8.25f, FontStyle.Italic)
+                Font = s_fontDdsNotice
             };
             cardDds.Controls.Add(_lblDdsBlocking);
 
@@ -207,7 +271,7 @@ namespace PredatorControlApp.Display
                 Location = new Point(20, 102),
                 AutoSize = true,
                 ForeColor = ThemeManager.TextMuted,
-                Font = new Font("Segoe UI", 8f)
+                Font = s_fontLevels
             };
             cardBlueLight.Controls.Add(lblLevels);
 
@@ -253,6 +317,7 @@ namespace PredatorControlApp.Display
             };
             btnClose.Click += (s, e) => this.Close();
             mainPanel.Controls.Add(btnClose);
+            this.CancelButton = btnClose;
         }
 
         private Panel CreateCard(int x, int y, int width, int height, string title)
@@ -266,14 +331,15 @@ namespace PredatorControlApp.Display
             };
             panel.Paint += (s, e) =>
             {
+                if (panel.Width <= 1 || panel.Height <= 1) return;
                 using var pen = new Pen(ThemeManager.CardBorder, 1);
-                e.Graphics.DrawRectangle(pen, 0, 0, width - 1, height - 1);
+                e.Graphics.DrawRectangle(pen, 0, 0, panel.Width - 1, panel.Height - 1);
             };
 
             var lblCardTitle = new Label
             {
                 Text = title,
-                Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+                Font = s_fontCardTitle,
                 ForeColor = ThemeManager.Accent,
                 Location = new Point(14, 10),
                 AutoSize = true
@@ -312,6 +378,9 @@ namespace PredatorControlApp.Display
             var ddsStatus = _displayManager.GetDdsStatus();
             if (ddsStatus.IsSupported)
             {
+                _cboDdsMode.Enabled = true;
+                _btnApplyDds.Enabled = true;
+
                 string activeMuxStr = ddsStatus.ActiveMux switch
                 {
                     1 => "Integrated (Optimus)",
@@ -332,12 +401,21 @@ namespace PredatorControlApp.Display
                     _lblDdsBlocking.Text = "Warning: Some active applications may block instant display switching.";
                     _lblDdsBlocking.ForeColor = ThemeManager.YellowStatus;
                 }
+                else
+                {
+                    _lblDdsBlocking.Text = "Note: Switching GPU mode takes effect immediately without reboot.";
+                    _lblDdsBlocking.ForeColor = ThemeManager.TextSecondary;
+                }
             }
             else
             {
                 _lblDdsStatus.Text = "Status: Advanced Optimus / DDS not detected or unsupported on current display.";
                 _lblDdsStatus.ForeColor = ThemeManager.TextSecondary;
+                _cboDdsMode.Enabled = false;
+                _btnApplyDds.Enabled = false;
                 _cboDdsMode.SelectedIndex = 1;
+                _lblDdsBlocking.Text = "Note: DDS switching requires hardware Dynamic Display Switch support and active NVIDIA drivers.";
+                _lblDdsBlocking.ForeColor = ThemeManager.TextSecondary;
             }
 
             // BlueLight Shield
@@ -351,10 +429,15 @@ namespace PredatorControlApp.Display
 
         private void OnApplyRefreshClicked(object? sender, EventArgs e)
         {
-            if (_cboRefreshRates.SelectedItem == null) return;
+            if (_cboRefreshRates.SelectedItem == null)
+            {
+                ShowMessage("Please select a target refresh rate first.", "Display Selection", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
             string sel = _cboRefreshRates.SelectedItem.ToString() ?? "";
-            string num = new string(sel.TakeWhile(char.IsDigit).ToArray());
-            if (int.TryParse(num, out int targetHz))
+            var match = Regex.Match(sel, @"\d+");
+            if (match.Success && int.TryParse(match.Value, out int targetHz) && targetHz >= 30)
             {
                 bool ok = _displayManager.SetRefreshRate(targetHz);
                 if (ok)
@@ -365,13 +448,24 @@ namespace PredatorControlApp.Display
                 }
                 else
                 {
-                    MessageBox.Show(this, $"Failed to apply refresh rate {targetHz} Hz.", "Display Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    ShowMessage($"Failed to apply refresh rate {targetHz} Hz.", "Display Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
+            }
+            else
+            {
+                ShowMessage($"Invalid refresh rate selection '{sel}'. Please select a valid rate.", "Display Selection Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
         private void OnApplyDdsClicked(object? sender, EventArgs e)
         {
+            var status = _displayManager.GetDdsStatus();
+            if (!status.IsSupported)
+            {
+                ShowMessage("NVIDIA Advanced Optimus (DDS) is not supported or NVIDIA drivers are unavailable on this display.", "GPU Switch Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             int mode = _cboDdsMode.SelectedIndex;
             if (mode < 0 || mode > 2) return;
 
@@ -384,17 +478,19 @@ namespace PredatorControlApp.Display
             }
             else
             {
-                MessageBox.Show(this, "Failed to switch GPU display mode. Ensure NVIDIA drivers are active.", "GPU Switch Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                ShowMessage("Failed to switch GPU display mode. Ensure NVIDIA drivers are active.", "GPU Switch Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
         private void OnBlueLightChanged(object? sender, EventArgs e)
         {
+            if (_sliderBlueLight == null) return;
             int val = _sliderBlueLight.Value;
             UpdateBlueLightLabel(val);
             _displayManager.SetBlueLightShield(val);
             _settings.BlueLightShieldMode = val;
-            _settings.Save();
+            _blueLightSaveTimer.Stop();
+            _blueLightSaveTimer.Start();
         }
 
         private void UpdateBlueLightLabel(int level)
@@ -415,6 +511,29 @@ namespace PredatorControlApp.Display
             _displayManager.SetLcdOverdrive(enabled);
             _settings.LcdOverdrive = enabled;
             _settings.Save();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                ThemeManager.ThemeChanged -= _themeHandler;
+                if (_blueLightSaveTimer != null)
+                {
+                    _blueLightSaveTimer.Stop();
+                    try
+                    {
+                        if (_sliderBlueLight != null && !_sliderBlueLight.IsDisposed)
+                        {
+                            _settings.BlueLightShieldMode = _sliderBlueLight.Value;
+                            _settings.Save();
+                        }
+                    }
+                    catch { }
+                    _blueLightSaveTimer.Dispose();
+                }
+            }
+            base.Dispose(disposing);
         }
     }
 }

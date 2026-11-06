@@ -576,13 +576,34 @@ pub const DEFAULT_TEMPS: [i32; 8] = [30, 50, 60, 70, 77, 85, 90, 100];
 
 pub const DEFAULT_CPU_POINTS: [Point; 8] = [
     Point { temp: 30, speed: 0 },
-    Point { temp: 50, speed: 10 },
-    Point { temp: 60, speed: 20 },
-    Point { temp: 70, speed: 25 },
-    Point { temp: 77, speed: 30 },
-    Point { temp: 85, speed: 45 },
-    Point { temp: 90, speed: 60 },
-    Point { temp: 100, speed: 100 },
+    Point {
+        temp: 50,
+        speed: 10,
+    },
+    Point {
+        temp: 60,
+        speed: 20,
+    },
+    Point {
+        temp: 70,
+        speed: 25,
+    },
+    Point {
+        temp: 77,
+        speed: 30,
+    },
+    Point {
+        temp: 85,
+        speed: 45,
+    },
+    Point {
+        temp: 90,
+        speed: 60,
+    },
+    Point {
+        temp: 100,
+        speed: 100,
+    },
 ];
 
 fn interpolate_clamped_resample(clamped: &[Point], temp: i32) -> i32 {

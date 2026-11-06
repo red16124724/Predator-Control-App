@@ -9,12 +9,24 @@ using System.Windows.Forms;
 namespace PredatorControlApp
 {
     [SupportedOSPlatform("windows")]
-    public class PredatorButton : Control
+    public class PredatorButton : Control, IButtonControl
     {
         private bool _isHover;
         private bool _isActive;
         private bool _isNavButton;
         private Color? _customActiveColor;
+        private DialogResult _dialogResult = DialogResult.None;
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public DialogResult DialogResult
+        {
+            get => _dialogResult;
+            set => _dialogResult = value;
+        }
+
+        public void NotifyDefault(bool value)
+        {
+        }
 
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public bool IsActive
@@ -317,6 +329,15 @@ namespace PredatorControlApp
             if (CanSelect)
             {
                 OnClick(EventArgs.Empty);
+            }
+        }
+
+        protected override void OnClick(EventArgs e)
+        {
+            base.OnClick(e);
+            if (_dialogResult != DialogResult.None && FindForm() is Form f)
+            {
+                f.DialogResult = _dialogResult;
             }
         }
 

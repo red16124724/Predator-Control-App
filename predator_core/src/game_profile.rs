@@ -30,6 +30,9 @@ pub const EVENT_TYPE_SWITCHED: i32 = 3;
 /// Debounce window for rapid Alt-Tab switching in milliseconds.
 pub const DEBOUNCE_THRESHOLD_MS: u64 = 80;
 
+/// Maximum buffered events in queue to prevent memory leak under load.
+pub const MAX_EVENT_QUEUE_CAPACITY: usize = 256;
+
 /// Blocked system and protected executables that must never trigger game profiles.
 pub const BLOCKED_EXECUTABLES: &[&str] = &[
     "svchost.exe",
@@ -113,9 +116,18 @@ pub struct GameProfileConfig {
 /// State machine events.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProfileEvent {
-    GameStarted { profile_id: u32, pid: u32 },
-    GameExited { profile_id: u32, pid: u32 },
-    GameSwitched { old_profile_id: u32, new_profile_id: u32 },
+    GameStarted {
+        profile_id: u32,
+        pid: u32,
+    },
+    GameExited {
+        profile_id: u32,
+        pid: u32,
+    },
+    GameSwitched {
+        old_profile_id: u32,
+        new_profile_id: u32,
+    },
 }
 
 impl ProfileEvent {
@@ -235,7 +247,10 @@ impl GameProfileEngine {
         if !full_path.trim().is_empty() {
             for profile in self.profiles.values() {
                 if !profile.full_path.trim().is_empty()
-                    && profile.full_path.trim().eq_ignore_ascii_case(full_path.trim())
+                    && profile
+                        .full_path
+                        .trim()
+                        .eq_ignore_ascii_case(full_path.trim())
                 {
                     return Some(profile.clone());
                 }
@@ -304,7 +319,7 @@ impl GameProfileEngine {
                         old_profile_id: old_id,
                         new_profile_id: matched_id,
                     };
-                    self.event_queue.push_back(event);
+                    self.push_event(event);
                     Some(event)
                 }
             }
@@ -318,7 +333,7 @@ impl GameProfileEngine {
                     profile_id: matched_id,
                     pid,
                 };
-                self.event_queue.push_back(event);
+                self.push_event(event);
                 Some(event)
             }
         }
@@ -336,11 +351,18 @@ impl GameProfileEngine {
                     profile_id: prof_id,
                     pid,
                 };
-                self.event_queue.push_back(event);
+                self.push_event(event);
                 return Some(event);
             }
         }
         None
+    }
+
+    fn push_event(&mut self, event: ProfileEvent) {
+        if self.event_queue.len() >= MAX_EVENT_QUEUE_CAPACITY {
+            self.event_queue.pop_front();
+        }
+        self.event_queue.push_back(event);
     }
 
     /// Polls the next event from the internal queue (FIFO).
@@ -363,7 +385,8 @@ type WinEventProc = unsafe extern "system" fn(
     dwms_event_time: u32,
 );
 
-type WaitOrTimerCallback = unsafe extern "system" fn(lp_parameter: *mut c_void, timer_or_wait_fired: u8);
+type WaitOrTimerCallback =
+    unsafe extern "system" fn(lp_parameter: *mut c_void, timer_or_wait_fired: u8);
 
 const EVENT_SYSTEM_FOREGROUND: u32 = 0x0003;
 const WINEVENT_OUTOFCONTEXT: u32 = 0x0000;
@@ -406,7 +429,12 @@ extern "system" {
 
     fn UnhookWinEvent(h_win_event_hook: *mut c_void) -> i32;
 
-    fn GetMessageW(lp_msg: *mut Msg, h_wnd: *mut c_void, w_msg_filter_min: u32, w_msg_filter_max: u32) -> i32;
+    fn GetMessageW(
+        lp_msg: *mut Msg,
+        h_wnd: *mut c_void,
+        w_msg_filter_min: u32,
+        w_msg_filter_max: u32,
+    ) -> i32;
 
     fn PostThreadMessageW(id_thread: u32, msg: u32, w_param: usize, l_param: isize) -> i32;
 
@@ -419,7 +447,12 @@ extern "system" {
     fn GetCurrentProcessId() -> u32;
     fn GetCurrentThreadId() -> u32;
     fn OpenProcess(desired_access: u32, inherit_handle: i32, process_id: u32) -> *mut c_void;
-    fn QueryFullProcessImageNameW(h_process: *mut c_void, flags: u32, exe_name: *mut u16, size: *mut u32) -> i32;
+    fn QueryFullProcessImageNameW(
+        h_process: *mut c_void,
+        flags: u32,
+        exe_name: *mut u16,
+        size: *mut u32,
+    ) -> i32;
     fn CloseHandle(h_object: *mut c_void) -> i32;
     fn GetTickCount64() -> u64;
 
@@ -864,7 +897,10 @@ mod tests {
 
         // Match by full path
         let m4 = engine
-            .find_match("unknown.exe", r"C:\Steam\steamapps\common\Witcher 3\bin\x64\witcher3.exe")
+            .find_match(
+                "unknown.exe",
+                r"C:\Steam\steamapps\common\Witcher 3\bin\x64\witcher3.exe",
+            )
             .unwrap();
         assert_eq!(m4.profile_id, 1);
 
@@ -914,7 +950,13 @@ mod tests {
                 pid: 1001
             })
         );
-        assert_eq!(engine.active_game(), Some(ActiveGame { profile_id: 10, pid: 1001 }));
+        assert_eq!(
+            engine.active_game(),
+            Some(ActiveGame {
+                profile_id: 10,
+                pid: 1001
+            })
+        );
 
         // 2. Alt-Tab debounce: duplicate focus event within 50ms is suppressed
         let ev_dup = engine.handle_foreground_transition(1001, "game_a.exe", "", 10_030);
@@ -923,7 +965,13 @@ mod tests {
         // 3. Focus outside (browser/notepad) -> active game remains active, no event emitted
         let ev_ext = engine.handle_foreground_transition(2002, "chrome.exe", "", 10_200);
         assert_eq!(ev_ext, None);
-        assert_eq!(engine.active_game(), Some(ActiveGame { profile_id: 10, pid: 1001 }));
+        assert_eq!(
+            engine.active_game(),
+            Some(ActiveGame {
+                profile_id: 10,
+                pid: 1001
+            })
+        );
 
         // 4. Alt-Tab back to game_a -> same profile already active, no duplicate start
         let ev_back = engine.handle_foreground_transition(1001, "game_a.exe", "", 10_400);
@@ -938,10 +986,17 @@ mod tests {
                 new_profile_id: 20
             })
         );
-        assert_eq!(engine.active_game(), Some(ActiveGame { profile_id: 20, pid: 3003 }));
+        assert_eq!(
+            engine.active_game(),
+            Some(ActiveGame {
+                profile_id: 20,
+                pid: 3003
+            })
+        );
 
         // 6. Own process is ignored
-        let ev_own = engine.handle_foreground_transition(9999, "predatorcontrolapp.exe", "", 10_800);
+        let ev_own =
+            engine.handle_foreground_transition(9999, "predatorcontrolapp.exe", "", 10_800);
         assert_eq!(ev_own, None);
 
         // 7. Process exit for active game -> GameExited
@@ -1014,7 +1069,7 @@ mod tests {
                     let exe = format!("game_{}.exe", profile_idx);
                     let now = (iter as u64) * 100;
 
-                    let mut guard = eng.lock().unwrap();
+                    let mut guard = eng.lock().unwrap_or_else(|e| e.into_inner());
                     guard.handle_foreground_transition(pid, &exe, "", now);
                     let _ = guard.poll_event();
                 }
@@ -1031,7 +1086,10 @@ mod tests {
     fn test_live_subsystem_init_and_shutdown() {
         // Test live Win32 hook thread creation, message loop, and teardown
         let init_res = init();
-        assert_eq!(init_res, 0, "SetWinEventHook thread must initialize successfully");
+        assert_eq!(
+            init_res, 0,
+            "SetWinEventHook thread must initialize successfully"
+        );
 
         // Idempotent init
         assert_eq!(init(), 0);
@@ -1053,7 +1111,11 @@ mod tests {
         assert_eq!(get_active(), None);
 
         // Shutdown cleanly
-        assert_eq!(shutdown(), 0, "Subsystem shutdown must stop hook thread cleanly");
+        assert_eq!(
+            shutdown(),
+            0,
+            "Subsystem shutdown must stop hook thread cleanly"
+        );
         assert_eq!(get_active(), None);
     }
 }

@@ -114,7 +114,8 @@ pub fn fetch_and_parse_smbios() -> Option<(u32, u32, u8, u16)> {
             return None;
         }
         let mut buf = vec![0u8; size as usize];
-        let bytes_read = unsafe { GetSystemFirmwareTable(rsmb_provider, 0, buf.as_mut_ptr(), size) };
+        let bytes_read =
+            unsafe { GetSystemFirmwareTable(rsmb_provider, 0, buf.as_mut_ptr(), size) };
         if bytes_read < 8 || bytes_read > size {
             return None;
         }
@@ -126,10 +127,24 @@ pub fn fetch_and_parse_smbios() -> Option<(u32, u32, u8, u16)> {
         }
 
         let parsed = parse(&buf[8..8 + len]);
-        let gaming_count = parsed.records.iter().filter(|r| (*r & 0x0100_0000) == 0).count() as u32;
-        let hotkey_count = parsed.records.iter().filter(|r| (*r & 0x0100_0000) != 0).count() as u32;
-        let dgpu_flag = if parsed.records.iter().any(|r| (*r & 0xFF) == 0x09) { 1u8 } else { 0u8 };
-        let version = parsed.version.map_or(0u16, |(maj, min)| ((maj as u16) << 8) | (min as u16));
+        let gaming_count = parsed
+            .records
+            .iter()
+            .filter(|r| (*r & 0x0100_0000) == 0)
+            .count() as u32;
+        let hotkey_count = parsed
+            .records
+            .iter()
+            .filter(|r| (*r & 0x0100_0000) != 0)
+            .count() as u32;
+        let dgpu_flag = if parsed.records.iter().any(|r| (*r & 0xFF) == 0x09) {
+            1u8
+        } else {
+            0u8
+        };
+        let version = parsed
+            .version
+            .map_or(0u16, |(maj, min)| ((maj as u16) << 8) | (min as u16));
         Some((gaming_count, hotkey_count, dgpu_flag, version))
     }
     #[cfg(not(windows))]

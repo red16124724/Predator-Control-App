@@ -448,42 +448,7 @@ namespace PredatorControlApp
 
             if (handler != null)
             {
-                Form? main = null;
-                try
-                {
-                    var forms = Application.OpenForms;
-                    for (int i = 0; i < forms.Count; i++)
-                    {
-                        var f = forms[i];
-                        if (f != null && !f.IsDisposed && !f.Disposing && f.IsHandleCreated)
-                        {
-                            main = f;
-                            break;
-                        }
-                    }
-                }
-                catch { }
-
-                if (main != null && !main.IsDisposed && !main.Disposing && main.IsHandleCreated && main.InvokeRequired)
-                {
-                    try
-                    {
-                        main.BeginInvoke(new Action(() =>
-                        {
-                            try
-                            {
-                                if (!main.IsDisposed && !main.Disposing)
-                                    SafeInvokeThemeChanged(handler);
-                            }
-                            catch { }
-                        }));
-                    }
-                    catch { }
-                }
-                else
-                {
-                    SafeInvokeThemeChanged(handler);
-                }
+                SafeInvokeThemeChanged(handler);
             }
         }
 

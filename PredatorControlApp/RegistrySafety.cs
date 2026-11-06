@@ -284,6 +284,8 @@ namespace PredatorControlApp
                 key.SetValue("ApplyCpuPowerLimits", profile.ApplyCpuPowerLimits ? 1 : 0);
                 key.SetValue("CpuPl1Watts", profile.CpuPl1Watts);
                 key.SetValue("CpuPl2Watts", profile.CpuPl2Watts);
+                key.SetValue("DdsMode", profile.DdsMode);
+                key.SetValue("LcdOverdrive", profile.LcdOverdrive);
                     key.Flush();
                 }
                 catch { }
@@ -353,6 +355,8 @@ namespace PredatorControlApp
                             ApplyCpuPowerLimits = key.GetValue("ApplyCpuPowerLimits") is int acpl && acpl == 1,
                             CpuPl1Watts = key.GetValue("CpuPl1Watts") is int cpl1 ? cpl1 : -1,
                             CpuPl2Watts = key.GetValue("CpuPl2Watts") is int cpl2 ? cpl2 : -1,
+                            DdsMode = key.GetValue("DdsMode") is int dds ? dds : -1,
+                            LcdOverdrive = key.GetValue("LcdOverdrive") is int lod ? lod : -1,
                         };
 
                         if (profile.Validate(out _))

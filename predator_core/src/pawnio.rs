@@ -192,7 +192,11 @@ pub fn build_execute_packet(function_name: &str, arguments: &[u64]) -> Vec<u8> {
 
 /// Parses the returned output buffer from a PawnIO execute IOCTL call.
 /// Deserializes little-endian u64 values into the destination slice.
-pub fn parse_execute_response(out_buffer: &[u8], bytes_returned: usize, output: &mut [u64]) -> bool {
+pub fn parse_execute_response(
+    out_buffer: &[u8],
+    bytes_returned: usize,
+    output: &mut [u64],
+) -> bool {
     if bytes_returned < 8 || output.is_empty() {
         return false;
     }
@@ -458,7 +462,9 @@ impl fmt::Display for PawnIoError {
             Self::BiosLocked(msg) => write!(f, "BiosLocked: {}", msg),
             Self::UnsupportedHardware(msg) => write!(f, "UnsupportedHardware: {}", msg),
             Self::HardwareError(msg) => write!(f, "HardwareError: {}", msg),
-            Self::MutexTimeout(name, dur) => write!(f, "MutexTimeout: Timed out waiting {:?} for {}", dur, name),
+            Self::MutexTimeout(name, dur) => {
+                write!(f, "MutexTimeout: Timed out waiting {:?} for {}", dur, name)
+            }
             Self::MutexAcquisitionFailed(msg) => write!(f, "MutexAcquisitionFailed: {}", msg),
             Self::InvalidRegister(idx) => write!(f, "InvalidRegister: 0x{:X}", idx),
             Self::SecurityViolation(msg) => write!(f, "SecurityViolation: {}", msg),
@@ -514,26 +520,38 @@ pub fn calculate_mchbar_rapl_pl2_address(mchbar_address: u64) -> u64 {
 pub trait PawnIoBackend: Send + Sync {
     fn is_open(&self) -> bool;
     fn is_driver_installed(&self) -> bool;
-    fn mchbar_address(&self) -> u64 { 0 }
-    fn device_path(&self) -> &str { PRIMARY_DEVICE_PATH }
+    fn mchbar_address(&self) -> u64 {
+        0
+    }
+    fn device_path(&self) -> &str {
+        PRIMARY_DEVICE_PATH
+    }
     fn initialize(&mut self) -> PowerLimitApplyStatus;
     fn read_msr(&self, msr_index: u32) -> Result<u64, PawnIoError>;
     fn write_msr(&self, msr_index: u32, value: u64) -> Result<(), PawnIoError>;
     fn read_mmio_32(&self, physical_address: u64) -> Result<u32, PawnIoError> {
         let _ = physical_address;
-        Err(PawnIoError::UnsupportedOperation("read_mmio_32 not implemented".into()))
+        Err(PawnIoError::UnsupportedOperation(
+            "read_mmio_32 not implemented".into(),
+        ))
     }
     fn write_mmio_32(&self, physical_address: u64, value: u32) -> Result<(), PawnIoError> {
         let _ = (physical_address, value);
-        Err(PawnIoError::UnsupportedOperation("write_mmio_32 not implemented".into()))
+        Err(PawnIoError::UnsupportedOperation(
+            "write_mmio_32 not implemented".into(),
+        ))
     }
     fn read_mmio_64(&self, physical_address: u64) -> Result<u64, PawnIoError> {
         let _ = physical_address;
-        Err(PawnIoError::UnsupportedOperation("read_mmio_64 not implemented".into()))
+        Err(PawnIoError::UnsupportedOperation(
+            "read_mmio_64 not implemented".into(),
+        ))
     }
     fn write_mmio_64(&self, physical_address: u64, value: u64) -> Result<(), PawnIoError> {
         let _ = (physical_address, value);
-        Err(PawnIoError::UnsupportedOperation("write_mmio_64 not implemented".into()))
+        Err(PawnIoError::UnsupportedOperation(
+            "write_mmio_64 not implemented".into(),
+        ))
     }
     fn scan_device(&self) -> PawnIoScanResult;
     fn close(&mut self);
@@ -602,7 +620,11 @@ impl MockPawnIoBackend {
         locked: bool,
         mirror_mmio: bool,
     ) {
-        let effective_units = if units_per_watt > 0 { units_per_watt } else { 8 };
+        let effective_units = if units_per_watt > 0 {
+            units_per_watt
+        } else {
+            8
+        };
         let power_unit_exponent = (effective_units as f64).log2().round() as u64;
         let power_unit_raw = 0x000A_0E00 | (power_unit_exponent & 0x0F);
         self.set_msr(MSR_RAPL_POWER_UNIT, power_unit_raw);
@@ -618,7 +640,11 @@ impl MockPawnIoBackend {
         let enable_and_clamp = (1 << 15) | (1 << 16) | (1 << 47) | (1 << 48);
         let tau1 = 0x28 << 17; // ~28s default Intel time window
         let tau2 = 0x10 << 49; // ~2.44ms default Intel time window
-        let lock_bit = if locked || self.simulate_bios_locked { 1 << 63 } else { 0 };
+        let lock_bit = if locked || self.simulate_bios_locked {
+            1 << 63
+        } else {
+            0
+        };
 
         let power_limit_raw = raw_pl1 | enable_and_clamp | tau1 | (raw_pl2 << 32) | tau2 | lock_bit;
         self.set_msr(MSR_PKG_POWER_LIMIT, power_limit_raw);
@@ -638,11 +664,19 @@ impl MockPawnIoBackend {
     }
 
     pub fn set_msr(&self, msr: u32, value: u64) {
-        self.msrs.write().unwrap_or_else(|e| e.into_inner()).insert(msr, value);
+        self.msrs
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(msr, value);
     }
 
     pub fn get_msr(&self, msr: u32) -> u64 {
-        self.msrs.read().unwrap_or_else(|e| e.into_inner()).get(&msr).copied().unwrap_or(0)
+        self.msrs
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&msr)
+            .copied()
+            .unwrap_or(0)
     }
 
     pub fn set_mmio(&self, address: u64, value: u64) {
@@ -669,15 +703,24 @@ impl MockPawnIoBackend {
     }
 
     pub fn history(&self) -> Vec<MockHistoryOp> {
-        self.history.read().unwrap_or_else(|e| e.into_inner()).clone()
+        self.history
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     pub fn clear_history(&self) {
-        self.history.write().unwrap_or_else(|e| e.into_inner()).clear();
+        self.history
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
     }
 
     fn record_op(&self, op: MockHistoryOp) {
-        self.history.write().unwrap_or_else(|e| e.into_inner()).push(op);
+        self.history
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(op);
     }
 }
 
@@ -724,7 +767,9 @@ impl PawnIoBackend for MockPawnIoBackend {
 
     fn read_msr(&self, msr_index: u32) -> Result<u64, PawnIoError> {
         if self.simulate_hardware_error || !self.is_open {
-            return Err(PawnIoError::HardwareError("Simulated hardware error or device closed".into()));
+            return Err(PawnIoError::HardwareError(
+                "Simulated hardware error or device closed".into(),
+            ));
         }
         if self.simulate_unsupported_hardware {
             return Ok(0);
@@ -741,7 +786,9 @@ impl PawnIoBackend for MockPawnIoBackend {
 
     fn write_msr(&self, msr_index: u32, value: u64) -> Result<(), PawnIoError> {
         if self.simulate_hardware_error || !self.is_open {
-            return Err(PawnIoError::HardwareError("Simulated hardware error or device closed".into()));
+            return Err(PawnIoError::HardwareError(
+                "Simulated hardware error or device closed".into(),
+            ));
         }
 
         if !is_safe_msr_index(msr_index) {
@@ -752,25 +799,39 @@ impl PawnIoBackend for MockPawnIoBackend {
         if msr_index == MSR_PKG_POWER_LIMIT {
             let current = self.get_msr(msr_index);
             if self.simulate_bios_locked || (current & MSR_PKG_POWER_LIMIT_LOCK_BIT) != 0 {
-                self.record_op(MockHistoryOp::WriteMsrBlockedBiosLock { msr: msr_index, value });
-                return Err(PawnIoError::BiosLocked("MSR 0x610 locked by BIOS bit 63".into()));
+                self.record_op(MockHistoryOp::WriteMsrBlockedBiosLock {
+                    msr: msr_index,
+                    value,
+                });
+                return Err(PawnIoError::BiosLocked(
+                    "MSR 0x610 locked by BIOS bit 63".into(),
+                ));
             }
             if (value & MSR_PKG_POWER_LIMIT_LOCK_BIT) != 0 {
-                return Err(PawnIoError::SecurityViolation("Refusing to set bit 63 lock bit on MSR 0x610".into()));
+                return Err(PawnIoError::SecurityViolation(
+                    "Refusing to set bit 63 lock bit on MSR 0x610".into(),
+                ));
             }
         }
 
         self.set_msr(msr_index, value);
-        self.record_op(MockHistoryOp::WriteMsr { msr: msr_index, value });
+        self.record_op(MockHistoryOp::WriteMsr {
+            msr: msr_index,
+            value,
+        });
         Ok(())
     }
 
     fn read_mmio_32(&self, physical_address: u64) -> Result<u32, PawnIoError> {
         if self.simulate_hardware_error || !self.is_open || !self.is_mmio_accessible {
-            return Err(PawnIoError::HardwareError("MMIO inaccessible or simulated hardware error".into()));
+            return Err(PawnIoError::HardwareError(
+                "MMIO inaccessible or simulated hardware error".into(),
+            ));
         }
 
-        self.record_op(MockHistoryOp::ReadMmio32 { address: physical_address });
+        self.record_op(MockHistoryOp::ReadMmio32 {
+            address: physical_address,
+        });
 
         let map = self.mmio.read().unwrap_or_else(|e| e.into_inner());
         if (physical_address & 4) != 0 {
@@ -791,7 +852,9 @@ impl PawnIoBackend for MockPawnIoBackend {
 
     fn write_mmio_32(&self, physical_address: u64, value: u32) -> Result<(), PawnIoError> {
         if self.simulate_hardware_error || !self.is_open || !self.is_mmio_accessible {
-            return Err(PawnIoError::HardwareError("MMIO inaccessible or simulated hardware error".into()));
+            return Err(PawnIoError::HardwareError(
+                "MMIO inaccessible or simulated hardware error".into(),
+            ));
         }
 
         let mut map = self.mmio.write().unwrap_or_else(|e| e.into_inner());
@@ -807,22 +870,31 @@ impl PawnIoBackend for MockPawnIoBackend {
             map.insert(physical_address, updated);
         }
 
-        self.record_op(MockHistoryOp::WriteMmio32 { address: physical_address, value });
+        self.record_op(MockHistoryOp::WriteMmio32 {
+            address: physical_address,
+            value,
+        });
         Ok(())
     }
 
     fn read_mmio_64(&self, physical_address: u64) -> Result<u64, PawnIoError> {
         if self.simulate_hardware_error || !self.is_open || !self.is_mmio_accessible {
-            return Err(PawnIoError::HardwareError("MMIO inaccessible or simulated hardware error".into()));
+            return Err(PawnIoError::HardwareError(
+                "MMIO inaccessible or simulated hardware error".into(),
+            ));
         }
 
-        self.record_op(MockHistoryOp::ReadMmio64 { address: physical_address });
+        self.record_op(MockHistoryOp::ReadMmio64 {
+            address: physical_address,
+        });
 
         let map = self.mmio.read().unwrap_or_else(|e| e.into_inner());
         if let Some(&val) = map.get(&physical_address) {
             return Ok(val);
         }
-        if let (Some(&low), Some(&high)) = (map.get(&physical_address), map.get(&(physical_address + 4))) {
+        if let (Some(&low), Some(&high)) =
+            (map.get(&physical_address), map.get(&(physical_address + 4)))
+        {
             return Ok((low & 0xFFFF_FFFF) | ((high & 0xFFFF_FFFF) << 32));
         }
         Ok(0)
@@ -830,7 +902,9 @@ impl PawnIoBackend for MockPawnIoBackend {
 
     fn write_mmio_64(&self, physical_address: u64, value: u64) -> Result<(), PawnIoError> {
         if self.simulate_hardware_error || !self.is_open || !self.is_mmio_accessible {
-            return Err(PawnIoError::HardwareError("MMIO inaccessible or simulated hardware error".into()));
+            return Err(PawnIoError::HardwareError(
+                "MMIO inaccessible or simulated hardware error".into(),
+            ));
         }
 
         let mut map = self.mmio.write().unwrap_or_else(|e| e.into_inner());
@@ -839,7 +913,10 @@ impl PawnIoBackend for MockPawnIoBackend {
             map.insert(physical_address + 4, value >> 32);
         }
 
-        self.record_op(MockHistoryOp::WriteMmio64 { address: physical_address, value });
+        self.record_op(MockHistoryOp::WriteMmio64 {
+            address: physical_address,
+            value,
+        });
         Ok(())
     }
 
@@ -894,8 +971,14 @@ mod win_mutex {
         }
     }
 
-    pub fn acquire_named_mutex(name: &str, timeout: Duration) -> Result<NamedMutexGuard, PawnIoError> {
-        let wide_name: Vec<u16> = OsStr::new(name).encode_wide().chain(std::iter::once(0)).collect();
+    pub fn acquire_named_mutex(
+        name: &str,
+        timeout: Duration,
+    ) -> Result<NamedMutexGuard, PawnIoError> {
+        let wide_name: Vec<u16> = OsStr::new(name)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
         let timeout_ms = timeout.as_millis().min(u32::MAX as u128) as u32;
 
         unsafe {
@@ -939,15 +1022,18 @@ mod non_win_mutex {
 
     pub struct NamedMutexGuard;
 
-    pub fn acquire_named_mutex(_name: &str, _timeout: Duration) -> Result<NamedMutexGuard, PawnIoError> {
+    pub fn acquire_named_mutex(
+        _name: &str,
+        _timeout: Duration,
+    ) -> Result<NamedMutexGuard, PawnIoError> {
         Ok(NamedMutexGuard)
     }
 }
 
-#[cfg(windows)]
-pub use win_mutex::*;
 #[cfg(not(windows))]
 pub use non_win_mutex::*;
+#[cfg(windows)]
+pub use win_mutex::*;
 
 // ============================================================================
 // 9. Windows Native Win32 / PawnIO Backend Implementation
@@ -1037,18 +1123,11 @@ mod win_ffi {
             lpName: LPCWSTR,
         ) -> HANDLE;
 
-        pub fn OpenMutexW(
-            dwDesiredAccess: DWORD,
-            bInheritHandle: BOOL,
-            lpName: LPCWSTR,
-        ) -> HANDLE;
+        pub fn OpenMutexW(dwDesiredAccess: DWORD, bInheritHandle: BOOL, lpName: LPCWSTR) -> HANDLE;
 
         pub fn ReleaseMutex(hMutex: HANDLE) -> BOOL;
 
-        pub fn WaitForSingleObject(
-            hHandle: HANDLE,
-            dwMilliseconds: DWORD,
-        ) -> DWORD;
+        pub fn WaitForSingleObject(hHandle: HANDLE, dwMilliseconds: DWORD) -> DWORD;
     }
 
     #[link(name = "advapi32")]
@@ -1065,10 +1144,7 @@ mod win_ffi {
             dwDesiredAccess: DWORD,
         ) -> HANDLE;
 
-        pub fn QueryServiceStatus(
-            hService: HANDLE,
-            lpServiceStatus: *mut SERVICE_STATUS,
-        ) -> BOOL;
+        pub fn QueryServiceStatus(hService: HANDLE, lpServiceStatus: *mut SERVICE_STATUS) -> BOOL;
 
         pub fn StartServiceW(
             hService: HANDLE,
@@ -1160,7 +1236,10 @@ impl NativePawnIoBackend {
     }
 
     fn to_wide_null(s: &str) -> Vec<u16> {
-        OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+        OsStr::new(s)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
     }
 
     fn open_handle_to_path(path: &str) -> (Option<SafeDeviceHandle>, u32) {
@@ -1196,7 +1275,9 @@ impl NativePawnIoBackend {
         let mut out_buf = vec![0u8; alloc_out_count * 8];
         let mut bytes_returned: u32 = 0;
 
-        let _device_lock = GLOBAL_PAWNIO_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
+        let _device_lock = GLOBAL_PAWNIO_DEVICE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let success = unsafe {
             win_ffi::DeviceIoControl(
                 handle.raw(),
@@ -1251,7 +1332,9 @@ impl NativePawnIoBackend {
         // Scoped on purpose: the guard must be released before execute_on_handle() below, which
         // acquires the same non-reentrant GLOBAL_PAWNIO_DEVICE mutex.
         let load_ok = {
-            let _device_lock = GLOBAL_PAWNIO_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
+            let _device_lock = GLOBAL_PAWNIO_DEVICE
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             let mut bytes_ret: u32 = 0;
             unsafe {
                 win_ffi::DeviceIoControl(
@@ -1351,7 +1434,9 @@ impl PawnIoBackend for NativePawnIoBackend {
         let msr_bytes = match load_module_bytes("IntelMSR.bin") {
             Some(b) => b,
             None => {
-                self.last_diagnostic = "IntelMSR.bin module payload could not be loaded from resources or disk.".into();
+                self.last_diagnostic =
+                    "IntelMSR.bin module payload could not be loaded from resources or disk."
+                        .into();
                 return PowerLimitApplyStatus::HardwareError;
             }
         };
@@ -1360,7 +1445,9 @@ impl PawnIoBackend for NativePawnIoBackend {
         // try_initialize_mchbar_module() and execute_on_handle() acquire it. Holding the guard for
         // the whole function would self-deadlock the caller on the same thread.
         let load_ok = {
-            let _device_lock = GLOBAL_PAWNIO_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
+            let _device_lock = GLOBAL_PAWNIO_DEVICE
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             let mut bytes_ret: u32 = 0;
             unsafe {
                 win_ffi::DeviceIoControl(
@@ -1378,7 +1465,10 @@ impl PawnIoBackend for NativePawnIoBackend {
 
         if load_ok == 0 {
             let err = unsafe { win_ffi::GetLastError() };
-            self.last_diagnostic = format!("PawnIO LoadBinary IOCTL (0xA1B22084) failed. Win32Error: {}", err);
+            self.last_diagnostic = format!(
+                "PawnIO LoadBinary IOCTL (0xA1B22084) failed. Win32Error: {}",
+                err
+            );
             return PowerLimitApplyStatus::HardwareError;
         }
 
@@ -1388,7 +1478,8 @@ impl PawnIoBackend for NativePawnIoBackend {
         // Try initializing secondary handle for MCHBAR MMIO support
         self.try_initialize_mchbar_module();
 
-        self.last_diagnostic = "PawnIO driver connected and IntelMSR module loaded successfully.".into();
+        self.last_diagnostic =
+            "PawnIO driver connected and IntelMSR module loaded successfully.".into();
         PowerLimitApplyStatus::Success
     }
 
@@ -1411,7 +1502,9 @@ impl PawnIoBackend for NativePawnIoBackend {
 
         // Prevent setting bit 63 (permanent lock bit)
         if msr_index == MSR_PKG_POWER_LIMIT && (value & MSR_PKG_POWER_LIMIT_LOCK_BIT) != 0 {
-            return Err(PawnIoError::SecurityViolation("Refusing to set bit 63 lock bit on MSR 0x610".into()));
+            return Err(PawnIoError::SecurityViolation(
+                "Refusing to set bit 63 lock bit on MSR 0x610".into(),
+            ));
         }
 
         let _io = self.io_lock.lock().unwrap_or_else(|e| e.into_inner());
@@ -1424,9 +1517,13 @@ impl PawnIoBackend for NativePawnIoBackend {
         // If writing to MSR 0x610, verify it is not already locked by UEFI/BIOS
         if msr_index == MSR_PKG_POWER_LIMIT {
             let mut check_out = [0u64; 1];
-            if Self::execute_on_handle(handle, FN_READ_MSR, &[msr_index as u64], &mut check_out).is_ok() {
+            if Self::execute_on_handle(handle, FN_READ_MSR, &[msr_index as u64], &mut check_out)
+                .is_ok()
+            {
                 if (check_out[0] & MSR_PKG_POWER_LIMIT_LOCK_BIT) != 0 {
-                    return Err(PawnIoError::BiosLocked("MSR 0x610 is locked by BIOS (bit 63 set)".into()));
+                    return Err(PawnIoError::BiosLocked(
+                        "MSR 0x610 is locked by BIOS (bit 63 set)".into(),
+                    ));
                 }
             }
         }
@@ -1436,7 +1533,10 @@ impl PawnIoBackend for NativePawnIoBackend {
 
     fn read_mmio_32(&self, physical_address: u64) -> Result<u32, PawnIoError> {
         if !(0x10_0000..(1 << 48)).contains(&physical_address) {
-            return Err(PawnIoError::HardwareError(format!("Invalid physical MMIO address: 0x{:X}", physical_address)));
+            return Err(PawnIoError::HardwareError(format!(
+                "Invalid physical MMIO address: 0x{:X}",
+                physical_address
+            )));
         }
 
         let _io = self.io_lock.lock().unwrap_or_else(|e| e.into_inner());
@@ -1452,7 +1552,10 @@ impl PawnIoBackend for NativePawnIoBackend {
 
     fn read_mmio_64(&self, physical_address: u64) -> Result<u64, PawnIoError> {
         if !(0x10_0000..(1 << 48)).contains(&physical_address) {
-            return Err(PawnIoError::HardwareError(format!("Invalid physical MMIO address: 0x{:X}", physical_address)));
+            return Err(PawnIoError::HardwareError(format!(
+                "Invalid physical MMIO address: 0x{:X}",
+                physical_address
+            )));
         }
 
         let _io = self.io_lock.lock().unwrap_or_else(|e| e.into_inner());
@@ -1493,19 +1596,33 @@ impl PawnIoBackend for NativePawnIoBackend {
 
         // Check Windows Service Control Manager
         unsafe {
-            let scm = win_ffi::OpenSCManagerW(std::ptr::null(), std::ptr::null(), win_ffi::SC_MANAGER_CONNECT);
+            let scm = win_ffi::OpenSCManagerW(
+                std::ptr::null(),
+                std::ptr::null(),
+                win_ffi::SC_MANAGER_CONNECT,
+            );
             if !scm.is_null() {
                 for name in &["PawnIO", "pawnio"] {
                     let wide_svc = Self::to_wide_null(name);
-                    let mut svc = win_ffi::OpenServiceW(scm, wide_svc.as_ptr(), win_ffi::SERVICE_QUERY_STATUS | win_ffi::SERVICE_START);
+                    let mut svc = win_ffi::OpenServiceW(
+                        scm,
+                        wide_svc.as_ptr(),
+                        win_ffi::SERVICE_QUERY_STATUS | win_ffi::SERVICE_START,
+                    );
                     if svc.is_null() && win_ffi::GetLastError() == win_ffi::ERROR_ACCESS_DENIED {
-                        svc = win_ffi::OpenServiceW(scm, wide_svc.as_ptr(), win_ffi::SERVICE_QUERY_STATUS);
+                        svc = win_ffi::OpenServiceW(
+                            scm,
+                            wide_svc.as_ptr(),
+                            win_ffi::SERVICE_QUERY_STATUS,
+                        );
                     }
                     if !svc.is_null() {
                         is_installed = true;
                         let mut status: win_ffi::SERVICE_STATUS = std::mem::zeroed();
                         if win_ffi::QueryServiceStatus(svc, &mut status) != 0 {
-                            if status.dwCurrentState == win_ffi::SERVICE_RUNNING || status.dwCurrentState == win_ffi::SERVICE_START_PENDING {
+                            if status.dwCurrentState == win_ffi::SERVICE_RUNNING
+                                || status.dwCurrentState == win_ffi::SERVICE_START_PENDING
+                            {
                                 is_running = true;
                             } else if status.dwCurrentState == win_ffi::SERVICE_STOPPED {
                                 // Attempt start if stopped
@@ -1538,7 +1655,10 @@ impl PawnIoBackend for NativePawnIoBackend {
         }
 
         let message = if is_accessible {
-            format!("PawnIO kernel driver detected and accessible via {}.", matched_path)
+            format!(
+                "PawnIO kernel driver detected and accessible via {}.",
+                matched_path
+            )
         } else if requires_elevation {
             format!("PawnIO detected at {}, but access was denied (Win32Error 5). Administrator elevation required.", matched_path)
         } else if is_installed {
@@ -1625,7 +1745,10 @@ pub fn plan_mchbar_power_write(
     pl2_address: u64,
 ) -> MchbarWritePlan {
     if !read_ok {
-        return MchbarWritePlan { status: WRITE_PLAN_READ_FAILED, ..Default::default() };
+        return MchbarWritePlan {
+            status: WRITE_PLAN_READ_FAILED,
+            ..Default::default()
+        };
     }
 
     let current_pl1_dword = current_mmio as u32;
@@ -1633,7 +1756,10 @@ pub fn plan_mchbar_power_write(
 
     // Lock check: bit 63 in the 64-bit view, bit 31 of the PL2 dword.
     if (current_mmio & (1 << 63)) != 0 || (current_pl2_dword & (1 << 31)) != 0 {
-        return MchbarWritePlan { status: WRITE_PLAN_BIOS_LOCKED, ..Default::default() };
+        return MchbarWritePlan {
+            status: WRITE_PLAN_BIOS_LOCKED,
+            ..Default::default()
+        };
     }
 
     let old_raw_pl2 = (current_pl2_dword & 0x7FFF) as u64;
@@ -1648,7 +1774,11 @@ pub fn plan_mchbar_power_write(
 
     let mut mmio_tau2 = current_pl2_dword & (0x7F << 17);
     if mmio_tau2 == 0 {
-        let shifted = if (fallback_tau2 >> 32) != 0 { fallback_tau2 >> 32 } else { fallback_tau2 };
+        let shifted = if (fallback_tau2 >> 32) != 0 {
+            fallback_tau2 >> 32
+        } else {
+            fallback_tau2
+        };
         mmio_tau2 = (shifted & (0x7F << 17)) as u32;
     }
     if mmio_tau2 == 0 {
@@ -1767,7 +1897,9 @@ impl PawnIoController {
         let raw = self.backend.read_msr(MSR_RAPL_POWER_UNIT)?;
         let pu = (raw & 0x0F) as u32;
         if pu == 0 && raw == 0 {
-            return Err(PawnIoError::UnsupportedHardware("MSR 0x606 returned 0: RAPL unsupported".into()));
+            return Err(PawnIoError::UnsupportedHardware(
+                "MSR 0x606 returned 0: RAPL unsupported".into(),
+            ));
         }
         let units_per_watt = 1u32 << pu;
         Ok((units_per_watt, raw))
@@ -1776,7 +1908,9 @@ impl PawnIoController {
     /// Reads MSR_PKG_POWER_INFO (0x614) for thermal spec (TDP), min power, and max power
     pub fn read_power_info(&self, units_per_watt: u32) -> Result<PowerInfo, PawnIoError> {
         if units_per_watt == 0 {
-            return Err(PawnIoError::HardwareError("units_per_watt must be greater than 0".into()));
+            return Err(PawnIoError::HardwareError(
+                "units_per_watt must be greater than 0".into(),
+            ));
         }
         let raw = self.backend.read_msr(MSR_PKG_POWER_INFO)?;
         let raw_thermal = raw & 0x7FFF;
@@ -1798,7 +1932,9 @@ impl PawnIoController {
     /// Reads MSR_PKG_POWER_LIMIT (0x610) to obtain PL1, PL2, and lock status
     pub fn read_power_limits(&self, units_per_watt: u32) -> Result<PowerLimits, PawnIoError> {
         if units_per_watt == 0 {
-            return Err(PawnIoError::HardwareError("units_per_watt must be greater than 0".into()));
+            return Err(PawnIoError::HardwareError(
+                "units_per_watt must be greater than 0".into(),
+            ));
         }
         let raw = self.backend.read_msr(MSR_PKG_POWER_LIMIT)?;
         let is_locked = (raw & MSR_PKG_POWER_LIMIT_LOCK_BIT) != 0;
@@ -1898,13 +2034,19 @@ impl PawnIoController {
             5.max((thermal_spec as f64 * 0.20).round() as i32)
         };
 
-        let mut scanned_max_pl2_watts = if power_info.maximum_power_watts > 0 && power_info.maximum_power_watts >= current_limits.pl2_watts {
+        let mut scanned_max_pl2_watts = if power_info.maximum_power_watts > 0
+            && power_info.maximum_power_watts >= current_limits.pl2_watts
+        {
             power_info.maximum_power_watts
         } else {
-            current_limits.pl2_watts.max((thermal_spec as f64 * 2.6).round() as i32)
+            current_limits
+                .pl2_watts
+                .max((thermal_spec as f64 * 2.6).round() as i32)
         };
 
-        let scanned_max_pl1_watts = current_limits.pl1_watts.max((scanned_max_pl2_watts as f64 * 0.85).round() as i32);
+        let scanned_max_pl1_watts = current_limits
+            .pl1_watts
+            .max((scanned_max_pl2_watts as f64 * 0.85).round() as i32);
         if scanned_max_pl2_watts < scanned_max_pl1_watts {
             scanned_max_pl2_watts = scanned_max_pl1_watts;
         }
@@ -1917,7 +2059,10 @@ impl PawnIoController {
         if let Ok(val64) = self.backend.read_mmio_64(mmio_addr) {
             is_mmio_accessible = true;
             raw_mmio_limit = val64;
-        } else if let (Ok(low), Ok(high)) = (self.backend.read_mmio_32(mmio_addr), self.backend.read_mmio_32(mmio_addr + 4)) {
+        } else if let (Ok(low), Ok(high)) = (
+            self.backend.read_mmio_32(mmio_addr),
+            self.backend.read_mmio_32(mmio_addr + 4),
+        ) {
             is_mmio_accessible = true;
             raw_mmio_limit = (low as u64) | ((high as u64) << 32);
         }
@@ -1988,7 +2133,10 @@ impl PawnIoController {
         }
 
         let enable_and_clamp = PL1_ENABLE_BIT | PL1_CLAMP_BIT | PL2_ENABLE_BIT | PL2_CLAMP_BIT;
-        Ok((safe_pl1 | enable_and_clamp | tau1 | (safe_pl2 << 32) | tau2) & !MSR_PKG_POWER_LIMIT_LOCK_BIT)
+        Ok(
+            (safe_pl1 | enable_and_clamp | tau1 | (safe_pl2 << 32) | tau2)
+                & !MSR_PKG_POWER_LIMIT_LOCK_BIT,
+        )
     }
 
     /// Writes MSR_PKG_POWER_LIMIT (0x610) atomically, preserving Tau time windows
@@ -1999,11 +2147,15 @@ impl PawnIoController {
         current_msr_limit: u64,
     ) -> Result<u64, PawnIoError> {
         if (current_msr_limit & MSR_PKG_POWER_LIMIT_LOCK_BIT) != 0 {
-            return Err(PawnIoError::BiosLocked("MSR 0x610 is locked by BIOS (bit 63 set)".into()));
+            return Err(PawnIoError::BiosLocked(
+                "MSR 0x610 is locked by BIOS (bit 63 set)".into(),
+            ));
         }
 
         let new_msr_value = Self::plan_msr_power_limit(current_msr_limit, raw_pl1, raw_pl2)
-            .map_err(|_| PawnIoError::BiosLocked("MSR 0x610 is locked by BIOS (bit 63 set)".into()))?;
+            .map_err(|_| {
+                PawnIoError::BiosLocked("MSR 0x610 is locked by BIOS (bit 63 set)".into())
+            })?;
 
         self.backend.write_msr(MSR_PKG_POWER_LIMIT, new_msr_value)?;
         Ok(new_msr_value)
@@ -2032,13 +2184,19 @@ impl PawnIoController {
         if let Ok(val64) = self.backend.read_mmio_64(mmio_pl1_addr) {
             read_ok = true;
             current_mmio = val64;
-        } else if let (Ok(low), Ok(high)) = (self.backend.read_mmio_32(mmio_pl1_addr), self.backend.read_mmio_32(mmio_pl2_addr)) {
+        } else if let (Ok(low), Ok(high)) = (
+            self.backend.read_mmio_32(mmio_pl1_addr),
+            self.backend.read_mmio_32(mmio_pl2_addr),
+        ) {
             read_ok = true;
             current_mmio = (low as u64) | ((high as u64) << 32);
         }
 
         if !read_ok {
-            return Err(PawnIoError::HardwareError(format!("Failed to read current MMIO registers at 0x{:X}", mmio_pl1_addr)));
+            return Err(PawnIoError::HardwareError(format!(
+                "Failed to read current MMIO registers at 0x{:X}",
+                mmio_pl1_addr
+            )));
         }
 
         // 2. Plan the ordered write (single source of truth shared with the FFI).
@@ -2060,14 +2218,22 @@ impl PawnIoController {
             ))),
             WRITE_PLAN_OK => {
                 // 3. Directional split write: two 32-bit stores in the planned order.
-                let first_ok = self.backend.write_mmio_32(plan.first_address, plan.first_value).is_ok();
+                let first_ok = self
+                    .backend
+                    .write_mmio_32(plan.first_address, plan.first_value)
+                    .is_ok();
                 if first_ok {
-                    let second_ok = self.backend.write_mmio_32(plan.second_address, plan.second_value).is_ok();
+                    let second_ok = self
+                        .backend
+                        .write_mmio_32(plan.second_address, plan.second_value)
+                        .is_ok();
                     if second_ok {
                         return Ok(plan.mirrored_value);
                     }
                     // Rollback first write to prevent partial/invalid split state
-                    let _ = self.backend.write_mmio_32(plan.first_address, plan.first_previous_value);
+                    let _ = self
+                        .backend
+                        .write_mmio_32(plan.first_address, plan.first_previous_value);
                     return Err(PawnIoError::HardwareError(format!(
                         "MMIO split-write failed on second dword at 0x{:X}; first dword rolled back",
                         plan.second_address
@@ -2075,7 +2241,8 @@ impl PawnIoController {
                 }
 
                 // 4. Fallback: atomic 64-bit write when 32-bit stores are unsupported.
-                self.backend.write_mmio_64(mmio_pl1_addr, plan.mirrored_value)?;
+                self.backend
+                    .write_mmio_64(mmio_pl1_addr, plan.mirrored_value)?;
                 Ok(plan.mirrored_value)
             }
             _ => Err(PawnIoError::HardwareError(format!(
@@ -2088,27 +2255,54 @@ impl PawnIoController {
     /// High-level method to apply target PL1 and PL2 power limits in Watts.
     /// Checks lock status, encodes limits, preserves Tau windows, atomically writes MSR 0x610,
     /// and mirrors to MMIO with directional split-write hazard prevention.
-    pub fn apply_power_limits(&mut self, target_pl1_watts: i32, target_pl2_watts: i32) -> PowerLimitApplyResult {
+    pub fn apply_power_limits(
+        &mut self,
+        target_pl1_watts: i32,
+        target_pl2_watts: i32,
+    ) -> PowerLimitApplyResult {
         let init_status = self.ensure_initialized();
         if init_status != PowerLimitApplyStatus::Success {
             return match init_status {
-                PowerLimitApplyStatus::DriverNotInstalled => PowerLimitApplyResult::driver_not_installed("PawnIO driver not installed or running"),
-                PowerLimitApplyStatus::AccessDenied => PowerLimitApplyResult::access_denied("Administrative elevation required to open PawnIO handle"),
-                PowerLimitApplyStatus::UnsupportedHardware => PowerLimitApplyResult::unsupported_hardware("Hardware does not support Intel RAPL"),
-                _ => PowerLimitApplyResult::hardware_error(format!("Backend initialization failed: {}", init_status)),
+                PowerLimitApplyStatus::DriverNotInstalled => {
+                    PowerLimitApplyResult::driver_not_installed(
+                        "PawnIO driver not installed or running",
+                    )
+                }
+                PowerLimitApplyStatus::AccessDenied => PowerLimitApplyResult::access_denied(
+                    "Administrative elevation required to open PawnIO handle",
+                ),
+                PowerLimitApplyStatus::UnsupportedHardware => {
+                    PowerLimitApplyResult::unsupported_hardware(
+                        "Hardware does not support Intel RAPL",
+                    )
+                }
+                _ => PowerLimitApplyResult::hardware_error(format!(
+                    "Backend initialization failed: {}",
+                    init_status
+                )),
             };
         }
 
         // 1. Read Power Units (MSR 0x606)
         let (units_per_watt, _) = match self.read_power_units() {
             Ok(u) => u,
-            Err(e) => return PowerLimitApplyResult::hardware_error(format!("Failed to read MSR 0x606: {}", e)),
+            Err(e) => {
+                return PowerLimitApplyResult::hardware_error(format!(
+                    "Failed to read MSR 0x606: {}",
+                    e
+                ))
+            }
         };
 
         // 2. Read Current MSR 0x610
         let current_msr = match self.backend.read_msr(MSR_PKG_POWER_LIMIT) {
             Ok(m) => m,
-            Err(e) => return PowerLimitApplyResult::hardware_error(format!("Failed to read MSR 0x610: {}", e)),
+            Err(e) => {
+                return PowerLimitApplyResult::hardware_error(format!(
+                    "Failed to read MSR 0x610: {}",
+                    e
+                ))
+            }
         };
 
         // 3. Bit 63 lock check
@@ -2147,7 +2341,12 @@ impl PawnIoController {
         // 5. Write MSR_PKG_POWER_LIMIT (0x610) atomically
         let new_msr_value = match self.write_msr_power_limits(raw_pl1, raw_pl2, current_msr) {
             Ok(val) => val,
-            Err(e) => return PowerLimitApplyResult::hardware_error(format!("Failed to write MSR 0x610: {}", e)),
+            Err(e) => {
+                return PowerLimitApplyResult::hardware_error(format!(
+                    "Failed to write MSR 0x610: {}",
+                    e
+                ))
+            }
         };
 
         // 6. Mirror to MMIO with directional split-write hazard prevention
@@ -2186,7 +2385,6 @@ impl Default for PawnIoController {
         Self::new()
     }
 }
-
 
 // ============================================================================
 // 10b. PawnIoDriver Engine Facade for Core Integration & FFI
@@ -2268,45 +2466,60 @@ impl PawnIoDriver {
 
     pub fn write_msr(&mut self, msr: u32, val: u64) -> Result<(), i32> {
         let _ = self.controller.ensure_initialized();
-        self.controller.backend.write_msr(msr, val).map_err(|e| match e {
-            PawnIoError::DriverNotInstalled(_) => -1,
-            PawnIoError::AccessDenied(_) => -2,
-            PawnIoError::BiosLocked(_) => -3,
-            PawnIoError::UnsupportedHardware(_) => -4,
-            PawnIoError::HardwareError(_) => -5,
-            PawnIoError::MutexTimeout(_, _) => -6,
-            _ => -7,
-        })
+        self.controller
+            .backend
+            .write_msr(msr, val)
+            .map_err(|e| match e {
+                PawnIoError::DriverNotInstalled(_) => -1,
+                PawnIoError::AccessDenied(_) => -2,
+                PawnIoError::BiosLocked(_) => -3,
+                PawnIoError::UnsupportedHardware(_) => -4,
+                PawnIoError::HardwareError(_) => -5,
+                PawnIoError::MutexTimeout(_, _) => -6,
+                _ => -7,
+            })
     }
 
     pub fn read_mmio32(&mut self, addr: u64) -> Result<u32, i32> {
         let _ = self.controller.ensure_initialized();
-        self.controller.backend.read_mmio_32(addr).map_err(|e| match e {
-            PawnIoError::DriverNotInstalled(_) => -1,
-            PawnIoError::AccessDenied(_) => -2,
-            PawnIoError::BiosLocked(_) => -3,
-            PawnIoError::UnsupportedHardware(_) => -4,
-            PawnIoError::HardwareError(_) => -5,
-            PawnIoError::MutexTimeout(_, _) => -6,
-            _ => -7,
-        })
+        self.controller
+            .backend
+            .read_mmio_32(addr)
+            .map_err(|e| match e {
+                PawnIoError::DriverNotInstalled(_) => -1,
+                PawnIoError::AccessDenied(_) => -2,
+                PawnIoError::BiosLocked(_) => -3,
+                PawnIoError::UnsupportedHardware(_) => -4,
+                PawnIoError::HardwareError(_) => -5,
+                PawnIoError::MutexTimeout(_, _) => -6,
+                _ => -7,
+            })
     }
 
     pub fn write_mmio32(&mut self, addr: u64, val: u32) -> Result<(), i32> {
         let _ = self.controller.ensure_initialized();
-        self.controller.backend.write_mmio_32(addr, val).map_err(|e| match e {
-            PawnIoError::DriverNotInstalled(_) => -1,
-            PawnIoError::AccessDenied(_) => -2,
-            PawnIoError::BiosLocked(_) => -3,
-            PawnIoError::UnsupportedHardware(_) => -4,
-            PawnIoError::HardwareError(_) => -5,
-            PawnIoError::MutexTimeout(_, _) => -6,
-            _ => -7,
-        })
+        self.controller
+            .backend
+            .write_mmio_32(addr, val)
+            .map_err(|e| match e {
+                PawnIoError::DriverNotInstalled(_) => -1,
+                PawnIoError::AccessDenied(_) => -2,
+                PawnIoError::BiosLocked(_) => -3,
+                PawnIoError::UnsupportedHardware(_) => -4,
+                PawnIoError::HardwareError(_) => -5,
+                PawnIoError::MutexTimeout(_, _) => -6,
+                _ => -7,
+            })
     }
 
-    pub fn write_rapl_limits_directional(&mut self, target_pl1: u32, target_pl2: u32) -> Result<bool, i32> {
-        let result = self.controller.apply_power_limits(target_pl1 as i32, target_pl2 as i32);
+    pub fn write_rapl_limits_directional(
+        &mut self,
+        target_pl1: u32,
+        target_pl2: u32,
+    ) -> Result<bool, i32> {
+        let result = self
+            .controller
+            .apply_power_limits(target_pl1 as i32, target_pl2 as i32);
         if result.is_success {
             Ok(result.mmio_mirrored)
         } else {
@@ -2474,7 +2687,7 @@ mod tests {
         backend.clear_history();
 
         let controller = PawnIoController::with_backend(Box::new(backend));
-        let raw_pl1 = 50 * 8;  // 400
+        let raw_pl1 = 50 * 8; // 400
         let raw_pl2 = 100 * 8; // 800
 
         let res = controller.write_mchbar_power_limits(raw_pl1, raw_pl2, 0x28 << 17, 0x10 << 49);
@@ -2494,11 +2707,36 @@ mod tests {
         let res1 = controller1.write_mchbar_power_limits(120 * 8, 140 * 8, 0x28 << 17, 0x10 << 49);
         assert!(res1.is_ok());
 
-        let h1 = history1_arc.read().unwrap_or_else(|e| e.into_inner()).clone();
-        let idx_pl2 = h1.iter().position(|op| matches!(op, MockHistoryOp::WriteMmio32 { address: 0xFED1_59A4, .. }));
-        let idx_pl1 = h1.iter().position(|op| matches!(op, MockHistoryOp::WriteMmio32 { address: 0xFED1_59A0, .. }));
-        assert!(idx_pl2.is_some() && idx_pl1.is_some(), "Both PL2 and PL1 32-bit MMIO writes must occur");
-        assert!(idx_pl2.unwrap() < idx_pl1.unwrap(), "Hazard ordering: PL2 (0xFED159A4) must be written before PL1 (0xFED159A0)");
+        let h1 = history1_arc
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let idx_pl2 = h1.iter().position(|op| {
+            matches!(
+                op,
+                MockHistoryOp::WriteMmio32 {
+                    address: 0xFED1_59A4,
+                    ..
+                }
+            )
+        });
+        let idx_pl1 = h1.iter().position(|op| {
+            matches!(
+                op,
+                MockHistoryOp::WriteMmio32 {
+                    address: 0xFED1_59A0,
+                    ..
+                }
+            )
+        });
+        assert!(
+            idx_pl2.is_some() && idx_pl1.is_some(),
+            "Both PL2 and PL1 32-bit MMIO writes must occur"
+        );
+        assert!(
+            idx_pl2.unwrap() < idx_pl1.unwrap(),
+            "Hazard ordering: PL2 (0xFED159A4) must be written before PL1 (0xFED159A0)"
+        );
 
         // 2. Normal condition: New PL1 (40W) <= Old PL2 (115W)
         // Must write PL1 lower DWORD (0xFED159A0) FIRST, then PL2 upper DWORD (0xFED159A4) SECOND
@@ -2511,11 +2749,36 @@ mod tests {
         let res2 = controller2.write_mchbar_power_limits(40 * 8, 80 * 8, 0x28 << 17, 0x10 << 49);
         assert!(res2.is_ok());
 
-        let h2 = history2_arc.read().unwrap_or_else(|e| e.into_inner()).clone();
-        let idx2_pl1 = h2.iter().position(|op| matches!(op, MockHistoryOp::WriteMmio32 { address: 0xFED1_59A0, .. }));
-        let idx2_pl2 = h2.iter().position(|op| matches!(op, MockHistoryOp::WriteMmio32 { address: 0xFED1_59A4, .. }));
-        assert!(idx2_pl1.is_some() && idx2_pl2.is_some(), "Both PL1 and PL2 32-bit MMIO writes must occur");
-        assert!(idx2_pl1.unwrap() < idx2_pl2.unwrap(), "Normal ordering: PL1 (0xFED159A0) must be written before PL2 (0xFED159A4)");
+        let h2 = history2_arc
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let idx2_pl1 = h2.iter().position(|op| {
+            matches!(
+                op,
+                MockHistoryOp::WriteMmio32 {
+                    address: 0xFED1_59A0,
+                    ..
+                }
+            )
+        });
+        let idx2_pl2 = h2.iter().position(|op| {
+            matches!(
+                op,
+                MockHistoryOp::WriteMmio32 {
+                    address: 0xFED1_59A4,
+                    ..
+                }
+            )
+        });
+        assert!(
+            idx2_pl1.is_some() && idx2_pl2.is_some(),
+            "Both PL1 and PL2 32-bit MMIO writes must occur"
+        );
+        assert!(
+            idx2_pl1.unwrap() < idx2_pl2.unwrap(),
+            "Normal ordering: PL1 (0xFED159A0) must be written before PL2 (0xFED159A4)"
+        );
     }
 
     #[test]
@@ -2585,9 +2848,18 @@ mod tests {
         assert_eq!(plan.first_address, 0xFED159A4);
         assert_eq!(plan.second_address, 0xFED159A0);
         assert_eq!(plan.first_value, 920 | (1 << 15) | (1 << 16) | (0x10 << 17));
-        assert_eq!(plan.second_value, 600 | (1 << 15) | (1 << 16) | (0x28 << 17));
-        assert_eq!(plan.first_previous_value, 520 | (1 << 15) | (1 << 16) | (0x10 << 17));
-        assert_eq!(plan.mirrored_value, (plan.second_value as u64) | ((plan.first_value as u64) << 32));
+        assert_eq!(
+            plan.second_value,
+            600 | (1 << 15) | (1 << 16) | (0x28 << 17)
+        );
+        assert_eq!(
+            plan.first_previous_value,
+            520 | (1 << 15) | (1 << 16) | (0x10 << 17)
+        );
+        assert_eq!(
+            plan.mirrored_value,
+            (plan.second_value as u64) | ((plan.first_value as u64) << 32)
+        );
     }
 
     #[test]
@@ -2599,7 +2871,10 @@ mod tests {
         assert_eq!(plan.first_address, 0xFED159A0);
         assert_eq!(plan.second_address, 0xFED159A4);
         assert_eq!(plan.first_value, 280 | (1 << 15) | (1 << 16) | (0x28 << 17));
-        assert_eq!(plan.second_value, 440 | (1 << 15) | (1 << 16) | (0x10 << 17));
+        assert_eq!(
+            plan.second_value,
+            440 | (1 << 15) | (1 << 16) | (0x10 << 17)
+        );
     }
 
     #[test]
@@ -2630,6 +2905,9 @@ mod tests {
         assert_eq!(plan & (1 << 48), 1 << 48);
         assert_eq!(plan & (1u64 << 63), 0);
 
-        assert_eq!(PawnIoController::plan_msr_power_limit(1u64 << 63, 100, 200), Err(1));
+        assert_eq!(
+            PawnIoController::plan_msr_power_limit(1u64 << 63, 100, 200),
+            Err(1)
+        );
     }
 }

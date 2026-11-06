@@ -1389,8 +1389,9 @@ namespace PredatorControlApp
                 int[] buffer = new int[32];
                 if (predator_display_get_supported_refresh_rates(buffer, (nuint)buffer.Length, out nuint count) == 0 && count > 0)
                 {
-                    rates = new int[count];
-                    Array.Copy(buffer, rates, (int)count);
+                    int safeCount = (int)Math.Min((long)count, (long)buffer.Length);
+                    rates = new int[safeCount];
+                    Array.Copy(buffer, rates, safeCount);
                     return true;
                 }
                 return false;
@@ -1496,8 +1497,8 @@ namespace PredatorControlApp
             if (!IsNativeCoreAvailable || index < 0) return false;
             try
             {
-                byte[] nameBuf = new byte[128];
-                byte[] valBuf = new byte[128];
+                byte[] nameBuf = new byte[512];
+                byte[] valBuf = new byte[512];
                 byte[] optBuf = new byte[512];
                 int ret = predator_bios_get_setting_info((nuint)index, nameBuf, valBuf, optBuf, out int risk, out int kind, 512);
                 if (ret == 0)

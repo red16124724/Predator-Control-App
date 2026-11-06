@@ -1131,6 +1131,10 @@ namespace PredatorControlApp
                     FanSpeedSysBattery = this.FanSpeedSysBattery,
                     RefreshRate = this.RefreshRate,
                     LcdOverdrive = this.LcdOverdrive,
+                    DdsMode = this.DdsMode,
+                    BlueLightShieldMode = this.BlueLightShieldMode,
+                    BiosModificationsEnabled = this.BiosModificationsEnabled,
+                    BiosDangerousAllowed = this.BiosDangerousAllowed,
                     BatteryLimit = this.BatteryLimit,
                     LastBatteryCalibrationUtcTicks = this.LastBatteryCalibrationUtcTicks,
                     BatteryCalibrationPhase = this.BatteryCalibrationPhase,
@@ -1374,6 +1378,8 @@ namespace PredatorControlApp
             FanSpeedSysBattery = Math.Clamp(FanSpeedSysBattery, 0, 100);
 
             RefreshRate = Math.Clamp(RefreshRate, 0, 1000);
+            DdsMode = Math.Clamp(DdsMode, 0, 2);
+            BlueLightShieldMode = Math.Clamp(BlueLightShieldMode, 0, 3);
 
             RgbMode = Math.Clamp(RgbMode, 0, 33);
             RgbBrightness = Math.Clamp(RgbBrightness, 0, 100);
@@ -1546,6 +1552,8 @@ namespace PredatorControlApp
             if (LastBatteryCalibrationUtcTicks < 0) LastBatteryCalibrationUtcTicks = 0;
             BatteryCalibrationPhase = Math.Clamp(BatteryCalibrationPhase, 0, 2);
             CalibrationLastKnownPercent = CalibrationLastKnownPercent < 0 ? -1 : Math.Clamp(CalibrationLastKnownPercent, 0, 100);
+
+            if (!BiosModificationsEnabled) BiosDangerousAllowed = false;
             }
 
             var cpu = _cpuCurve;
@@ -1834,6 +1842,10 @@ namespace PredatorControlApp
 
                             if (key.GetValue("RefreshRate") is int rr) settings.RefreshRate = rr;
                             if (key.GetValue("LcdOverdrive") is int od) settings.LcdOverdrive = od == 1;
+                            if (key.GetValue("DdsMode") is int dds) settings.DdsMode = dds;
+                            if (key.GetValue("BlueLightShieldMode") is int bls) settings.BlueLightShieldMode = bls;
+                            if (key.GetValue("BiosModificationsEnabled") is int bme) settings.BiosModificationsEnabled = bme == 1;
+                            if (key.GetValue("BiosDangerousAllowed") is int bda) settings.BiosDangerousAllowed = bda == 1;
                             if (key.GetValue("BatteryLimit") is int bl) settings.BatteryLimit = bl == 1;
                             if (key.GetValue("LastBatteryCalibrationUtcTicks") is long lbct) settings.LastBatteryCalibrationUtcTicks = lbct;
                             else if (key.GetValue("LastBatteryCalibrationUtcTicks") is string lbcts && long.TryParse(lbcts, out var parsedTicks)) settings.LastBatteryCalibrationUtcTicks = parsedTicks;
@@ -2205,6 +2217,10 @@ namespace PredatorControlApp
 
                         if (snapshot.RefreshRate > 0) key.SetValue("RefreshRate", snapshot.RefreshRate);
                         key.SetValue("LcdOverdrive", snapshot.LcdOverdrive ? 1 : 0);
+                        key.SetValue("DdsMode", snapshot.DdsMode);
+                        key.SetValue("BlueLightShieldMode", snapshot.BlueLightShieldMode);
+                        key.SetValue("BiosModificationsEnabled", snapshot.BiosModificationsEnabled ? 1 : 0);
+                        key.SetValue("BiosDangerousAllowed", snapshot.BiosDangerousAllowed ? 1 : 0);
                         key.SetValue("BatteryLimit", snapshot.BatteryLimit ? 1 : 0);
                         key.SetValue("LastBatteryCalibrationUtcTicks", snapshot.LastBatteryCalibrationUtcTicks, RegistryValueKind.QWord);
                         key.SetValue("BatteryCalibrationPhase", snapshot.BatteryCalibrationPhase, RegistryValueKind.DWord);

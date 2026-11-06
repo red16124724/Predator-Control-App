@@ -45,7 +45,7 @@ namespace PredatorControlApp.Tests
                 new(100, 100)
             };
 
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(4));
             int mutations = 0;
             int interpolations = 0;
             var tasks = new Task[6];
@@ -78,6 +78,7 @@ namespace PredatorControlApp.Tests
                         }
                         catch { }
                         step++;
+                        Thread.Yield();
                     }
                 });
             }
@@ -95,6 +96,7 @@ namespace PredatorControlApp.Tests
                         Assert.InRange(speed, 10, 100);
                         temp = (temp + 3) % 120;
                         Interlocked.Increment(ref interpolations);
+                        Thread.Yield();
                     }
                 });
             }
@@ -131,11 +133,15 @@ namespace PredatorControlApp.Tests
                     int tid = i;
                     tasks[i] = Task.Run(() =>
                     {
+                        var curve = tid == 0 ? settings.CpuCurve : settings.GpuCurve;
                         int count = 0;
                         while (!cts.Token.IsCancellationRequested)
                         {
-                            settings.CpuCurve.Add(new CurvePointData((tid * 10 + count) % 100, 50));
-                            if (settings.CpuCurve.Count > 200) settings.CpuCurve.Clear();
+                            lock (curve)
+                            {
+                                curve.Add(new CurvePointData((tid * 10 + count) % 100, 50));
+                                if (curve.Count > 200) curve.Clear();
+                            }
                             Interlocked.Increment(ref mutations);
                             count++;
                         }

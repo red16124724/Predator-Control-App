@@ -21,6 +21,16 @@ namespace PredatorControlApp.Display
 
     public class DisplayManager
     {
+        private static void SafeInvoke<T>(Action<T>? evt, T arg)
+        {
+            if (evt == null) return;
+            foreach (Action<T> handler in evt.GetInvocationList())
+            {
+                try { handler(arg); }
+                catch { /* isolate subscribers */ }
+            }
+        }
+
         private static readonly Lazy<DisplayManager> _instance = new(() => new DisplayManager());
         public static DisplayManager Instance => _instance.Value;
 
@@ -35,10 +45,10 @@ namespace PredatorControlApp.Display
         public event Action<int>? DdsModeChanged;
         public event Action<bool>? LcdOverdriveChanged;
 
-        public int CurrentRefreshRate => _currentRefreshRate;
-        public int BlueLightMode => _blueLightMode;
-        public int CurrentDdsMode => _ddsMode;
-        public bool IsLcdOverdriveEnabled => _lcdOverdrive;
+        public int CurrentRefreshRate { get { lock (_lock) return _currentRefreshRate; } }
+        public int BlueLightMode { get { lock (_lock) return _blueLightMode; } }
+        public int CurrentDdsMode { get { lock (_lock) return _ddsMode; } }
+        public bool IsLcdOverdriveEnabled { get { lock (_lock) return _lcdOverdrive; } }
 
         public DisplayManager()
         {
@@ -77,7 +87,7 @@ namespace PredatorControlApp.Display
 
         public bool SetRefreshRate(int hz)
         {
-            if (hz < 30) return false;
+            if (hz < 30 || hz > 1000) return false;
 
             bool success = false;
             if (PredatorNativeCore.IsNativeCoreAvailable)
@@ -88,7 +98,7 @@ namespace PredatorControlApp.Display
             if (success || !PredatorNativeCore.IsNativeCoreAvailable)
             {
                 lock (_lock) { _currentRefreshRate = hz; }
-                RefreshRateChanged?.Invoke(hz);
+                SafeInvoke(RefreshRateChanged, hz);
                 return true;
             }
 
@@ -108,7 +118,7 @@ namespace PredatorControlApp.Display
             if (success || !PredatorNativeCore.IsNativeCoreAvailable)
             {
                 lock (_lock) { _blueLightMode = mode; }
-                BlueLightShieldChanged?.Invoke(mode);
+                SafeInvoke(BlueLightShieldChanged, mode);
                 return true;
             }
 
@@ -145,7 +155,7 @@ namespace PredatorControlApp.Display
             if (success || !PredatorNativeCore.IsNativeCoreAvailable)
             {
                 lock (_lock) { _ddsMode = mode; }
-                DdsModeChanged?.Invoke(mode);
+                SafeInvoke(DdsModeChanged, mode);
                 return true;
             }
 
@@ -163,7 +173,7 @@ namespace PredatorControlApp.Display
             if (success || !PredatorNativeCore.IsNativeCoreAvailable)
             {
                 lock (_lock) { _lcdOverdrive = enabled; }
-                LcdOverdriveChanged?.Invoke(enabled);
+                SafeInvoke(LcdOverdriveChanged, enabled);
                 return true;
             }
 

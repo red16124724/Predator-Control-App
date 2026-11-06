@@ -74,7 +74,12 @@ impl SpectrumState {
                     acc += s;
                 }
             }
-            let mono = acc * inv;
+            let raw_mono = acc * inv;
+            let mono = if raw_mono.is_finite() {
+                raw_mono.clamp(-10.0, 10.0)
+            } else {
+                0.0
+            };
             sum += mono * mono;
             if frame >= first_kept {
                 self.write_sample(mono);
@@ -85,10 +90,15 @@ impl SpectrumState {
         self.pending = (self.pending + written).min(fft_size);
 
         // RMS over the whole chunk (pre-window, matches what the ear hears).
-        let chunk_rms = (sum / frames as f32).sqrt();
-        self.rms = if self.rms > 0.0 {
+        let raw_rms = (sum / frames as f32).sqrt();
+        let chunk_rms = if raw_rms.is_finite() {
+            raw_rms.clamp(0.0, 10.0)
+        } else {
+            0.0
+        };
+        self.rms = if self.rms.is_finite() && self.rms > 0.0 {
             // Smoothing so the level meter does not flicker between packets.
-            self.rms * 0.6 + chunk_rms * 0.4
+            (self.rms * 0.6 + chunk_rms * 0.4).clamp(0.0, 10.0)
         } else {
             // First packet reports the true level instead of ramping up from zero.
             chunk_rms
@@ -96,7 +106,11 @@ impl SpectrumState {
         if chunk_rms > self.peak_level {
             self.peak_level = chunk_rms;
         } else {
-            self.peak_level *= 0.999;
+            self.peak_level = if self.peak_level.is_finite() {
+                (self.peak_level * 0.999).clamp(0.0, 10.0)
+            } else {
+                0.0
+            };
         }
     }
 
@@ -410,12 +424,20 @@ impl SpectrumAnalyzer {
 
     pub fn level(&self) -> f32 {
         let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        state.rms.clamp(0.0, 4.0)
+        if state.rms.is_finite() {
+            state.rms.clamp(0.0, 4.0)
+        } else {
+            0.0
+        }
     }
 
     pub fn peak(&self) -> f32 {
         let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        state.peak_level.clamp(0.0, 4.0)
+        if state.peak_level.is_finite() {
+            state.peak_level.clamp(0.0, 4.0)
+        } else {
+            0.0
+        }
     }
 
     pub fn is_beat(&self) -> bool {
@@ -530,7 +552,8 @@ mod wasapi_ffi {
 
     #[repr(C)]
     pub struct IUnknownVtbl {
-        pub query_interface: unsafe extern "system" fn(*mut c_void, *const Guid, *mut *mut c_void) -> i32,
+        pub query_interface:
+            unsafe extern "system" fn(*mut c_void, *const Guid, *mut *mut c_void) -> i32,
         pub add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
         pub release: unsafe extern "system" fn(*mut c_void) -> u32,
     }
@@ -538,18 +561,29 @@ mod wasapi_ffi {
     #[repr(C)]
     pub struct IMMDeviceEnumeratorVtbl {
         pub parent: IUnknownVtbl,
-        pub enum_audio_endpoints: unsafe extern "system" fn(*mut c_void, i32, u32, *mut *mut c_void) -> i32,
-        pub get_default_audio_endpoint: unsafe extern "system" fn(*mut c_void, i32, i32, *mut *mut c_void) -> i32,
+        pub enum_audio_endpoints:
+            unsafe extern "system" fn(*mut c_void, i32, u32, *mut *mut c_void) -> i32,
+        pub get_default_audio_endpoint:
+            unsafe extern "system" fn(*mut c_void, i32, i32, *mut *mut c_void) -> i32,
         pub get_device: unsafe extern "system" fn(*mut c_void, *const u16, *mut *mut c_void) -> i32,
-        pub register_endpoint_notification_callback: unsafe extern "system" fn(*mut c_void, *mut c_void) -> i32,
-        pub unregister_endpoint_notification_callback: unsafe extern "system" fn(*mut c_void, *mut c_void) -> i32,
+        pub register_endpoint_notification_callback:
+            unsafe extern "system" fn(*mut c_void, *mut c_void) -> i32,
+        pub unregister_endpoint_notification_callback:
+            unsafe extern "system" fn(*mut c_void, *mut c_void) -> i32,
     }
 
     #[repr(C)]
     pub struct IMMDeviceVtbl {
         pub parent: IUnknownVtbl,
-        pub activate: unsafe extern "system" fn(*mut c_void, *const Guid, u32, *mut c_void, *mut *mut c_void) -> i32,
-        pub open_property_store: unsafe extern "system" fn(*mut c_void, u32, *mut *mut c_void) -> i32,
+        pub activate: unsafe extern "system" fn(
+            *mut c_void,
+            *const Guid,
+            u32,
+            *mut c_void,
+            *mut *mut c_void,
+        ) -> i32,
+        pub open_property_store:
+            unsafe extern "system" fn(*mut c_void, u32, *mut *mut c_void) -> i32,
         pub get_id: unsafe extern "system" fn(*mut c_void, *mut *mut u16) -> i32,
         pub get_state: unsafe extern "system" fn(*mut c_void, *mut u32) -> i32,
     }
@@ -557,24 +591,41 @@ mod wasapi_ffi {
     #[repr(C)]
     pub struct IAudioClientVtbl {
         pub parent: IUnknownVtbl,
-        pub initialize: unsafe extern "system" fn(*mut c_void, i32, u32, i64, i64, *const c_void, *const c_void) -> i32,
+        pub initialize: unsafe extern "system" fn(
+            *mut c_void,
+            i32,
+            u32,
+            i64,
+            i64,
+            *const c_void,
+            *const c_void,
+        ) -> i32,
         pub get_buffer_size: unsafe extern "system" fn(*mut c_void, *mut u32) -> i32,
         pub get_stream_latency: unsafe extern "system" fn(*mut c_void, *mut i64) -> i32,
         pub get_current_padding: unsafe extern "system" fn(*mut c_void, *mut u32) -> i32,
-        pub is_format_supported: unsafe extern "system" fn(*mut c_void, i32, *const c_void, *mut *mut c_void) -> i32,
+        pub is_format_supported:
+            unsafe extern "system" fn(*mut c_void, i32, *const c_void, *mut *mut c_void) -> i32,
         pub get_mix_format: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> i32,
         pub get_device_period: unsafe extern "system" fn(*mut c_void, *mut i64, *mut i64) -> i32,
         pub start: unsafe extern "system" fn(*mut c_void) -> i32,
         pub stop: unsafe extern "system" fn(*mut c_void) -> i32,
         pub reset: unsafe extern "system" fn(*mut c_void) -> i32,
         pub set_event_handle: unsafe extern "system" fn(*mut c_void, *mut c_void) -> i32,
-        pub get_service: unsafe extern "system" fn(*mut c_void, *const Guid, *mut *mut c_void) -> i32,
+        pub get_service:
+            unsafe extern "system" fn(*mut c_void, *const Guid, *mut *mut c_void) -> i32,
     }
 
     #[repr(C)]
     pub struct IAudioCaptureClientVtbl {
         pub parent: IUnknownVtbl,
-        pub get_buffer: unsafe extern "system" fn(*mut c_void, *mut *mut u8, *mut u32, *mut u32, *mut u64, *mut u64) -> i32,
+        pub get_buffer: unsafe extern "system" fn(
+            *mut c_void,
+            *mut *mut u8,
+            *mut u32,
+            *mut u32,
+            *mut u64,
+            *mut u64,
+        ) -> i32,
         pub release_buffer: unsafe extern "system" fn(*mut c_void, u32) -> i32,
         pub get_next_packet_size: unsafe extern "system" fn(*mut c_void, *mut u32) -> i32,
     }
@@ -716,7 +767,13 @@ fn run_wasapi_capture_loop(
         let dev_vtbl = unsafe { &*(*(device as *mut *mut IMMDeviceVtbl)) };
         let mut audio_client: *mut std::ffi::c_void = std::ptr::null_mut();
         let hr = unsafe {
-            (dev_vtbl.activate)(device, &IID_IAUDIOCLIENT, CLSCTX_ALL, std::ptr::null_mut(), &mut audio_client)
+            (dev_vtbl.activate)(
+                device,
+                &IID_IAUDIOCLIENT,
+                CLSCTX_ALL,
+                std::ptr::null_mut(),
+                &mut audio_client,
+            )
         };
 
         if hr != 0 || audio_client.is_null() {
@@ -792,7 +849,8 @@ fn run_wasapi_capture_loop(
 
         while is_running.load(Ordering::Acquire) {
             let mut packet_size: u32 = 0;
-            let hr = unsafe { (capture_vtbl.get_next_packet_size)(capture_client, &mut packet_size) };
+            let hr =
+                unsafe { (capture_vtbl.get_next_packet_size)(capture_client, &mut packet_size) };
             if hr != 0 {
                 break;
             }
@@ -864,7 +922,9 @@ pub unsafe extern "C" fn predator_audio_capture_start(
     band_count: usize,
 ) -> i32 {
     crate::safe_ffi(-1, || {
-        let mut guard = GLOBAL_AUDIO_CAPTURE.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = GLOBAL_AUDIO_CAPTURE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let sr = if sample_rate > 0 { sample_rate } else { 48_000 };
         let fft = if fft_size > 0 { fft_size } else { 2048 };
         let bands = if band_count > 0 { band_count } else { 8 };
@@ -883,7 +943,9 @@ pub unsafe extern "C" fn predator_audio_capture_start(
 #[no_mangle]
 pub unsafe extern "C" fn predator_audio_capture_stop() {
     crate::safe_ffi((), || {
-        let mut guard = GLOBAL_AUDIO_CAPTURE.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = GLOBAL_AUDIO_CAPTURE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if let Some(mut worker) = guard.take() {
             worker.stop();
         }
@@ -893,9 +955,15 @@ pub unsafe extern "C" fn predator_audio_capture_stop() {
 #[no_mangle]
 pub unsafe extern "C" fn predator_audio_capture_is_active() -> i32 {
     crate::safe_ffi(0, || {
-        let guard = GLOBAL_AUDIO_CAPTURE.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = GLOBAL_AUDIO_CAPTURE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if let Some(worker) = guard.as_ref() {
-            if worker.is_active() { 1 } else { 0 }
+            if worker.is_active() {
+                1
+            } else {
+                0
+            }
         } else {
             0
         }
@@ -919,7 +987,9 @@ pub unsafe extern "C" fn predator_audio_capture_get_zones(
             return -1;
         }
 
-        let guard = GLOBAL_AUDIO_CAPTURE.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = GLOBAL_AUDIO_CAPTURE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if let Some(worker) = guard.as_ref() {
             let slice = unsafe { std::slice::from_raw_parts_mut(out_zones, zone_count * 3) };
             worker.get_zones([r, g, b], brightness, slice) as i32
@@ -932,7 +1002,9 @@ pub unsafe extern "C" fn predator_audio_capture_get_zones(
 #[no_mangle]
 pub unsafe extern "C" fn predator_audio_capture_get_level() -> f32 {
     crate::safe_ffi(0.0, || {
-        let guard = GLOBAL_AUDIO_CAPTURE.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = GLOBAL_AUDIO_CAPTURE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if let Some(worker) = guard.as_ref() {
             worker.get_level()
         } else {
@@ -954,7 +1026,9 @@ pub unsafe extern "C" fn predator_audio_capture_get_bands(
             return -1;
         }
 
-        let guard = GLOBAL_AUDIO_CAPTURE.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = GLOBAL_AUDIO_CAPTURE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if let Some(worker) = guard.as_ref() {
             worker.copy_bands(out_bands, band_count) as i32
         } else {

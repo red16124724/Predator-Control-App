@@ -14,8 +14,8 @@
 //!   managed circuit-breaker behaviour.
 
 use std::ffi::c_void;
-use std::os::windows::ffi::OsStrExt;
 use std::ffi::OsStr;
+use std::os::windows::ffi::OsStrExt;
 
 const NVAPI_INITIALIZE: u32 = 0x0150_E828;
 const NVAPI_ENUM_PHYSICAL_GPUS: u32 = 0xE5AC_92AA;
@@ -31,7 +31,8 @@ type NvQueryInterface = unsafe extern "C" fn(u32) -> *mut c_void;
 type NvInitialize = unsafe extern "C" fn() -> i32;
 type NvEnumPhysicalGpus = unsafe extern "C" fn(*mut usize, *mut u32) -> i32;
 type NvGpuGetUsages = unsafe extern "C" fn(*mut c_void, *mut NvUsages) -> i32;
-type NvGpuGetThermalSettings = unsafe extern "C" fn(*mut c_void, u32, *mut NvThermalSettings) -> i32;
+type NvGpuGetThermalSettings =
+    unsafe extern "C" fn(*mut c_void, u32, *mut NvThermalSettings) -> i32;
 
 #[link(name = "kernel32")]
 extern "system" {
@@ -123,7 +124,8 @@ impl NvApi {
             return None;
         }
 
-        let query = unsafe { GetProcAddress(module, b"nvapi_QueryInterface\0".as_ptr() as *const i8) };
+        let query =
+            unsafe { GetProcAddress(module, b"nvapi_QueryInterface\0".as_ptr() as *const i8) };
         if query.is_null() {
             unsafe {
                 FreeLibrary(module);
@@ -181,7 +183,9 @@ impl NvApi {
         let get_thermal = if thermal_ptr.is_null() {
             None
         } else {
-            Some(unsafe { std::mem::transmute::<*mut c_void, NvGpuGetThermalSettings>(thermal_ptr) })
+            Some(unsafe {
+                std::mem::transmute::<*mut c_void, NvGpuGetThermalSettings>(thermal_ptr)
+            })
         };
 
         Some(NvApi {
@@ -292,7 +296,11 @@ impl NvState {
         self.consecutive_failures = self.consecutive_failures.saturating_add(1);
         if self.consecutive_failures >= 3 {
             self.consecutive_failures = 0;
-            let reenumerated = self.api.as_mut().map(|api| api.reenumerate()).unwrap_or(false);
+            let reenumerated = self
+                .api
+                .as_mut()
+                .map(|api| api.reenumerate())
+                .unwrap_or(false);
             if !reenumerated {
                 // Full reload on the next call.
                 self.api = None;

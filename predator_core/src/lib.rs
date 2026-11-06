@@ -1122,7 +1122,11 @@ pub unsafe extern "C" fn predator_pawnio_is_driver_open() -> i32 {
     safe_ffi(0, || {
         let guard = GLOBAL_PAWNIO.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(ref d) = *guard {
-            if d.is_available() { 1 } else { 0 }
+            if d.is_available() {
+                1
+            } else {
+                0
+            }
         } else {
             0
         }
@@ -1238,7 +1242,11 @@ pub unsafe extern "C" fn predator_telemetry_stop() {
 pub unsafe extern "C" fn predator_telemetry_is_active() -> i32 {
     safe_ffi(0, || {
         let guard = GLOBAL_TELEMETRY.lock().unwrap_or_else(|e| e.into_inner());
-        if guard.is_some() { 1 } else { 0 }
+        if guard.is_some() {
+            1
+        } else {
+            0
+        }
     })
 }
 
@@ -1719,8 +1727,14 @@ mod tests {
 
 // 9. Universal BIOS and Firmware Settings Native Subsystem
 pub use migration_exports::{
-    predator_bios_apply_setting, predator_bios_get_setting_info,
-    predator_bios_get_settings_count, predator_bios_probe_support,
-    predator_bios_restore_defaults,
+    predator_bios_apply_setting, predator_bios_get_setting_info, predator_bios_get_settings_count,
+    predator_bios_probe_support, predator_bios_restore_defaults,
 };
 
+// 10. Display and Advanced Optimus (DDS) Native Engine
+pub use migration_exports::{
+    predator_display_get_current_refresh_rate, predator_display_get_dds_status,
+    predator_display_get_supported_refresh_rates, predator_display_set_bluelight_shield,
+    predator_display_set_dds_mode, predator_display_set_lcd_overdrive,
+    predator_display_set_refresh_rate,
+};

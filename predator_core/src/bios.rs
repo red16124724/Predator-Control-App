@@ -36,9 +36,9 @@ pub const E_UNSUPPORTED: i32 = -7;
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum BiosSupportMode {
     Unsupported = 0,
-    WmiModern2025 = 1,       // 2025+ models: root\wmi ListBIOSSettings & MethodForPowerShell
-    AcpiWmiFallback2020 = 2,  // 2020-2024 models: ACPI-WMI standard hardware registers fallback
-    UefiNvramDirect = 3,      // Universal UEFI: direct NVRAM variable access
+    WmiModern2025 = 1, // 2025+ models: root\wmi ListBIOSSettings & MethodForPowerShell
+    AcpiWmiFallback2020 = 2, // 2020-2024 models: ACPI-WMI standard hardware registers fallback
+    UefiNvramDirect = 3, // Universal UEFI: direct NVRAM variable access
 }
 
 /// Two-tier safety classification for BIOS settings.
@@ -110,6 +110,7 @@ pub static SAFE_SETTINGS: &[&str] = &[
     "Keyboard backlight timeout",
     "Fast Boot",
     "POST Animation & Sound",
+    "LCD Overdrive",
 ];
 
 /// Representation of an enumerated BIOS or firmware setting.
@@ -242,7 +243,10 @@ pub fn validate_ascii_str(s: &str, max_len: usize) -> Result<(), i32> {
 /// Reads a null-terminated ASCII C-string from a raw pointer up to `max_len` bytes.
 /// Validates length and printable ASCII boundaries.
 pub unsafe fn read_ascii_c_str_limited(ptr: *const u8, max_len: usize) -> Result<String, i32> {
-    if ptr.is_null() {
+    if ptr.is_null()
+        || (ptr as usize) < crate::MIN_USER_ADDR
+        || (ptr as usize) > crate::MAX_USER_ADDR
+    {
         return Err(E_GENERAL);
     }
     let mut len = 0;
@@ -276,6 +280,33 @@ pub fn zeroize_string(s: &mut String) {
     }
     s.clear();
     s.shrink_to_fit();
+}
+
+/// RAII container that volatile-zeroizes its internal String on drop to guarantee memory scrubbing.
+#[derive(Default, Debug)]
+pub struct ZeroizingString(pub String);
+
+impl ZeroizingString {
+    pub fn new(s: String) -> Self {
+        Self(s)
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::ops::Deref for ZeroizingString {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Drop for ZeroizingString {
+    fn drop(&mut self) {
+        zeroize_string(&mut self.0);
+    }
 }
 
 /// Copies a Rust string slice into a destination C-buffer, ensuring null-termination
@@ -607,22 +638,32 @@ impl MockBiosBackend {
 
     pub fn with_model(model: &str) -> Self {
         let b = Self::new();
-        *b.detected_model.lock().unwrap() = Some(model.to_string());
+        *b.detected_model.lock().unwrap_or_else(|e| e.into_inner()) = Some(model.to_string());
         b
     }
 
     pub fn add_wmi_setting(&self, raw: &str) {
-        self.wmi_settings.lock().unwrap().push(raw.to_string());
+        self.wmi_settings
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(raw.to_string());
     }
 
     pub fn set_method_result(&self, res: BiosMethodResult) {
-        *self.wmi_method_result.lock().unwrap() = res;
+        *self
+            .wmi_method_result
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = res;
     }
 }
 
 impl BiosBackend for MockBiosBackend {
     fn query_wmi_bios_settings(&self) -> Result<Vec<String>, i32> {
-        let settings = self.wmi_settings.lock().unwrap().clone();
+        let settings = self
+            .wmi_settings
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         if settings.is_empty() {
             Err(E_UNSUPPORTED)
         } else {
@@ -640,7 +681,10 @@ impl BiosBackend for MockBiosBackend {
             .lock()
             .unwrap()
             .push((name.to_string(), value.to_string()));
-        Ok(*self.wmi_method_result.lock().unwrap())
+        Ok(*self
+            .wmi_method_result
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()))
     }
 
     fn load_wmi_bios_default(
@@ -648,12 +692,18 @@ impl BiosBackend for MockBiosBackend {
         _password: &str,
         user_default: bool,
     ) -> Result<BiosMethodResult, i32> {
-        self.restore_calls.lock().unwrap().push(user_default);
-        Ok(*self.wmi_method_result.lock().unwrap())
+        self.restore_calls
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(user_default);
+        Ok(*self
+            .wmi_method_result
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()))
     }
 
     fn read_uefi_variable(&self, name: &str, guid: &str) -> Option<Vec<u8>> {
-        let store = self.nvram_store.lock().unwrap();
+        let store = self.nvram_store.lock().unwrap_or_else(|e| e.into_inner());
         store
             .get(&(name.to_string(), normalize_guid(guid)))
             .map(|(data, _)| data.clone())
@@ -666,7 +716,7 @@ impl BiosBackend for MockBiosBackend {
         data: &[u8],
         attributes: u32,
     ) -> Result<(), i32> {
-        let mut store = self.nvram_store.lock().unwrap();
+        let mut store = self.nvram_store.lock().unwrap_or_else(|e| e.into_inner());
         store.insert(
             (name.to_string(), normalize_guid(guid)),
             (data.to_vec(), attributes),
@@ -675,17 +725,26 @@ impl BiosBackend for MockBiosBackend {
     }
 
     fn read_acpi_register(&self, action_id: u32) -> Result<u64, i32> {
-        let regs = self.acpi_registers.lock().unwrap();
+        let regs = self
+            .acpi_registers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         Ok(regs.get(&action_id).copied().unwrap_or(0))
     }
 
     fn write_acpi_register(&self, action_id: u32, value: u64) -> Result<(), i32> {
-        self.acpi_registers.lock().unwrap().insert(action_id, value);
+        self.acpi_registers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(action_id, value);
         Ok(())
     }
 
     fn detect_model_name(&self) -> Option<String> {
-        self.detected_model.lock().unwrap().clone()
+        self.detected_model
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 }
 
@@ -749,7 +808,8 @@ impl BiosSubsystem {
     /// Probes laptop hardware model, determining launch year and operational mode.
     pub fn probe(&mut self) -> BiosSupportMode {
         let detected = self.backend.detect_model_name().unwrap_or_else(|| {
-            std::env::var("PREDATOR_MODEL").unwrap_or_else(|_| "Predator Helios 16 PH16-72".to_string())
+            std::env::var("PREDATOR_MODEL")
+                .unwrap_or_else(|_| "Predator Helios 16 PH16-72".to_string())
         });
         self.model_name = detected;
 
@@ -787,7 +847,10 @@ impl BiosSubsystem {
                 name: "Function Key behavior".to_string(),
                 current: "Special Key".to_string(),
                 current_value: "Special Key".to_string(),
-                options: vec!["Special Key".to_string(), "Standard Function Key".to_string()],
+                options: vec![
+                    "Special Key".to_string(),
+                    "Standard Function Key".to_string(),
+                ],
                 risk: SettingRisk::Normal,
                 kind: SettingKind::AcpiFallback,
             },
@@ -912,15 +975,21 @@ impl BiosSubsystem {
             return E_INVALID_ARG;
         }
 
+        // Two-tier safety classification guard: reject dangerous modifications upfront
+        if classify_setting_risk(name) == SettingRisk::Dangerous && !dangerous_allowed {
+            return E_DANGEROUS_BLOCKED;
+        }
+
         let idx = match self.settings.iter().position(|s| {
             s.name.eq_ignore_ascii_case(name)
+                || s.name.eq_ignore_ascii_case(name.trim())
                 || normalize_setting_name(&s.name) == normalize_setting_name(name)
         }) {
             Some(i) => i,
             None => return E_NOT_FOUND,
         };
 
-        // Enforce two-tier safety classification guard
+        // Secondary check against registered item risk
         if self.settings[idx].risk == SettingRisk::Dangerous && !dangerous_allowed {
             return E_DANGEROUS_BLOCKED;
         }
@@ -945,7 +1014,11 @@ impl BiosSubsystem {
                 // Dispatch to ACPI-WMI standard register
                 let norm = normalize_setting_name(&self.settings[idx].name);
                 let write_res = if norm.contains("functionkey") {
-                    let val = if value.eq_ignore_ascii_case("Standard Function Key") { 1 } else { 0 };
+                    let val = if value.eq_ignore_ascii_case("Standard Function Key") {
+                        1
+                    } else {
+                        0
+                    };
                     self.backend.write_acpi_register(0x1F, val)
                 } else if norm.contains("usbcharg") {
                     let val = if value.contains("10") {
@@ -972,10 +1045,18 @@ impl BiosSubsystem {
                     };
                     self.backend.write_acpi_register(0x84, val)
                 } else if norm.contains("animation") {
-                    let val = if value.eq_ignore_ascii_case("Enabled") { 1 } else { 0 };
+                    let val = if value.eq_ignore_ascii_case("Enabled") {
+                        1
+                    } else {
+                        0
+                    };
                     self.backend.write_acpi_register(0x06, val)
                 } else if norm.contains("overdrive") {
-                    let val = if value.eq_ignore_ascii_case("Enabled") { 1 } else { 0 };
+                    let val = if value.eq_ignore_ascii_case("Enabled") {
+                        1
+                    } else {
+                        0
+                    };
                     self.backend.write_acpi_register(0x0F, val)
                 } else if norm.contains("mux") {
                     let val = if value.eq_ignore_ascii_case("Discrete GPU only") {
@@ -987,7 +1068,11 @@ impl BiosSubsystem {
                     };
                     self.backend.write_acpi_register(0x02, val)
                 } else if norm.contains("threshold") {
-                    let val = if value.eq_ignore_ascii_case("Enabled") { 1 } else { 0 };
+                    let val = if value.eq_ignore_ascii_case("Enabled") {
+                        1
+                    } else {
+                        0
+                    };
                     self.backend.write_acpi_register(0x50, val)
                 } else {
                     Ok(())
@@ -995,7 +1080,7 @@ impl BiosSubsystem {
 
                 if write_res.is_ok() || write_res == Err(E_UNSUPPORTED) {
                     self.settings[idx].current = value.to_string();
-                        self.settings[idx].current_value = value.to_string();
+                    self.settings[idx].current_value = value.to_string();
                     E_SUCCESS
                 } else {
                     E_GENERAL
@@ -1025,7 +1110,7 @@ impl BiosSubsystem {
 
                 if res.is_ok() || res == Err(E_UNSUPPORTED) {
                     self.settings[idx].current = value.to_string();
-                        self.settings[idx].current_value = value.to_string();
+                    self.settings[idx].current_value = value.to_string();
                     E_SUCCESS
                 } else {
                     E_GENERAL
@@ -1131,25 +1216,49 @@ mod tests {
         assert_eq!(classify_setting_risk("Intel VTX"), SettingRisk::Normal);
         assert_eq!(classify_setting_risk("Intel VTD"), SettingRisk::Normal);
         assert_eq!(classify_setting_risk("AMD-SVM"), SettingRisk::Normal);
-        assert_eq!(classify_setting_risk("Above 4G decoding"), SettingRisk::Normal);
-        assert_eq!(classify_setting_risk("Re-Size BAR Support"), SettingRisk::Normal);
+        assert_eq!(
+            classify_setting_risk("Above 4G decoding"),
+            SettingRisk::Normal
+        );
+        assert_eq!(
+            classify_setting_risk("Re-Size BAR Support"),
+            SettingRisk::Normal
+        );
         assert_eq!(classify_setting_risk("Wi-Fi"), SettingRisk::Normal);
         assert_eq!(classify_setting_risk("Bluetooth"), SettingRisk::Normal);
-        assert_eq!(classify_setting_risk("Power-off USB Charge"), SettingRisk::Normal);
-        assert_eq!(classify_setting_risk("Power-Off USB Charging"), SettingRisk::Normal);
+        assert_eq!(
+            classify_setting_risk("Power-off USB Charge"),
+            SettingRisk::Normal
+        );
+        assert_eq!(
+            classify_setting_risk("Power-Off USB Charging"),
+            SettingRisk::Normal
+        );
         assert_eq!(classify_setting_risk("Fast Boot"), SettingRisk::Normal);
         assert_eq!(classify_setting_risk("FastBoot"), SettingRisk::Normal);
         assert_eq!(classify_setting_risk("F12 Boot Menu"), SettingRisk::Normal);
-        assert_eq!(classify_setting_risk("POST Animation & Sound"), SettingRisk::Normal);
-        assert_eq!(classify_setting_risk("Function Key behavior"), SettingRisk::Normal);
+        assert_eq!(
+            classify_setting_risk("POST Animation & Sound"),
+            SettingRisk::Normal
+        );
+        assert_eq!(
+            classify_setting_risk("Function Key behavior"),
+            SettingRisk::Normal
+        );
 
         // Dangerous items
         assert_eq!(classify_setting_risk("SATA Mode"), SettingRisk::Dangerous);
         assert_eq!(classify_setting_risk("Secure Boot"), SettingRisk::Dangerous);
         assert_eq!(classify_setting_risk("Display MUX"), SettingRisk::Dangerous);
         assert_eq!(classify_setting_risk("QuietBoot"), SettingRisk::Dangerous);
-        assert_eq!(classify_setting_risk("VMD Controller"), SettingRisk::Dangerous);
-        assert_eq!(classify_setting_risk("CPU Overclocking"), SettingRisk::Dangerous);
+        assert_eq!(
+            classify_setting_risk("VMD Controller"),
+            SettingRisk::Dangerous
+        );
+        assert_eq!(
+            classify_setting_risk("CPU Overclocking"),
+            SettingRisk::Dangerous
+        );
         assert_eq!(classify_setting_risk(""), SettingRisk::Dangerous);
     }
 
@@ -1185,7 +1294,9 @@ mod tests {
     #[test]
     fn test_mode1_wmi_settings_and_apply_flow() {
         let mock = Box::new(MockBiosBackend::with_model("Predator Helios 16 PH16-73"));
-        mock.add_wmi_setting("Function Key behavior, Special Key[Special Key;Standard Function Key;]");
+        mock.add_wmi_setting(
+            "Function Key behavior, Special Key[Special Key;Standard Function Key;]",
+        );
         mock.add_wmi_setting("SATA Mode, AHCI[AHCI;RAID;]");
         mock.set_method_result(BiosMethodResult::Done);
 
@@ -1196,7 +1307,10 @@ mod tests {
         // 1. Normal setting apply
         let res = sub.apply_setting("Function Key behavior", "Standard Function Key", "", false);
         assert_eq!(res, E_SUCCESS);
-        assert_eq!(sub.get_setting(0).unwrap().current_value, "Standard Function Key");
+        assert_eq!(
+            sub.get_setting(0).unwrap().current_value,
+            "Standard Function Key"
+        );
 
         // 2. Dangerous setting apply blocked when dangerous_allowed == false
         let blocked = sub.apply_setting("SATA Mode", "RAID", "", false);
@@ -1250,7 +1364,11 @@ mod tests {
         // Normal ACPI setting apply
         let res = sub.apply_setting("LCD Overdrive", "Disabled", "", false);
         assert_eq!(res, E_SUCCESS);
-        let od = sub.settings().iter().find(|s| s.name == "LCD Overdrive").unwrap();
+        let od = sub
+            .settings()
+            .iter()
+            .find(|s| s.name == "LCD Overdrive")
+            .unwrap();
         assert_eq!(od.current_value, "Disabled");
 
         // Display MUX is Dangerous -> blocked without flag
@@ -1271,7 +1389,11 @@ mod tests {
         let res = sub.apply_setting("Fast Boot", "Disabled", "", false);
         assert_eq!(res, E_SUCCESS);
 
-        let fb = sub.settings().iter().find(|s| s.name == "Fast Boot").unwrap();
+        let fb = sub
+            .settings()
+            .iter()
+            .find(|s| s.name == "Fast Boot")
+            .unwrap();
         assert_eq!(fb.current_value, "Disabled");
         assert_eq!(fb.kind, SettingKind::UefiNvram);
     }
@@ -1301,11 +1423,17 @@ mod tests {
         // 2023 model -> AcpiWmiFallback2020
         let mock_2023 = Box::new(MockBiosBackend::with_model("Predator Triton 17 X PTX17-71"));
         let sub_2023 = BiosSubsystem::new(mock_2023);
-        assert_eq!(sub_2023.support_mode(), BiosSupportMode::AcpiWmiFallback2020);
+        assert_eq!(
+            sub_2023.support_mode(),
+            BiosSupportMode::AcpiWmiFallback2020
+        );
 
         // 2020 Nitro 5 -> AcpiWmiFallback2020
         let mock_2020 = Box::new(MockBiosBackend::with_model("Nitro 5 AN515-55"));
         let sub_2020 = BiosSubsystem::new(mock_2020);
-        assert_eq!(sub_2020.support_mode(), BiosSupportMode::AcpiWmiFallback2020);
+        assert_eq!(
+            sub_2020.support_mode(),
+            BiosSupportMode::AcpiWmiFallback2020
+        );
     }
 }

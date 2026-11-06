@@ -1326,40 +1326,44 @@ namespace PredatorControlApp
         public bool ReadMmio32(ulong physicalAddress, out uint value)
         {
             value = 0;
-            if (_mchbarDeviceHandle != null && !_mchbarDeviceHandle.IsInvalid && _isMchbarLoaded)
+            lock (_ioLock)
             {
-                var mutex = GetOrCreatePciMutex();
-                bool acquired = false;
-                try
+                if (_mchbarDeviceHandle != null && !_mchbarDeviceHandle.IsInvalid && _isMchbarLoaded)
                 {
-                    if (mutex != null)
+                    var mutex = GetOrCreatePciMutex();
+                    bool acquired = false;
+                    try
                     {
-                        try { acquired = mutex.WaitOne(150); }
-                        catch (AbandonedMutexException) { acquired = true; }
-                    }
+                        if (mutex != null)
+                        {
+                            try { acquired = mutex.WaitOne(150); }
+                            catch (AbandonedMutexException) { acquired = true; }
+                            catch (ObjectDisposedException) { acquired = false; }
+                        }
 
-                    if (mutex != null && !acquired)
-                    {
-                        Debug.WriteLine("[ReadMmio32] Timed out waiting for Global\\Access_PCI. Aborting read to prevent collision.");
-                        return false;
-                    }
+                        if (mutex != null && !acquired)
+                        {
+                            Debug.WriteLine("[ReadMmio32] Timed out waiting for Global\\Access_PCI. Aborting read to prevent collision.");
+                            return false;
+                        }
 
-                    var output = new ulong[1];
-                    if (ExecuteOnHandle(_mchbarDeviceHandle, FN_READ_DWORD, new ulong[] { physicalAddress }, output))
+                        var output = new ulong[1];
+                        if (ExecuteOnHandle(_mchbarDeviceHandle, FN_READ_DWORD, new ulong[] { physicalAddress }, output))
+                        {
+                            value = (uint)(output[0] & 0xFFFFFFFFU);
+                            return true;
+                        }
+                    }
+                    finally
                     {
-                        value = (uint)(output[0] & 0xFFFFFFFFU);
-                        return true;
+                        if (acquired && mutex != null)
+                        {
+                            try { mutex.ReleaseMutex(); } catch { }
+                        }
                     }
                 }
-                finally
-                {
-                    if (acquired && mutex != null)
-                    {
-                        try { mutex.ReleaseMutex(); } catch { }
-                    }
-                }
+                return false;
             }
-            return false;
         }
 
         public bool WriteMmio32(ulong physicalAddress, uint value)
@@ -1375,6 +1379,7 @@ namespace PredatorControlApp
                     {
                         try { acquired = mutex.WaitOne(150); }
                         catch (AbandonedMutexException) { acquired = true; }
+                        catch (ObjectDisposedException) { acquired = false; }
                     }
                     if (mutex != null && !acquired)
                     {
@@ -1396,40 +1401,44 @@ namespace PredatorControlApp
         public bool ReadMmio64(ulong physicalAddress, out ulong value)
         {
             value = 0;
-            if (_mchbarDeviceHandle != null && !_mchbarDeviceHandle.IsInvalid && _isMchbarLoaded)
+            lock (_ioLock)
             {
-                var mutex = GetOrCreatePciMutex();
-                bool acquired = false;
-                try
+                if (_mchbarDeviceHandle != null && !_mchbarDeviceHandle.IsInvalid && _isMchbarLoaded)
                 {
-                    if (mutex != null)
+                    var mutex = GetOrCreatePciMutex();
+                    bool acquired = false;
+                    try
                     {
-                        try { acquired = mutex.WaitOne(150); }
-                        catch (AbandonedMutexException) { acquired = true; }
-                    }
+                        if (mutex != null)
+                        {
+                            try { acquired = mutex.WaitOne(150); }
+                            catch (AbandonedMutexException) { acquired = true; }
+                            catch (ObjectDisposedException) { acquired = false; }
+                        }
 
-                    if (mutex != null && !acquired)
-                    {
-                        Debug.WriteLine("[ReadMmio64] Timed out waiting for Global\\Access_PCI. Aborting read to prevent collision.");
-                        return false;
-                    }
+                        if (mutex != null && !acquired)
+                        {
+                            Debug.WriteLine("[ReadMmio64] Timed out waiting for Global\\Access_PCI. Aborting read to prevent collision.");
+                            return false;
+                        }
 
-                    var output = new ulong[1];
-                    if (ExecuteOnHandle(_mchbarDeviceHandle, FN_READ_QWORD, new ulong[] { physicalAddress }, output))
+                        var output = new ulong[1];
+                        if (ExecuteOnHandle(_mchbarDeviceHandle, FN_READ_QWORD, new ulong[] { physicalAddress }, output))
+                        {
+                            value = output[0];
+                            return true;
+                        }
+                    }
+                    finally
                     {
-                        value = output[0];
-                        return true;
+                        if (acquired && mutex != null)
+                        {
+                            try { mutex.ReleaseMutex(); } catch { }
+                        }
                     }
                 }
-                finally
-                {
-                    if (acquired && mutex != null)
-                    {
-                        try { mutex.ReleaseMutex(); } catch { }
-                    }
-                }
+                return false;
             }
-            return false;
         }
 
         public bool WriteMmio64(ulong physicalAddress, ulong value)

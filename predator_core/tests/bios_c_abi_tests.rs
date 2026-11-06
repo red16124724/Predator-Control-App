@@ -10,11 +10,8 @@ fn test_bios_c_abi_probe_and_counts() {
         let mut model_buf = [0u8; 128];
 
         // 1. Probe support mode and model name
-        let probe_res = predator_bios_probe_support(
-            &mut support_mode,
-            model_buf.as_mut_ptr(),
-            model_buf.len(),
-        );
+        let probe_res =
+            predator_bios_probe_support(&mut support_mode, model_buf.as_mut_ptr(), model_buf.len());
         assert_eq!(probe_res, 0, "Probe support must succeed");
         assert!(
             support_mode >= 1 && support_mode <= 3,
@@ -29,15 +26,18 @@ fn test_bios_c_abi_probe_and_counts() {
 
         // 2. Settings count
         let count = predator_bios_get_settings_count();
-        assert!(count >= 7, "Must report at least 7 settings in fallback/native mode, got: {}", count);
+        assert!(
+            count >= 7,
+            "Must report at least 7 settings in fallback/native mode, got: {}",
+            count
+        );
 
         // 3. Null pointer safety
-        let null_probe = predator_bios_probe_support(
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            0,
+        let null_probe = predator_bios_probe_support(std::ptr::null_mut(), std::ptr::null_mut(), 0);
+        assert_eq!(
+            null_probe, 0,
+            "Null pointers for optional probe outputs must succeed"
         );
-        assert_eq!(null_probe, 0, "Null pointers for optional probe outputs must succeed");
     }
 }
 
@@ -65,14 +65,25 @@ fn test_bios_c_abi_get_setting_info() {
                 &mut kind,
                 128,
             );
-            assert_eq!(res, 0, "Getting setting info for index {} must succeed", idx);
+            assert_eq!(
+                res, 0,
+                "Getting setting info for index {} must succeed",
+                idx
+            );
 
-            let name = std::ffi::CStr::from_ptr(name_buf.as_ptr() as *const i8).to_str().unwrap();
-            let val = std::ffi::CStr::from_ptr(val_buf.as_ptr() as *const i8).to_str().unwrap();
+            let name = std::ffi::CStr::from_ptr(name_buf.as_ptr() as *const i8)
+                .to_str()
+                .unwrap();
+            let val = std::ffi::CStr::from_ptr(val_buf.as_ptr() as *const i8)
+                .to_str()
+                .unwrap();
 
             assert!(!name.is_empty(), "Setting {} name must not be empty", idx);
             assert!(!val.is_empty(), "Setting {} value must not be empty", idx);
-            assert!(risk == 0 || risk == 1, "Risk must be 0 (Normal) or 1 (Dangerous)");
+            assert!(
+                risk == 0 || risk == 1,
+                "Risk must be 0 (Normal) or 1 (Dangerous)"
+            );
             assert!(kind >= 1 && kind <= 3, "Kind must be 1..=3");
         }
 
@@ -139,7 +150,10 @@ fn test_bios_c_abi_apply_setting_and_safety_guards() {
             std::ptr::null(),
             1,
         );
-        assert_eq!(res_unknown, -4, "Unknown setting must return E_NOT_FOUND (-4)");
+        assert_eq!(
+            res_unknown, -4,
+            "Unknown setting must return E_NOT_FOUND (-4)"
+        );
 
         // 5. Plaintext ASCII validation: control characters rejected with -2
         let name_invalid_ascii = b"LCD\nOverdrive\0";
@@ -169,12 +183,8 @@ fn test_bios_c_abi_apply_setting_and_safety_guards() {
         );
 
         // 7. Null pointer rejected with -1
-        let res_null = predator_bios_apply_setting(
-            std::ptr::null(),
-            val_normal.as_ptr(),
-            std::ptr::null(),
-            0,
-        );
+        let res_null =
+            predator_bios_apply_setting(std::ptr::null(), val_normal.as_ptr(), std::ptr::null(), 0);
         assert_eq!(res_null, -1, "Null pointer must return E_GENERAL (-1)");
     }
 }
@@ -205,7 +215,9 @@ fn test_bios_c_abi_mock_mode1_wmi_matrix() {
     unsafe {
         // Setup mock backend with 2025 Helios 16
         let mock = Box::new(bios::MockBiosBackend::with_model("PH16-73"));
-        mock.add_wmi_setting("Function Key behavior, Special Key[Special Key;Standard Function Key;]");
+        mock.add_wmi_setting(
+            "Function Key behavior, Special Key[Special Key;Standard Function Key;]",
+        );
         mock.add_wmi_setting("SATA Mode, AHCI[AHCI;RAID;]");
         mock.add_wmi_setting("Intel VTX, Enabled[Enabled;Disabled;]");
         mock.set_method_result(bios::BiosMethodResult::Done);
@@ -225,7 +237,12 @@ fn test_bios_c_abi_mock_mode1_wmi_matrix() {
         let normal_setting = b"Function Key behavior\0";
         let normal_val = b"Standard Function Key\0";
         assert_eq!(
-            predator_bios_apply_setting(normal_setting.as_ptr(), normal_val.as_ptr(), std::ptr::null(), 0),
+            predator_bios_apply_setting(
+                normal_setting.as_ptr(),
+                normal_val.as_ptr(),
+                std::ptr::null(),
+                0
+            ),
             0
         );
 
@@ -233,13 +250,23 @@ fn test_bios_c_abi_mock_mode1_wmi_matrix() {
         let sata_setting = b"SATA Mode\0";
         let sata_val = b"RAID\0";
         assert_eq!(
-            predator_bios_apply_setting(sata_setting.as_ptr(), sata_val.as_ptr(), std::ptr::null(), 0),
+            predator_bios_apply_setting(
+                sata_setting.as_ptr(),
+                sata_val.as_ptr(),
+                std::ptr::null(),
+                0
+            ),
             -3
         );
 
         // Apply dangerous setting allowed
         assert_eq!(
-            predator_bios_apply_setting(sata_setting.as_ptr(), sata_val.as_ptr(), std::ptr::null(), 1),
+            predator_bios_apply_setting(
+                sata_setting.as_ptr(),
+                sata_val.as_ptr(),
+                std::ptr::null(),
+                1
+            ),
             0
         );
 

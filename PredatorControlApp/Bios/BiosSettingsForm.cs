@@ -9,8 +9,25 @@ namespace PredatorControlApp.Bios
     [SupportedOSPlatform("windows")]
     public class BiosSettingsForm : Form
     {
+        public static Func<IWin32Window?, string, string, MessageBoxButtons, MessageBoxIcon, DialogResult> MessageBoxHandler { get; set; } =
+            (owner, text, caption, buttons, icon) => MessageBox.Show(owner, text, caption, buttons, icon);
+
+        private DialogResult ShowMessage(string text, string caption, MessageBoxButtons buttons, MessageBoxIcon icon)
+        {
+            return MessageBoxHandler(this, text, caption, buttons, icon);
+        }
+
         private readonly BiosManager _biosManager;
         private readonly AppSettings _settings;
+
+        private static readonly Font s_fontMain = new("Segoe UI", 9.5f, FontStyle.Regular);
+        private static readonly Font s_fontTitle = new("Segoe UI", 15f, FontStyle.Bold);
+        private static readonly Font s_fontModelBadge = new("Segoe UI", 9f, FontStyle.Bold);
+        private static readonly Font s_fontModeBadge = new("Segoe UI", 8.5f, FontStyle.Italic);
+        private static readonly Font s_fontSafetyTitle = new("Segoe UI", 9f, FontStyle.Bold);
+        private static readonly Font s_fontSettingName = new("Segoe UI", 9.5f, FontStyle.Bold);
+        private static readonly Font s_fontRiskBadge = new("Segoe UI", 7.5f, FontStyle.Bold);
+        private static readonly Font s_fontCurrentVal = new("Segoe UI", 8.5f);
 
         private Label _lblModelBadge = null!;
         private Label _lblModeBadge = null!;
@@ -20,6 +37,9 @@ namespace PredatorControlApp.Bios
         private PredatorButton _btnRestoreDefaults = null!;
         private TabControl _tabControl = null!;
 
+        private readonly Action _themeHandler;
+        private bool _isUpdatingSafetyGates;
+
         public BiosSettingsForm(BiosManager? biosManager = null, AppSettings? settings = null)
         {
             _biosManager = biosManager ?? BiosManager.Instance;
@@ -28,6 +48,33 @@ namespace PredatorControlApp.Bios
             InitializeComponent();
             ApplyTheme();
             PopulateCategories();
+
+            _themeHandler = () => SafeBeginInvoke(ApplyTheme);
+            ThemeManager.ThemeChanged += _themeHandler;
+        }
+
+        private void SafeBeginInvoke(Action action)
+        {
+            try
+            {
+                if (IsDisposed || Disposing) return;
+                if (IsHandleCreated && InvokeRequired)
+                {
+                    BeginInvoke(new Action(() =>
+                    {
+                        try
+                        {
+                            if (!IsDisposed && !Disposing) action();
+                        }
+                        catch { }
+                    }));
+                }
+                else
+                {
+                    if (!IsDisposed && !Disposing) action();
+                }
+            }
+            catch { }
         }
 
         private void InitializeComponent()
@@ -40,7 +87,8 @@ namespace PredatorControlApp.Bios
             this.MaximizeBox = false;
             this.MinimizeBox = false;
             this.ShowInTaskbar = false;
-            this.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
+            this.AutoScaleMode = AutoScaleMode.None;
+            this.Font = s_fontMain;
 
             var mainPanel = new Panel
             {
@@ -55,7 +103,7 @@ namespace PredatorControlApp.Bios
             var lblTitle = new Label
             {
                 Text = "BIOS & Firmware Settings",
-                Font = new Font("Segoe UI", 15f, FontStyle.Bold),
+                Font = s_fontTitle,
                 Location = new Point(16, y),
                 AutoSize = true
             };
@@ -66,7 +114,7 @@ namespace PredatorControlApp.Bios
             _lblModelBadge = new Label
             {
                 Text = $"Model: {_biosManager.ModelName}",
-                Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+                Font = s_fontModelBadge,
                 ForeColor = ThemeManager.Accent,
                 Location = new Point(18, y),
                 AutoSize = true
@@ -76,7 +124,7 @@ namespace PredatorControlApp.Bios
             _lblModeBadge = new Label
             {
                 Text = $"[{_biosManager.GetSupportModeDescription()}]",
-                Font = new Font("Segoe UI", 8.5f, FontStyle.Italic),
+                Font = s_fontModeBadge,
                 ForeColor = ThemeManager.TextSecondary,
                 Location = new Point(240, y),
                 AutoSize = true
@@ -94,6 +142,7 @@ namespace PredatorControlApp.Bios
             };
             cardSafety.Paint += (s, e) =>
             {
+                if (cardSafety.Width <= 1 || cardSafety.Height <= 1) return;
                 using var pen = new Pen(ThemeManager.CardBorder, 1);
                 e.Graphics.DrawRectangle(pen, 0, 0, cardSafety.Width - 1, cardSafety.Height - 1);
             };
@@ -102,7 +151,7 @@ namespace PredatorControlApp.Bios
             var lblSafetyTitle = new Label
             {
                 Text = "Safety Interlocks & Access Control",
-                Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+                Font = s_fontSafetyTitle,
                 ForeColor = ThemeManager.TextPrimary,
                 Location = new Point(12, 8),
                 AutoSize = true
@@ -184,16 +233,32 @@ namespace PredatorControlApp.Bios
             };
             btnClose.Click += (s, e) => this.Close();
             mainPanel.Controls.Add(btnClose);
+            this.CancelButton = btnClose;
         }
 
         private void ApplyTheme()
         {
             this.BackColor = ThemeManager.FormBg;
             this.ForeColor = ThemeManager.TextPrimary;
+            if (_tabControl != null)
+            {
+                foreach (TabPage tab in _tabControl.TabPages)
+                {
+                    tab.BackColor = ThemeManager.FormBg;
+                }
+            }
         }
 
         private void PopulateCategories()
         {
+            if (_tabControl == null) return;
+
+            int prevIdx = _tabControl.SelectedIndex;
+
+            foreach (TabPage oldTab in _tabControl.TabPages)
+            {
+                try { oldTab.Dispose(); } catch { }
+            }
             _tabControl.TabPages.Clear();
 
             var categories = new[]
@@ -229,7 +294,8 @@ namespace PredatorControlApp.Bios
                         Text = "No settings available in this category for this laptop model.",
                         Location = new Point(15, 20),
                         AutoSize = true,
-                        ForeColor = ThemeManager.TextSecondary
+                        ForeColor = ThemeManager.TextSecondary,
+                        Font = s_fontCurrentVal
                     };
                     scrollPanel.Controls.Add(lblNone);
                 }
@@ -245,6 +311,11 @@ namespace PredatorControlApp.Bios
 
                 _tabControl.TabPages.Add(tab);
             }
+
+            if (prevIdx >= 0 && prevIdx < _tabControl.TabCount)
+            {
+                _tabControl.SelectedIndex = prevIdx;
+            }
         }
 
         private Panel CreateSettingRow(BiosSettingItem item, int y, int width)
@@ -257,15 +328,16 @@ namespace PredatorControlApp.Bios
             };
             panel.Paint += (s, e) =>
             {
+                if (panel.Width <= 1 || panel.Height <= 1) return;
                 using var pen = new Pen(ThemeManager.CardBorder, 1);
-                e.Graphics.DrawRectangle(pen, 0, 0, width - 1, 59);
+                e.Graphics.DrawRectangle(pen, 0, 0, panel.Width - 1, 59);
             };
 
             // Setting Name
             var lblName = new Label
             {
                 Text = item.Name,
-                Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+                Font = s_fontSettingName,
                 ForeColor = ThemeManager.TextPrimary,
                 Location = new Point(12, 10),
                 AutoSize = true
@@ -276,7 +348,7 @@ namespace PredatorControlApp.Bios
             var lblRisk = new Label
             {
                 Text = item.Risk == BiosSettingRisk.Dangerous ? "[DANGEROUS]" : "[SAFE]",
-                Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
+                Font = s_fontRiskBadge,
                 ForeColor = item.Risk == BiosSettingRisk.Dangerous ? ThemeManager.RedStatus : ThemeManager.SuccessGreen,
                 Location = new Point(lblName.Right + 10, 12),
                 AutoSize = true
@@ -305,7 +377,7 @@ namespace PredatorControlApp.Bios
             var lblCurrent = new Label
             {
                 Text = $"Current: {item.CurrentValue}",
-                Font = new Font("Segoe UI", 8.5f),
+                Font = s_fontCurrentVal,
                 ForeColor = ThemeManager.TextSecondary,
                 Location = new Point(270, 33),
                 AutoSize = true
@@ -313,27 +385,44 @@ namespace PredatorControlApp.Bios
             panel.Controls.Add(lblCurrent);
 
             // Apply Button
+            bool isDangerous = item.Risk == BiosSettingRisk.Dangerous;
+            bool canApply = _biosManager.ModificationsEnabled && (!isDangerous || _biosManager.DangerousAllowed);
+
             var btnApply = new PredatorButton
             {
                 Text = "Apply",
                 Location = new Point(485, 26),
                 Size = new Size(80, 28),
-                Enabled = _biosManager.ModificationsEnabled
+                Enabled = canApply
             };
             btnApply.Click += (s, e) =>
             {
+                if (item == null) return;
+                if (!_biosManager.ModificationsEnabled)
+                {
+                    ShowMessage("BIOS modifications are disabled.", "Safety Gate", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                if (item.Risk == BiosSettingRisk.Dangerous && !_biosManager.DangerousAllowed)
+                {
+                    ShowMessage("Dangerous settings modification is disabled. Enable 'Allow Dangerous Settings' first.", "Safety Gate", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
                 if (cbo.SelectedItem == null) return;
-                item.PendingValue = cbo.SelectedItem.ToString() ?? "";
+                string val = cbo.SelectedItem.ToString() ?? "";
+                if (string.IsNullOrWhiteSpace(val)) return;
+
+                item.PendingValue = val;
                 bool ok = _biosManager.ApplySetting(item, out string msg);
                 if (ok)
                 {
                     lblCurrent.Text = $"Current: {item.CurrentValue}";
-                    MessageBox.Show(this, string.IsNullOrEmpty(msg) ? $"Successfully applied {item.Name} = {item.CurrentValue}." : msg,
+                    ShowMessage(string.IsNullOrEmpty(msg) ? $"Successfully applied {item.Name} = {item.CurrentValue}." : msg,
                         "BIOS Updated", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 else
                 {
-                    MessageBox.Show(this, msg, "BIOS Apply Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    ShowMessage(msg, "BIOS Apply Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
             };
             panel.Controls.Add(btnApply);
@@ -343,39 +432,67 @@ namespace PredatorControlApp.Bios
 
         private void OnModificationsToggled(object? sender, EventArgs e)
         {
-            _biosManager.ModificationsEnabled = _chkEnableModifications.Checked;
-            _chkAllowDangerous.Enabled = _chkEnableModifications.Checked;
-            if (!_chkEnableModifications.Checked)
+            if (_isUpdatingSafetyGates) return;
+            _isUpdatingSafetyGates = true;
+            try
             {
-                _chkAllowDangerous.Checked = false;
-                _biosManager.DangerousAllowed = false;
+                bool enabled = _chkEnableModifications.Checked;
+                _biosManager.ModificationsEnabled = enabled;
+                _chkAllowDangerous.Enabled = enabled;
+                if (!enabled)
+                {
+                    _chkAllowDangerous.Checked = false;
+                    _biosManager.DangerousAllowed = false;
+                }
+                PopulateCategories();
             }
-            PopulateCategories();
+            finally
+            {
+                _isUpdatingSafetyGates = false;
+            }
         }
 
         private void OnDangerousToggled(object? sender, EventArgs e)
         {
-            if (_chkAllowDangerous.Checked)
+            if (_isUpdatingSafetyGates) return;
+            _isUpdatingSafetyGates = true;
+            try
             {
-                var dr = MessageBox.Show(this,
-                    "WARNING: Modifying dangerous firmware options (such as Display MUX or direct UEFI variables) can cause display blanking or system boot failure if configured incorrectly.\n\nAre you sure you want to unlock dangerous settings?",
-                    "Hardware Safety Confirmation",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Warning);
-
-                if (dr != DialogResult.Yes)
+                if (_chkAllowDangerous.Checked)
                 {
-                    _chkAllowDangerous.Checked = false;
-                    _biosManager.DangerousAllowed = false;
-                    return;
+                    if (!_chkEnableModifications.Checked || !_biosManager.ModificationsEnabled)
+                    {
+                        _chkAllowDangerous.Checked = false;
+                        _biosManager.DangerousAllowed = false;
+                        return;
+                    }
+
+                    var dr = ShowMessage(
+                        "WARNING: Modifying dangerous firmware options (such as Display MUX or direct UEFI variables) can cause display blanking or system boot failure if configured incorrectly.\n\nAre you sure you want to unlock dangerous settings?",
+                        "Hardware Safety Confirmation",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Warning);
+
+                    if (dr != DialogResult.Yes)
+                    {
+                        _chkAllowDangerous.Checked = false;
+                        _biosManager.DangerousAllowed = false;
+                        return;
+                    }
                 }
+                _biosManager.DangerousAllowed = _chkAllowDangerous.Checked;
+                PopulateCategories();
             }
-            _biosManager.DangerousAllowed = _chkAllowDangerous.Checked;
-            PopulateCategories();
+            finally
+            {
+                _isUpdatingSafetyGates = false;
+            }
         }
 
         private void OnPasswordClicked(object? sender, EventArgs e)
         {
+            if (IsDisposed || Disposing) return;
+
             using var form = new Form
             {
                 Text = "BIOS Supervisor Password",
@@ -385,7 +502,8 @@ namespace PredatorControlApp.Bios
                 MaximizeBox = false,
                 MinimizeBox = false,
                 BackColor = ThemeManager.FormBg,
-                ForeColor = ThemeManager.TextPrimary
+                ForeColor = ThemeManager.TextPrimary,
+                Font = s_fontMain
             };
 
             var lbl = new Label
@@ -408,7 +526,8 @@ namespace PredatorControlApp.Bios
             {
                 Text = "Save",
                 Location = new Point(150, 75),
-                Size = new Size(85, 30)
+                Size = new Size(85, 30),
+                DialogResult = DialogResult.OK
             };
             btnOk.Click += (s, ev) =>
             {
@@ -426,9 +545,13 @@ namespace PredatorControlApp.Bios
             btnClear.Click += (s, ev) =>
             {
                 _biosManager.SetSupervisorPassword(null);
+                form.DialogResult = DialogResult.Cancel;
                 form.Close();
             };
             form.Controls.Add(btnClear);
+
+            form.AcceptButton = btnOk;
+            form.CancelButton = btnClear;
 
             if (form.ShowDialog(this) == DialogResult.OK)
             {
@@ -438,7 +561,7 @@ namespace PredatorControlApp.Bios
 
         private void OnRestoreDefaultsClicked(object? sender, EventArgs e)
         {
-            var dr = MessageBox.Show(this,
+            var dr = ShowMessage(
                 "Are you sure you want to restore all BIOS settings to factory defaults?",
                 "Restore Defaults",
                 MessageBoxButtons.YesNo,
@@ -449,14 +572,31 @@ namespace PredatorControlApp.Bios
                 bool ok = _biosManager.RestoreDefaults(userDefaults: false, out string msg);
                 if (ok)
                 {
-                    MessageBox.Show(this, "Factory defaults restored successfully.", "BIOS Defaults", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    ShowMessage("Factory defaults restored successfully.", "BIOS Defaults", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     PopulateCategories();
                 }
                 else
                 {
-                    MessageBox.Show(this, msg, "Restore Defaults Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    ShowMessage(msg, "Restore Defaults Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
             }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                ThemeManager.ThemeChanged -= _themeHandler;
+                if (_tabControl != null)
+                {
+                    foreach (TabPage tab in _tabControl.TabPages)
+                    {
+                        try { tab.Dispose(); } catch { }
+                    }
+                    _tabControl.TabPages.Clear();
+                }
+            }
+            base.Dispose(disposing);
         }
     }
 }

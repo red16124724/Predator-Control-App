@@ -30,17 +30,8 @@ fn test_game_profile_c_abi_lifecycle_and_validation() {
         // 3. Register valid profile
         let exe = b"witcher3.exe\0";
         let path = b"D:\\Games\\Witcher 3\\witcher3.exe\0";
-        let reg_res = predator_game_profile_register(
-            1,
-            exe.as_ptr(),
-            path.as_ptr(),
-            2,
-            55,
-            115,
-            1,
-            144,
-            1,
-        );
+        let reg_res =
+            predator_game_profile_register(1, exe.as_ptr(), path.as_ptr(), 2, 55, 115, 1, 144, 1);
         assert_eq!(reg_res, 0, "Valid registration must return 0");
 
         // 4. Register profile without full path (null pointer allowed for full_path)
@@ -56,22 +47,15 @@ fn test_game_profile_c_abi_lifecycle_and_validation() {
             240,
             2,
         );
-        assert_eq!(reg_res2, 0, "Registration with null full_path must return 0");
+        assert_eq!(
+            reg_res2, 0,
+            "Registration with null full_path must return 0"
+        );
 
         // 5. Invalid parameters
         // ID 0
         assert_eq!(
-            predator_game_profile_register(
-                0,
-                exe.as_ptr(),
-                path.as_ptr(),
-                1,
-                50,
-                100,
-                0,
-                60,
-                0
-            ),
+            predator_game_profile_register(0, exe.as_ptr(), path.as_ptr(), 1, 50, 100, 0, 60, 0),
             -1,
             "Profile ID 0 must be rejected"
         );
@@ -142,13 +126,33 @@ fn test_game_profile_c_abi_event_polling_and_serialization() {
         // Register profiles
         let exe1 = b"doom.exe\0";
         assert_eq!(
-            predator_game_profile_register(10, exe1.as_ptr(), std::ptr::null(), 2, 65, 125, 1, 144, 1),
+            predator_game_profile_register(
+                10,
+                exe1.as_ptr(),
+                std::ptr::null(),
+                2,
+                65,
+                125,
+                1,
+                144,
+                1
+            ),
             0
         );
 
         let exe2 = b"eldenring.exe\0";
         assert_eq!(
-            predator_game_profile_register(20, exe2.as_ptr(), std::ptr::null(), 3, 85, 145, 2, 60, 2),
+            predator_game_profile_register(
+                20,
+                exe2.as_ptr(),
+                std::ptr::null(),
+                3,
+                85,
+                145,
+                2,
+                60,
+                2
+            ),
             0
         );
 
@@ -210,10 +214,7 @@ fn test_game_profile_c_abi_event_polling_and_serialization() {
         assert_eq!(pid, 10, "pid parameter carries old profile ID (10)");
 
         // Verify active game is now Elden Ring
-        assert_eq!(
-            predator_game_profile_get_active(&mut prof_id, &mut pid),
-            1
-        );
+        assert_eq!(predator_game_profile_get_active(&mut prof_id, &mut pid), 1);
         assert_eq!(prof_id, 20);
         assert_eq!(pid, 7777);
 
@@ -231,10 +232,7 @@ fn test_game_profile_c_abi_event_polling_and_serialization() {
         assert_eq!(pid, 7777);
 
         // Active game is now None
-        assert_eq!(
-            predator_game_profile_get_active(&mut prof_id, &mut pid),
-            0
-        );
+        assert_eq!(predator_game_profile_get_active(&mut prof_id, &mut pid), 0);
 
         // Queue is empty again
         assert_eq!(

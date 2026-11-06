@@ -60,11 +60,43 @@ namespace PredatorControlApp.Bios
         private readonly List<BiosSettingItem> _settings = new();
         private string? _cachedPassword = null;
 
-        public bool ModificationsEnabled { get; set; } = false;
-        public bool DangerousAllowed { get; set; } = false;
+        public bool ModificationsEnabled
+        {
+            get { lock (_lock) return _modificationsEnabled; }
+            set
+            {
+                lock (_lock)
+                {
+                    _modificationsEnabled = value;
+                    if (!value)
+                    {
+                        _dangerousAllowed = false;
+                    }
+                }
+            }
+        }
+        private bool _modificationsEnabled = false;
 
-        public BiosSupportMode SupportMode => _supportMode;
-        public string ModelName => _modelName;
+        public bool DangerousAllowed
+        {
+            get { lock (_lock) return _dangerousAllowed; }
+            set
+            {
+                lock (_lock)
+                {
+                    if (value && !_modificationsEnabled)
+                    {
+                        _dangerousAllowed = false;
+                        return;
+                    }
+                    _dangerousAllowed = value;
+                }
+            }
+        }
+        private bool _dangerousAllowed = false;
+
+        public BiosSupportMode SupportMode { get { lock (_lock) return _supportMode; } }
+        public string ModelName { get { lock (_lock) return _modelName; } }
         public IReadOnlyList<BiosSettingItem> Settings
         {
             get { lock (_lock) { return _settings.ToList().AsReadOnly(); } }
@@ -129,8 +161,9 @@ namespace PredatorControlApp.Bios
             _ => "Universal ACPI Emulation Fallback"
         };
 
-        private static BiosCategory ClassifyCategory(string name)
+        private static BiosCategory ClassifyCategory(string? name)
         {
+            if (string.IsNullOrWhiteSpace(name)) return BiosCategory.System;
             string lower = name.ToLowerInvariant();
             if (lower.Contains("boot") || lower.Contains("f12") || lower.Contains("recovery") || lower.Contains("network"))
                 return BiosCategory.BootSetup;
@@ -276,30 +309,63 @@ namespace PredatorControlApp.Bios
 
         public void SetSupervisorPassword(string? password)
         {
-            _cachedPassword = password;
+            lock (_lock)
+            {
+                _cachedPassword = string.IsNullOrWhiteSpace(password) ? null : password;
+            }
         }
 
         public bool ApplySetting(BiosSettingItem item, out string error)
         {
             error = "";
-            if (!ModificationsEnabled)
+            if (item == null)
             {
-                error = "BIOS modifications are disabled. Toggle 'Enable BIOS Modifications' in the toolbar first.";
+                error = "Setting item cannot be null.";
                 return false;
             }
-
-            if (item.Risk == BiosSettingRisk.Dangerous && !DangerousAllowed)
+            if (string.IsNullOrWhiteSpace(item.Name))
             {
-                error = "This setting carries hardware or display risk and is blocked. Enable 'Allow Dangerous Settings' first.";
+                error = "Setting name cannot be empty.";
+                return false;
+            }
+            if (string.IsNullOrWhiteSpace(item.PendingValue))
+            {
+                error = "Setting value cannot be empty.";
+                return false;
+            }
+            string? password;
+            bool dangerousAllowed;
+            lock (_lock)
+            {
+                if (!_modificationsEnabled)
+                {
+                    error = "BIOS modifications are disabled. Toggle 'Enable BIOS Modifications' in the toolbar first.";
+                    return false;
+                }
+
+                if (item.Risk == BiosSettingRisk.Dangerous && !_dangerousAllowed)
+                {
+                    error = "This setting carries hardware or display risk and is blocked. Enable 'Allow Dangerous Settings' first.";
+                    return false;
+                }
+
+                password = _cachedPassword;
+                dangerousAllowed = _dangerousAllowed;
+            }
+
+            // Validate allowed options if defined for this setting item
+            if (item.Options != null && item.Options.Count > 0 && !item.Options.Contains(item.PendingValue))
+            {
+                error = $"Invalid value '{item.PendingValue}' for setting '{item.Name}'. Allowed values: {string.Join(", ", item.Options)}.";
                 return false;
             }
 
             if (PredatorNativeCore.IsNativeCoreAvailable)
             {
-                int ret = PredatorNativeCore.BiosApplySetting(item.Name, item.PendingValue, _cachedPassword, DangerousAllowed);
+                int ret = PredatorNativeCore.BiosApplySetting(item.Name, item.PendingValue, password, dangerousAllowed);
                 if (ret == 0)
                 {
-                    item.CurrentValue = item.PendingValue;
+                    lock (_lock) { item.CurrentValue = item.PendingValue; }
                     return true;
                 }
                 else if (ret == 2)
@@ -309,7 +375,7 @@ namespace PredatorControlApp.Bios
                 }
                 else if (ret == 8)
                 {
-                    item.CurrentValue = item.PendingValue;
+                    lock (_lock) { item.CurrentValue = item.PendingValue; }
                     error = "Setting applied successfully. A system restart is required for changes to take effect in firmware.";
                     return true;
                 }
@@ -326,22 +392,27 @@ namespace PredatorControlApp.Bios
             }
 
             // In managed fallback mode, acknowledge setting change
-            item.CurrentValue = item.PendingValue;
+            lock (_lock) { item.CurrentValue = item.PendingValue; }
             return true;
         }
 
         public bool RestoreDefaults(bool userDefaults, out string error)
         {
             error = "";
-            if (!ModificationsEnabled)
+            string? password;
+            lock (_lock)
             {
-                error = "BIOS modifications are disabled.";
-                return false;
+                if (!_modificationsEnabled)
+                {
+                    error = "BIOS modifications are disabled.";
+                    return false;
+                }
+                password = _cachedPassword;
             }
 
             if (PredatorNativeCore.IsNativeCoreAvailable)
             {
-                int ret = PredatorNativeCore.BiosRestoreDefaults(_cachedPassword, userDefaults);
+                int ret = PredatorNativeCore.BiosRestoreDefaults(password, userDefaults);
                 if (ret == 0 || ret == 8)
                 {
                     ProbeAndLoad();

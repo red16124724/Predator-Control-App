@@ -390,11 +390,7 @@ extern "system" {
         buffer: *mut u8,
         buffer_size: u32,
     ) -> u32;
-    fn EnumSystemFirmwareTables(
-        provider: u32,
-        buffer: *mut u8,
-        buffer_size: u32,
-    ) -> u32;
+    fn EnumSystemFirmwareTables(provider: u32, buffer: *mut u8, buffer_size: u32) -> u32;
 }
 
 pub fn fetch_and_scan_power() -> Option<UefiPowerConfig> {
@@ -405,7 +401,8 @@ pub fn fetch_and_scan_power() -> Option<UefiPowerConfig> {
         let enum_size = unsafe { EnumSystemFirmwareTables(acpi_provider, std::ptr::null_mut(), 0) };
         if enum_size >= 4 && enum_size <= 1024 * 1024 {
             let mut id_buf = vec![0u8; enum_size as usize];
-            let read_ids = unsafe { EnumSystemFirmwareTables(acpi_provider, id_buf.as_mut_ptr(), enum_size) };
+            let read_ids =
+                unsafe { EnumSystemFirmwareTables(acpi_provider, id_buf.as_mut_ptr(), enum_size) };
             if read_ids >= 4 {
                 let table_count = (read_ids / 4) as usize;
                 for i in 0..table_count {
@@ -415,12 +412,23 @@ pub fn fetch_and_scan_power() -> Option<UefiPowerConfig> {
                         id_buf[i * 4 + 2],
                         id_buf[i * 4 + 3],
                     ]);
-                    let table_size = unsafe { GetSystemFirmwareTable(acpi_provider, table_id, std::ptr::null_mut(), 0) };
+                    let table_size = unsafe {
+                        GetSystemFirmwareTable(acpi_provider, table_id, std::ptr::null_mut(), 0)
+                    };
                     if table_size >= 36 && table_size <= 16 * 1024 * 1024 {
                         let mut table_buf = vec![0u8; table_size as usize];
-                        let table_read = unsafe { GetSystemFirmwareTable(acpi_provider, table_id, table_buf.as_mut_ptr(), table_size) };
+                        let table_read = unsafe {
+                            GetSystemFirmwareTable(
+                                acpi_provider,
+                                table_id,
+                                table_buf.as_mut_ptr(),
+                                table_size,
+                            )
+                        };
                         if table_read >= 36 {
-                            if let Some(config) = parse_aml_power_limits(&table_buf[..table_read as usize]) {
+                            if let Some(config) =
+                                parse_aml_power_limits(&table_buf[..table_read as usize])
+                            {
                                 return Some(config);
                             }
                         }

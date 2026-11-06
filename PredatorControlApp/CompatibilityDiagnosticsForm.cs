@@ -53,10 +53,12 @@ internal sealed class CompatibilityDiagnosticsForm : Form
 {
     public CompatibilityDiagnosticsForm(string report)
     {
+        report ??= string.Empty;
         Text = "Compatibility and diagnostics";
         StartPosition = FormStartPosition.CenterParent;
         MinimumSize = new System.Drawing.Size(560, 420);
         Size = new System.Drawing.Size(720, 620);
+        AutoScaleMode = AutoScaleMode.None;
         var text = new TextBox
         {
             Dock = DockStyle.Fill, Multiline = true, ReadOnly = true,
@@ -81,7 +83,7 @@ internal sealed class CompatibilityDiagnosticsForm : Form
             using var dialog = new SaveFileDialog { Filter = "Text files (*.txt)|*.txt", FileName = "Predator-compatibility-report.txt" };
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
             try { System.IO.File.WriteAllText(dialog.FileName, report); }
-            catch (Exception ex) when (ex is System.IO.IOException || ex is UnauthorizedAccessException)
+            catch (Exception ex)
             {
                 MessageBox.Show(this, "Could not save the report: " + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
@@ -91,5 +93,6 @@ internal sealed class CompatibilityDiagnosticsForm : Form
         Controls.Add(text);
         Controls.Add(buttons);
         AcceptButton = close;
+        CancelButton = close;
     }
 }

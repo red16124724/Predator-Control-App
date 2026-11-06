@@ -428,7 +428,25 @@ namespace PredatorControlApp.Tests
                 using var k1 = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"SOFTWARE\PredatorControl");
                 object? at1 = k1?.GetValue("AppTheme");
                 object? th1 = k1?.GetValue("Theme");
-                string fileJson = System.IO.File.Exists(AppSettings.SettingsFilePath) ? System.IO.File.ReadAllText(AppSettings.SettingsFilePath) : "NO_FILE";
+                string fileJson = "NO_FILE";
+                try
+                {
+                    if (System.IO.File.Exists(AppSettings.SettingsFilePath))
+                    {
+                        for (int r = 0; r < 5; r++)
+                        {
+                            try
+                            {
+                                using var fs = new System.IO.FileStream(AppSettings.SettingsFilePath, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.ReadWrite | System.IO.FileShare.Delete);
+                                using var sr = new System.IO.StreamReader(fs);
+                                fileJson = sr.ReadToEnd();
+                                break;
+                            }
+                            catch (System.IO.IOException) { System.Threading.Thread.Sleep(50); }
+                        }
+                    }
+                }
+                catch { }
 
                 ThemeManager.LoadThemeFromRegistry();
                 var afterTheme = ThemeManager.CurrentTheme;
@@ -441,6 +459,98 @@ namespace PredatorControlApp.Tests
             }
         }
 
+
+        #endregion
+
+        #region Bug Fix 8: Comprehensive Persistence & Hardware Safety Tests
+
+        [Fact]
+        public void AppSettings_CreateSnapshot_PreservesDdsAndBlueLightAndBiosSettings()
+        {
+            var settings = new AppSettings
+            {
+                DdsMode = 2,
+                BlueLightShieldMode = 3,
+                BiosModificationsEnabled = true,
+                BiosDangerousAllowed = true
+            };
+
+            var snapshot = settings.CreateSnapshot();
+
+            Assert.Equal(2, snapshot.DdsMode);
+            Assert.Equal(3, snapshot.BlueLightShieldMode);
+            Assert.True(snapshot.BiosModificationsEnabled);
+            Assert.True(snapshot.BiosDangerousAllowed);
+        }
+
+        [Fact]
+        public void AppSettings_Sanitize_ClampsDdsAndBlueLight()
+        {
+            var settings = new AppSettings
+            {
+                DdsMode = 99,
+                BlueLightShieldMode = -5
+            };
+
+            settings.Sanitize();
+
+            Assert.Equal(2, settings.DdsMode);
+            Assert.Equal(0, settings.BlueLightShieldMode);
+
+            settings.DdsMode = -10;
+            settings.BlueLightShieldMode = 100;
+            settings.Sanitize();
+
+            Assert.Equal(0, settings.DdsMode);
+            Assert.Equal(3, settings.BlueLightShieldMode);
+        }
+
+        [Fact]
+        public void GameProfile_RegistrySafety_PreservesDdsAndLcdOverdrive()
+        {
+            string testExe = "test_game_verify_123.exe";
+            try
+            {
+                var profile = new GameProfile
+                {
+                    ExecutableName = testExe,
+                    DisplayName = "Verify Test Game",
+                    DdsMode = 2,
+                    LcdOverdrive = 1
+                };
+
+                RegistrySafety.SaveGameProfile(profile);
+
+                var loaded = RegistrySafety.LoadGameProfiles();
+                var match = loaded.FirstOrDefault(p => string.Equals(p.ExecutableName, testExe, StringComparison.OrdinalIgnoreCase));
+
+                Assert.NotNull(match);
+                Assert.Equal(2, match!.DdsMode);
+                Assert.Equal(1, match!.LcdOverdrive);
+            }
+            finally
+            {
+                RegistrySafety.DeleteGameProfile(testExe);
+            }
+        }
+
+        [Fact]
+        public void CurveFollower_LazyInitNative_WhenNativeAvailable()
+        {
+            using var follower = new CurveFollower(3);
+            var points = new List<Point>
+            {
+                new Point(30, 20),
+                new Point(60, 50),
+                new Point(80, 80),
+                new Point(90, 100)
+            };
+
+            int speed = follower.Update(50.0, points);
+            Assert.InRange(speed, 20, 100);
+        }
+
         #endregion
     }
 }
+

@@ -6,8 +6,8 @@
 //! may hand over buffers that are not naturally aligned.
 
 use crate::{
-    backlight, battery, bios, cpu_spec, curve, game_profile, graphproj, history, hook, is_valid_buffer,
-    is_valid_mut_buffer, pipeguard, procsync, shortcuts, uefi,
+    backlight, battery, bios, cpu_spec, curve, game_profile, graphproj, history, hook,
+    is_valid_buffer, is_valid_mut_buffer, pipeguard, procsync, shortcuts, uefi,
 };
 
 // ============================================================================
@@ -597,7 +597,6 @@ pub unsafe extern "C" fn predator_pipeguard_is_valid(input: *const u8, input_len
     })
 }
 
-
 // ============================================================================
 // Tier 1: 8-Point Fan Curve Normalizer (FanCurveGraph.Normalize)
 // ============================================================================
@@ -614,18 +613,19 @@ pub unsafe extern "C" fn predator_curve_normalize(
             return -1;
         }
         let mut temp_buf = [curve::ControlPoint::default(); 128];
-        let in_slice: &[curve::ControlPoint] = if in_len > 0 && in_len <= 128 && crate::is_valid_buffer_range(in_points, in_len) {
-            if (in_points as usize) % std::mem::align_of::<curve::ControlPoint>() == 0 {
-                std::slice::from_raw_parts(in_points, in_len)
-            } else {
-                for i in 0..in_len {
-                    temp_buf[i] = std::ptr::read_unaligned(in_points.add(i));
+        let in_slice: &[curve::ControlPoint] =
+            if in_len > 0 && in_len <= 128 && crate::is_valid_buffer_range(in_points, in_len) {
+                if (in_points as usize) % std::mem::align_of::<curve::ControlPoint>() == 0 {
+                    std::slice::from_raw_parts(in_points, in_len)
+                } else {
+                    for i in 0..in_len {
+                        temp_buf[i] = std::ptr::read_unaligned(in_points.add(i));
+                    }
+                    &temp_buf[..in_len]
                 }
-                &temp_buf[..in_len]
-            }
-        } else {
-            &[]
-        };
+            } else {
+                &[]
+            };
         let normalized = curve::normalize_curve(in_slice);
         for i in 0..8 {
             std::ptr::write_unaligned(out_points.add(i), normalized[i]);
@@ -682,14 +682,14 @@ pub unsafe extern "C" fn predator_backlight_create(
     initial_ac_brightness: i32,
 ) -> *mut backlight::BacklightStateManager {
     crate::safe_ffi(std::ptr::null_mut(), || {
-        Box::into_raw(Box::new(backlight::BacklightStateManager::new(initial_ac_brightness)))
+        Box::into_raw(Box::new(backlight::BacklightStateManager::new(
+            initial_ac_brightness,
+        )))
     })
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn predator_backlight_destroy(
-    handle: *mut backlight::BacklightStateManager,
-) {
+pub unsafe extern "C" fn predator_backlight_destroy(handle: *mut backlight::BacklightStateManager) {
     crate::safe_ffi((), || {
         if crate::is_valid_mut_ptr(handle) {
             drop(Box::from_raw(handle));
@@ -705,14 +705,21 @@ pub unsafe extern "C" fn predator_backlight_evaluate_idle(
     out_brightness: *mut i32,
 ) -> i32 {
     crate::safe_ffi(0, || {
-        if !crate::is_valid_mut_ptr(handle) || !is_valid_mut_buffer(out_should_dim) || !is_valid_mut_buffer(out_brightness) {
+        if !crate::is_valid_mut_ptr(handle)
+            || !is_valid_mut_buffer(out_should_dim)
+            || !is_valid_mut_buffer(out_brightness)
+        {
             return 0;
         }
         let mgr = &mut *handle;
         let (handled, should_dim, brightness) = mgr.evaluate_idle(now_sec);
         std::ptr::write_unaligned(out_should_dim, if should_dim { 1 } else { 0 });
         std::ptr::write_unaligned(out_brightness, brightness);
-        if handled { 1 } else { 0 }
+        if handled {
+            1
+        } else {
+            0
+        }
     })
 }
 
@@ -723,14 +730,21 @@ pub unsafe extern "C" fn predator_backlight_on_activity(
     out_brightness: *mut i32,
 ) -> i32 {
     crate::safe_ffi(0, || {
-        if !crate::is_valid_mut_ptr(handle) || !is_valid_mut_buffer(out_should_restore) || !is_valid_mut_buffer(out_brightness) {
+        if !crate::is_valid_mut_ptr(handle)
+            || !is_valid_mut_buffer(out_should_restore)
+            || !is_valid_mut_buffer(out_brightness)
+        {
             return 0;
         }
         let mgr = &mut *handle;
         let (_handled, should_restore, brightness) = mgr.on_activity();
         std::ptr::write_unaligned(out_should_restore, if should_restore { 1 } else { 0 });
         std::ptr::write_unaligned(out_brightness, brightness);
-        if should_restore { 1 } else { 0 }
+        if should_restore {
+            1
+        } else {
+            0
+        }
     })
 }
 
@@ -745,7 +759,11 @@ pub unsafe extern "C" fn predator_backlight_is_on_battery(
             return 0;
         }
         let mgr = &*handle;
-        if mgr.is_on_battery(backlight::PowerLineStatus::from(line_status), charge_status) { 1 } else { 0 }
+        if mgr.is_on_battery(backlight::PowerLineStatus::from(line_status), charge_status) {
+            1
+        } else {
+            0
+        }
     })
 }
 
@@ -759,11 +777,18 @@ pub unsafe extern "C" fn predator_backlight_on_lid_changed(
     out_brightness: *mut i32,
 ) -> i32 {
     crate::safe_ffi(0, || {
-        if !crate::is_valid_mut_ptr(handle) || !is_valid_mut_buffer(out_turn_off) || !is_valid_mut_buffer(out_brightness) {
+        if !crate::is_valid_mut_ptr(handle)
+            || !is_valid_mut_buffer(out_turn_off)
+            || !is_valid_mut_buffer(out_brightness)
+        {
             return 0;
         }
         let mgr = &mut *handle;
-        let (should_turn_off, brightness) = mgr.on_lid_changed(is_open != 0, backlight::PowerLineStatus::from(line_status), charge_status);
+        let (should_turn_off, brightness) = mgr.on_lid_changed(
+            is_open != 0,
+            backlight::PowerLineStatus::from(line_status),
+            charge_status,
+        );
         std::ptr::write_unaligned(out_turn_off, if should_turn_off { 1 } else { 0 });
         std::ptr::write_unaligned(out_brightness, brightness);
         1
@@ -777,7 +802,10 @@ pub unsafe extern "C" fn predator_backlight_on_suspend(
     out_brightness: *mut i32,
 ) -> i32 {
     crate::safe_ffi(0, || {
-        if !crate::is_valid_mut_ptr(handle) || !is_valid_mut_buffer(out_turn_off) || !is_valid_mut_buffer(out_brightness) {
+        if !crate::is_valid_mut_ptr(handle)
+            || !is_valid_mut_buffer(out_turn_off)
+            || !is_valid_mut_buffer(out_brightness)
+        {
             return 0;
         }
         let mgr = &mut *handle;
@@ -797,11 +825,15 @@ pub unsafe extern "C" fn predator_backlight_on_resume(
     out_brightness: *mut i32,
 ) -> i32 {
     crate::safe_ffi(0, || {
-        if !crate::is_valid_mut_ptr(handle) || !is_valid_mut_buffer(out_turn_off) || !is_valid_mut_buffer(out_brightness) {
+        if !crate::is_valid_mut_ptr(handle)
+            || !is_valid_mut_buffer(out_turn_off)
+            || !is_valid_mut_buffer(out_brightness)
+        {
             return 0;
         }
         let mgr = &mut *handle;
-        let (should_turn_off, brightness) = mgr.on_resume(backlight::PowerLineStatus::from(line_status), charge_status);
+        let (should_turn_off, brightness) =
+            mgr.on_resume(backlight::PowerLineStatus::from(line_status), charge_status);
         std::ptr::write_unaligned(out_turn_off, if should_turn_off { 1 } else { 0 });
         std::ptr::write_unaligned(out_brightness, brightness);
         1
@@ -901,7 +933,11 @@ pub unsafe extern "C" fn predator_procsync_is_process_running(
 ) -> i32 {
     crate::safe_ffi(0, || {
         let name = procsync::read_str(name_ptr, name_len);
-        if procsync::is_process_running(name) { 1 } else { 0 }
+        if procsync::is_process_running(name) {
+            1
+        } else {
+            0
+        }
     })
 }
 
@@ -910,11 +946,9 @@ pub unsafe extern "C" fn predator_procsync_get_foreground_process_name(
     out: *mut u8,
     out_capacity: i32,
 ) -> i32 {
-    crate::safe_ffi(-1, || {
-        match procsync::get_foreground_process_name() {
-            Some(name) => procsync::copy_result(&name, out, out_capacity),
-            None => -1,
-        }
+    crate::safe_ffi(-1, || match procsync::get_foreground_process_name() {
+        Some(name) => procsync::copy_result(&name, out, out_capacity),
+        None => -1,
     })
 }
 
@@ -1028,14 +1062,16 @@ pub unsafe extern "C" fn predator_game_profile_register(
 
         // Read null-terminated exe_name
         let mut exe_len = 0;
+        let mut found_null = false;
         while exe_len < 260 {
             let b = *exe_name.add(exe_len);
             if b == 0 {
+                found_null = true;
                 break;
             }
             exe_len += 1;
         }
-        if exe_len == 0 {
+        if !found_null || exe_len == 0 {
             return -1;
         }
         let exe_slice = std::slice::from_raw_parts(exe_name, exe_len);
@@ -1047,15 +1083,24 @@ pub unsafe extern "C" fn predator_game_profile_register(
         // Read optional null-terminated full_path
         let path_str = if is_valid_buffer(full_path) {
             let mut path_len = 0;
+            let mut found_path_null = false;
             while path_len < 1024 {
                 let b = *full_path.add(path_len);
                 if b == 0 {
+                    found_path_null = true;
                     break;
                 }
                 path_len += 1;
             }
-            let path_slice = std::slice::from_raw_parts(full_path, path_len);
-            std::str::from_utf8(path_slice).unwrap_or("").trim().to_string()
+            if found_path_null && path_len > 0 {
+                let path_slice = std::slice::from_raw_parts(full_path, path_len);
+                std::str::from_utf8(path_slice)
+                    .unwrap_or("")
+                    .trim()
+                    .to_string()
+            } else {
+                String::new()
+            }
         } else {
             String::new()
         };
@@ -1184,7 +1229,6 @@ pub unsafe extern "C" fn predator_game_profile_get_active(
     })
 }
 
-
 // ============================================================================
 // Display & Advanced Optimus (DDS) Exports
 // ============================================================================
@@ -1217,14 +1261,22 @@ pub unsafe extern "C" fn predator_display_get_current_refresh_rate() -> i32 {
 #[no_mangle]
 pub unsafe extern "C" fn predator_display_set_refresh_rate(hz: i32) -> i32 {
     crate::safe_ffi(-1, || {
-        if crate::display::set_refresh_rate(hz).is_ok() { 0 } else { -1 }
+        if crate::display::set_refresh_rate(hz).is_ok() {
+            0
+        } else {
+            -1
+        }
     })
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn predator_display_set_bluelight_shield(mode: i32) -> i32 {
     crate::safe_ffi(-1, || {
-        if crate::display::set_bluelight_shield(mode).is_ok() { 0 } else { -1 }
+        if crate::display::set_bluelight_shield(mode).is_ok() {
+            0
+        } else {
+            -1
+        }
     })
 }
 
@@ -1255,14 +1307,22 @@ pub unsafe extern "C" fn predator_display_get_dds_status(
 #[no_mangle]
 pub unsafe extern "C" fn predator_display_set_dds_mode(mode: i32) -> i32 {
     crate::safe_ffi(-1, || {
-        if crate::display::set_dds_mode(mode).is_ok() { 0 } else { -1 }
+        if crate::display::set_dds_mode(mode).is_ok() {
+            0
+        } else {
+            -1
+        }
     })
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn predator_display_set_lcd_overdrive(enabled: i32) -> i32 {
     crate::safe_ffi(-1, || {
-        if crate::display::set_lcd_overdrive(enabled != 0).is_ok() { 0 } else { -1 }
+        if crate::display::set_lcd_overdrive(enabled != 0).is_ok() {
+            0
+        } else {
+            -1
+        }
     })
 }
 
@@ -1326,20 +1386,26 @@ pub unsafe extern "C" fn predator_bios_get_setting_info(
                 if is_valid_mut_buffer(out_name) {
                     let b = s.name.as_bytes();
                     let len = b.len().min(max_len - 1);
-                    for i in 0..len { std::ptr::write_unaligned(out_name.add(i), b[i]); }
+                    for i in 0..len {
+                        std::ptr::write_unaligned(out_name.add(i), b[i]);
+                    }
                     std::ptr::write_unaligned(out_name.add(len), 0);
                 }
                 if is_valid_mut_buffer(out_val) {
                     let b = s.current.as_bytes();
                     let len = b.len().min(max_len - 1);
-                    for i in 0..len { std::ptr::write_unaligned(out_val.add(i), b[i]); }
+                    for i in 0..len {
+                        std::ptr::write_unaligned(out_val.add(i), b[i]);
+                    }
                     std::ptr::write_unaligned(out_val.add(len), 0);
                 }
                 if is_valid_mut_buffer(out_options) {
                     let joined = s.options.join(";");
                     let b = joined.as_bytes();
                     let len = b.len().min(max_len - 1);
-                    for i in 0..len { std::ptr::write_unaligned(out_options.add(i), b[i]); }
+                    for i in 0..len {
+                        std::ptr::write_unaligned(out_options.add(i), b[i]);
+                    }
                     std::ptr::write_unaligned(out_options.add(len), 0);
                 }
                 if is_valid_mut_buffer(out_risk) {
@@ -1376,21 +1442,18 @@ pub unsafe extern "C" fn predator_bios_apply_setting(
             Ok(s) => s,
             Err(e) => return e,
         };
-        let mut pwd_str = if is_valid_buffer(password) {
+        let pwd_str = if is_valid_buffer(password) {
             match bios::read_ascii_c_str_limited(password, 128) {
-                Ok(s) => s,
+                Ok(s) => bios::ZeroizingString::new(s),
                 Err(e) => return e,
             }
         } else {
-            String::new()
+            bios::ZeroizingString::default()
         };
 
-        let res = crate::bios::with_bios_manager(|mgr| {
+        crate::bios::with_bios_manager(|mgr| {
             mgr.apply_setting(&name_str, &val_str, &pwd_str, dangerous_allowed != 0) as i32
-        });
-
-        bios::zeroize_string(&mut pwd_str);
-        res
+        })
     })
 }
 
@@ -1400,21 +1463,17 @@ pub unsafe extern "C" fn predator_bios_restore_defaults(
     user_defaults: i32,
 ) -> i32 {
     crate::safe_ffi(-1, || {
-        let mut pwd_str = if is_valid_buffer(password) {
+        let pwd_str = if is_valid_buffer(password) {
             match bios::read_ascii_c_str_limited(password, 128) {
-                Ok(s) => s,
+                Ok(s) => bios::ZeroizingString::new(s),
                 Err(e) => return e,
             }
         } else {
-            String::new()
+            bios::ZeroizingString::default()
         };
 
-        let res = crate::bios::with_bios_manager(|mgr| {
+        crate::bios::with_bios_manager(|mgr| {
             mgr.restore_defaults(&pwd_str, user_defaults != 0) as i32
-        });
-
-        bios::zeroize_string(&mut pwd_str);
-        res
+        })
     })
 }
-

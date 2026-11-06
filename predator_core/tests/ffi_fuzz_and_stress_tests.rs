@@ -1349,22 +1349,60 @@ fn test_ffi_high_kernel_partition_pointer_protection() {
         for &addr in &high_addrs {
             // Curve follower & normalizer
             let curve_handle = addr as *mut predator_core::curve::FanCurveFollower;
-            let pts = [ControlPoint { temp: 40, speed: 20 }];
-            assert_eq!(predator_curve_update(curve_handle, 50.0, pts.as_ptr(), pts.len(), 0), 50);
-            assert_eq!(predator_curve_update(std::ptr::null_mut(), 50.0, addr as *const ControlPoint, 1, 0), 50);
-            assert_eq!(predator_curve_interpolate(addr as *const ControlPoint, 1, 50), 50);
+            let pts = [ControlPoint {
+                temp: 40,
+                speed: 20,
+            }];
+            assert_eq!(
+                predator_curve_update(curve_handle, 50.0, pts.as_ptr(), pts.len(), 0),
+                50
+            );
+            assert_eq!(
+                predator_curve_update(
+                    std::ptr::null_mut(),
+                    50.0,
+                    addr as *const ControlPoint,
+                    1,
+                    0
+                ),
+                50
+            );
+            assert_eq!(
+                predator_curve_interpolate(addr as *const ControlPoint, 1, 50),
+                50
+            );
             predator_curve_reset(curve_handle);
             predator_curve_destroy(curve_handle);
 
             let mut norm_pts = [ControlPoint::default(); 8];
-            assert_eq!(predator_curve_normalize(addr as *const ControlPoint, 1, norm_pts.as_mut_ptr(), 8), 8);
-            assert_eq!(predator_curve_normalize(pts.as_ptr(), 1, addr as *mut ControlPoint, 8), -1);
+            assert_eq!(
+                predator_curve_normalize(addr as *const ControlPoint, 1, norm_pts.as_mut_ptr(), 8),
+                8
+            );
+            assert_eq!(
+                predator_curve_normalize(pts.as_ptr(), 1, addr as *mut ControlPoint, 8),
+                -1
+            );
 
             // Thermal coordinator
             let th_handle = addr as *mut predator_core::thermal::ThermalCoordinator;
-            assert_eq!(predator_thermal_evaluate(th_handle, 50.0, 50.0, 45, 15, 45, std::ptr::null_mut()), -1);
+            assert_eq!(
+                predator_thermal_evaluate(th_handle, 50.0, 50.0, 45, 15, 45, std::ptr::null_mut()),
+                -1
+            );
             let real_th = predator_thermal_create();
-            assert_eq!(predator_thermal_evaluate(real_th, 50.0, 50.0, 45, 15, 45, addr as *mut NativeThermalDecision), -1);
+            assert_eq!(
+                predator_thermal_evaluate(
+                    real_th,
+                    50.0,
+                    50.0,
+                    45,
+                    15,
+                    45,
+                    addr as *mut NativeThermalDecision
+                ),
+                -1
+            );
             predator_thermal_destroy(real_th);
             assert_eq!(predator_thermal_reset(th_handle), -1);
             predator_thermal_destroy(th_handle);
@@ -1377,17 +1415,29 @@ fn test_ffi_high_kernel_partition_pointer_protection() {
             predator_rgb_reset(rgb_handle);
             predator_rgb_destroy(rgb_handle);
             assert_eq!(predator_rgb_hsv_to_rgb(0.0, 1.0, 1.0, addr as *mut u8), -1);
-            assert_eq!(predator_rgb_blend(addr as *mut u8, addr as *const u8, 4, 0.5), -1);
+            assert_eq!(
+                predator_rgb_blend(addr as *mut u8, addr as *const u8, 4, 0.5),
+                -1
+            );
             assert_eq!(predator_rgb_apply_brightness(addr as *mut u8, 4, 128), -1);
 
             // Audio analyzer
             let audio_handle = addr as *mut predator_core::audio::SpectrumAnalyzer;
-            assert_eq!(predator_audio_push(audio_handle, addr as *const f32, 16, 2), -1);
-            assert_eq!(predator_audio_get_bands(audio_handle, addr as *mut f32, 16), -1);
+            assert_eq!(
+                predator_audio_push(audio_handle, addr as *const f32, 16, 2),
+                -1
+            );
+            assert_eq!(
+                predator_audio_get_bands(audio_handle, addr as *mut f32, 16),
+                -1
+            );
             assert_eq!(predator_audio_get_level(audio_handle), 0.0);
             assert_eq!(predator_audio_is_beat(audio_handle), 0);
             assert_eq!(predator_audio_beat_strength(audio_handle), 0.0);
-            assert_eq!(predator_audio_render_zones(audio_handle, 255, 255, 255, 100, addr as *mut u8, 4), -1);
+            assert_eq!(
+                predator_audio_render_zones(audio_handle, 255, 255, 255, 100, addr as *mut u8, 4),
+                -1
+            );
             predator_audio_reset(audio_handle);
             predator_audio_destroy(audio_handle);
 
@@ -1400,7 +1450,10 @@ fn test_ffi_high_kernel_partition_pointer_protection() {
             assert_eq!(predator_history_max(hist_handle, addr as *mut f64), 0);
             assert_eq!(predator_history_average(hist_handle, addr as *mut f64), 0);
             assert_eq!(predator_history_latest(hist_handle, addr as *mut f64), 0);
-            assert_eq!(predator_history_snapshot(hist_handle, addr as *mut f64, 8), 0);
+            assert_eq!(
+                predator_history_snapshot(hist_handle, addr as *mut f64, 8),
+                0
+            );
             predator_history_clear(hist_handle);
             predator_history_destroy(hist_handle);
 
@@ -1408,12 +1461,27 @@ fn test_ffi_high_kernel_partition_pointer_protection() {
             let bl_handle = addr as *mut predator_core::backlight::BacklightStateManager;
             let mut out_i32 = 0i32;
             let mut out_i32_b = 0i32;
-            assert_eq!(predator_backlight_evaluate_idle(bl_handle, 100, &mut out_i32, &mut out_i32_b), 0);
-            assert_eq!(predator_backlight_on_activity(bl_handle, &mut out_i32, &mut out_i32_b), 0);
+            assert_eq!(
+                predator_backlight_evaluate_idle(bl_handle, 100, &mut out_i32, &mut out_i32_b),
+                0
+            );
+            assert_eq!(
+                predator_backlight_on_activity(bl_handle, &mut out_i32, &mut out_i32_b),
+                0
+            );
             assert_eq!(predator_backlight_is_on_battery(bl_handle, 1, 0), 0);
-            assert_eq!(predator_backlight_on_lid_changed(bl_handle, 1, 1, 0, &mut out_i32, &mut out_i32_b), 0);
-            assert_eq!(predator_backlight_on_suspend(bl_handle, &mut out_i32, &mut out_i32_b), 0);
-            assert_eq!(predator_backlight_on_resume(bl_handle, 1, 0, &mut out_i32, &mut out_i32_b), 0);
+            assert_eq!(
+                predator_backlight_on_lid_changed(bl_handle, 1, 1, 0, &mut out_i32, &mut out_i32_b),
+                0
+            );
+            assert_eq!(
+                predator_backlight_on_suspend(bl_handle, &mut out_i32, &mut out_i32_b),
+                0
+            );
+            assert_eq!(
+                predator_backlight_on_resume(bl_handle, 1, 0, &mut out_i32, &mut out_i32_b),
+                0
+            );
             assert_eq!(predator_backlight_set_plugged_in(bl_handle, 1), 0);
             assert_eq!(predator_backlight_set_saved_ac(bl_handle, 50), 0);
             assert_eq!(predator_backlight_set_manual_battery(bl_handle, 1, 40), 0);
@@ -1424,72 +1492,227 @@ fn test_ffi_high_kernel_partition_pointer_protection() {
             // CPU spec
             let mut spec = predator_core::cpu_spec::CpuHardwareSpec::default();
             assert_eq!(predator_cpuspec_detect(addr as *const u8, 10, &mut spec), 0);
-            assert_eq!(predator_cpuspec_detect(b"Intel Core".as_ptr(), 10, addr as *mut _), -1);
-            assert_eq!(predator_cpuspec_estimate_proportional_limits(45, 1, addr as *mut i32, &mut out_i32), -1);
-            assert_eq!(predator_cpuspec_estimate_proportional_limits(45, 1, &mut out_i32, addr as *mut i32), -1);
+            assert_eq!(
+                predator_cpuspec_detect(b"Intel Core".as_ptr(), 10, addr as *mut _),
+                -1
+            );
+            assert_eq!(
+                predator_cpuspec_estimate_proportional_limits(
+                    45,
+                    1,
+                    addr as *mut i32,
+                    &mut out_i32
+                ),
+                -1
+            );
+            assert_eq!(
+                predator_cpuspec_estimate_proportional_limits(
+                    45,
+                    1,
+                    &mut out_i32,
+                    addr as *mut i32
+                ),
+                -1
+            );
 
             // Lighting rules
             let mut out_u32 = 0u32;
-            assert_eq!(predator_lighting_parse_hex(addr as *const u8, 4, &mut out_u32), 0);
-            assert_eq!(predator_lighting_parse_hex(b"ff00".as_ptr(), 4, addr as *mut u32), 0);
-            assert_eq!(predator_lighting_blend(0xFF000000, 0xFFFFFFFF, 0.5, addr as *mut u32), 0);
+            assert_eq!(
+                predator_lighting_parse_hex(addr as *const u8, 4, &mut out_u32),
+                0
+            );
+            assert_eq!(
+                predator_lighting_parse_hex(b"ff00".as_ptr(), 4, addr as *mut u32),
+                0
+            );
+            assert_eq!(
+                predator_lighting_blend(0xFF000000, 0xFFFFFFFF, 0.5, addr as *mut u32),
+                0
+            );
 
             // Protocol migration
-            assert_eq!(predator_protocol_encode(0, 10, 0, 0, 0, addr as *mut u64), 0);
+            assert_eq!(
+                predator_protocol_encode(0, 10, 0, 0, 0, addr as *mut u64),
+                0
+            );
 
             // SMBIOS
             let mut smbios_out = [0u32; 10];
             let mut smbios_ver = 0i32;
             let dummy_table = [172u8, 6, 0, 0, 1, 2, 0, 0];
-            assert_eq!(predator_smbios_parse(addr as *const u8, dummy_table.len(), smbios_out.as_mut_ptr(), 10, &mut smbios_ver), -1);
-            assert_eq!(predator_smbios_parse(dummy_table.as_ptr(), dummy_table.len(), addr as *mut u32, 10, &mut smbios_ver), -1);
-            assert_eq!(predator_smbios_parse(dummy_table.as_ptr(), dummy_table.len(), smbios_out.as_mut_ptr(), 10, addr as *mut i32), -1);
+            assert_eq!(
+                predator_smbios_parse(
+                    addr as *const u8,
+                    dummy_table.len(),
+                    smbios_out.as_mut_ptr(),
+                    10,
+                    &mut smbios_ver
+                ),
+                -1
+            );
+            assert_eq!(
+                predator_smbios_parse(
+                    dummy_table.as_ptr(),
+                    dummy_table.len(),
+                    addr as *mut u32,
+                    10,
+                    &mut smbios_ver
+                ),
+                -1
+            );
+            assert_eq!(
+                predator_smbios_parse(
+                    dummy_table.as_ptr(),
+                    dummy_table.len(),
+                    smbios_out.as_mut_ptr(),
+                    10,
+                    addr as *mut i32
+                ),
+                -1
+            );
 
             // ACPI
             let mut ppcc_entry = predator_core::acpi::PpccEntry::default();
-            assert_eq!(predator_acpi_ppcc_entries(addr as *const u8, 10, &mut ppcc_entry, 1), -1);
-            assert_eq!(predator_acpi_ppcc_entries(dummy_table.as_ptr(), 0, addr as *mut _, 1), -1);
-            assert_eq!(predator_acpi_ppcc_summary(addr as *const u8, 10, std::ptr::null_mut()), -1);
+            assert_eq!(
+                predator_acpi_ppcc_entries(addr as *const u8, 10, &mut ppcc_entry, 1),
+                -1
+            );
+            assert_eq!(
+                predator_acpi_ppcc_entries(dummy_table.as_ptr(), 0, addr as *mut _, 1),
+                -1
+            );
+            assert_eq!(
+                predator_acpi_ppcc_summary(addr as *const u8, 10, std::ptr::null_mut()),
+                -1
+            );
             let mut table_entry = predator_core::acpi::AcpiTable::default();
-            assert_eq!(predator_acpi_scan_tables(addr as *const u8, 10, &mut table_entry, 1), -1);
-            assert_eq!(predator_acpi_scan_tables(dummy_table.as_ptr(), dummy_table.len(), addr as *mut _, 1), 0);
+            assert_eq!(
+                predator_acpi_scan_tables(addr as *const u8, 10, &mut table_entry, 1),
+                -1
+            );
+            assert_eq!(
+                predator_acpi_scan_tables(
+                    dummy_table.as_ptr(),
+                    dummy_table.len(),
+                    addr as *mut _,
+                    1
+                ),
+                0
+            );
 
             // Battery ETA
             assert_eq!(predator_battery_eta_smoothed_rate(addr as *mut f64), 0);
-            assert_eq!(predator_battery_eta_smoothed_percent_rate(addr as *mut f64), 0);
-            assert_eq!(predator_battery_eta_calculate(1, 100, 100, 10.0, 1, 0, 100, 1, addr as *mut f64), 0);
+            assert_eq!(
+                predator_battery_eta_smoothed_percent_rate(addr as *mut f64),
+                0
+            );
+            assert_eq!(
+                predator_battery_eta_calculate(1, 100, 100, 10.0, 1, 0, 100, 1, addr as *mut f64),
+                0
+            );
             assert_eq!(predator_battery_eta_warmup(1, 100, addr as *mut f64), 0);
 
             // Procsync
             let mut str_buf = [0u8; 32];
-            assert_eq!(predator_procsync_executable_name(addr as *const u8, 10, str_buf.as_mut_ptr(), 32), 0);
-            assert_eq!(predator_procsync_executable_name(b"game.exe".as_ptr(), 8, addr as *mut u8, 32), -1);
-            assert_eq!(predator_procsync_process_name(addr as *const u8, 10, str_buf.as_mut_ptr(), 32), 0);
-            assert_eq!(predator_procsync_process_name(b"game.exe".as_ptr(), 8, addr as *mut u8, 32), -1);
+            assert_eq!(
+                predator_procsync_executable_name(addr as *const u8, 10, str_buf.as_mut_ptr(), 32),
+                0
+            );
+            assert_eq!(
+                predator_procsync_executable_name(b"game.exe".as_ptr(), 8, addr as *mut u8, 32),
+                -1
+            );
+            assert_eq!(
+                predator_procsync_process_name(addr as *const u8, 10, str_buf.as_mut_ptr(), 32),
+                0
+            );
+            assert_eq!(
+                predator_procsync_process_name(b"game.exe".as_ptr(), 8, addr as *mut u8, 32),
+                -1
+            );
 
             // Pipeguard
-            assert_eq!(predator_pipeguard_sanitize(addr as *const u8, 10, str_buf.as_mut_ptr(), 32), 0);
-            assert_eq!(predator_pipeguard_sanitize(b"msg".as_ptr(), 3, addr as *mut u8, 32), -1);
+            assert_eq!(
+                predator_pipeguard_sanitize(addr as *const u8, 10, str_buf.as_mut_ptr(), 32),
+                0
+            );
+            assert_eq!(
+                predator_pipeguard_sanitize(b"msg".as_ptr(), 3, addr as *mut u8, 32),
+                -1
+            );
             assert_eq!(predator_pipeguard_is_valid(addr as *const u8, 10), 0);
 
             // Graph projection
             let samples = [10.0f64, 20.0];
             let mut xy_out = [0.0f32; 4];
-            assert_eq!(predator_graph_project_series(addr as *const f64, 2, 10, 100.0, 100.0, 0.0, 50.0, xy_out.as_mut_ptr()), 0);
-            assert_eq!(predator_graph_project_series(samples.as_ptr(), 2, 10, 100.0, 100.0, 0.0, 50.0, addr as *mut f32), 0);
+            assert_eq!(
+                predator_graph_project_series(
+                    addr as *const f64,
+                    2,
+                    10,
+                    100.0,
+                    100.0,
+                    0.0,
+                    50.0,
+                    xy_out.as_mut_ptr()
+                ),
+                0
+            );
+            assert_eq!(
+                predator_graph_project_series(
+                    samples.as_ptr(),
+                    2,
+                    10,
+                    100.0,
+                    100.0,
+                    0.0,
+                    50.0,
+                    addr as *mut f32
+                ),
+                0
+            );
 
             // Hook
-            assert_eq!(predator_hook_set_shortcuts(addr as *const predator_core::hook::ShortcutEntry, 5), 0);
+            assert_eq!(
+                predator_hook_set_shortcuts(addr as *const predator_core::hook::ShortcutEntry, 5),
+                0
+            );
 
             // UEFI
             let mut uefi_cfg = predator_core::uefi::UefiPowerConfig::default();
-            assert_eq!(predator_uefi_scan_power_and_locks(addr as *const u8, 10, &mut uefi_cfg), -1);
-            assert_eq!(predator_uefi_scan_power_and_locks(dummy_table.as_ptr(), dummy_table.len(), addr as *mut _), -1);
-            assert_eq!(predator_uefi_parse_variable_power(addr as *const u8, 10, &mut uefi_cfg), -1);
-            assert_eq!(predator_uefi_parse_variable_power(dummy_table.as_ptr(), dummy_table.len(), addr as *mut _), -1);
+            assert_eq!(
+                predator_uefi_scan_power_and_locks(addr as *const u8, 10, &mut uefi_cfg),
+                -1
+            );
+            assert_eq!(
+                predator_uefi_scan_power_and_locks(
+                    dummy_table.as_ptr(),
+                    dummy_table.len(),
+                    addr as *mut _
+                ),
+                -1
+            );
+            assert_eq!(
+                predator_uefi_parse_variable_power(addr as *const u8, 10, &mut uefi_cfg),
+                -1
+            );
+            assert_eq!(
+                predator_uefi_parse_variable_power(
+                    dummy_table.as_ptr(),
+                    dummy_table.len(),
+                    addr as *mut _
+                ),
+                -1
+            );
             let mut raw_bat = predator_core::battery::RawBatteryInfo::default();
-            assert_eq!(predator_battery_parse_info(addr as *const u8, 36, &mut raw_bat), -1);
-            assert_eq!(predator_battery_parse_info(dummy_table.as_ptr(), 36, addr as *mut _), -1);
+            assert_eq!(
+                predator_battery_parse_info(addr as *const u8, 36, &mut raw_bat),
+                -1
+            );
+            assert_eq!(
+                predator_battery_parse_info(dummy_table.as_ptr(), 36, addr as *mut _),
+                -1
+            );
         }
     }
 }
@@ -1506,12 +1729,27 @@ fn test_ffi_misaligned_handles_backlight_and_curve() {
             let bad_handle = addr as *mut predator_core::backlight::BacklightStateManager;
             let mut out1 = 0i32;
             let mut out2 = 0i32;
-            assert_eq!(predator_backlight_evaluate_idle(bad_handle, 100, &mut out1, &mut out2), 0);
-            assert_eq!(predator_backlight_on_activity(bad_handle, &mut out1, &mut out2), 0);
+            assert_eq!(
+                predator_backlight_evaluate_idle(bad_handle, 100, &mut out1, &mut out2),
+                0
+            );
+            assert_eq!(
+                predator_backlight_on_activity(bad_handle, &mut out1, &mut out2),
+                0
+            );
             assert_eq!(predator_backlight_is_on_battery(bad_handle, 1, 0), 0);
-            assert_eq!(predator_backlight_on_lid_changed(bad_handle, 1, 1, 0, &mut out1, &mut out2), 0);
-            assert_eq!(predator_backlight_on_suspend(bad_handle, &mut out1, &mut out2), 0);
-            assert_eq!(predator_backlight_on_resume(bad_handle, 1, 0, &mut out1, &mut out2), 0);
+            assert_eq!(
+                predator_backlight_on_lid_changed(bad_handle, 1, 1, 0, &mut out1, &mut out2),
+                0
+            );
+            assert_eq!(
+                predator_backlight_on_suspend(bad_handle, &mut out1, &mut out2),
+                0
+            );
+            assert_eq!(
+                predator_backlight_on_resume(bad_handle, 1, 0, &mut out1, &mut out2),
+                0
+            );
             assert_eq!(predator_backlight_set_plugged_in(bad_handle, 1), 0);
             assert_eq!(predator_backlight_set_saved_ac(bad_handle, 50), 0);
             assert_eq!(predator_backlight_set_manual_battery(bad_handle, 1, 40), 0);
@@ -1523,9 +1761,18 @@ fn test_ffi_misaligned_handles_backlight_and_curve() {
 
         // Test curve normalize with unaligned input and output buffers
         let raw_pts = [
-            ControlPoint { temp: 40, speed: 20 },
-            ControlPoint { temp: 60, speed: 45 },
-            ControlPoint { temp: 80, speed: 70 },
+            ControlPoint {
+                temp: 40,
+                speed: 20,
+            },
+            ControlPoint {
+                temp: 60,
+                speed: 45,
+            },
+            ControlPoint {
+                temp: 80,
+                speed: 70,
+            },
         ];
         let mut unaligned_in_mem = [0u8; 128];
         let unaligned_in_ptr = unaligned_in_mem.as_mut_ptr().add(1) as *mut ControlPoint;
@@ -1564,7 +1811,10 @@ fn test_ffi_integer_overflow_and_extreme_shift_limits() {
         // Exceeding fan index 23 must return 0 safely without panic
         assert_eq!(predator_protocol_encode(18, 24, 2, 0, 0, &mut out_u64), 0);
         assert_eq!(predator_protocol_encode(18, 64, 2, 0, 0, &mut out_u64), 0);
-        assert_eq!(predator_protocol_encode(18, u64::MAX, 2, 0, 0, &mut out_u64), 0);
+        assert_eq!(
+            predator_protocol_encode(18, u64::MAX, 2, 0, 0, &mut out_u64),
+            0
+        );
 
         // Direct internal encode tests
         assert!(encode(18, 64, 0, 0, 0).is_none());
@@ -1573,14 +1823,70 @@ fn test_ffi_integer_overflow_and_extreme_shift_limits() {
         // Graph projection with NaN / Inf dimensions
         let samples = [10.0f64, 20.0];
         let mut xy_out = [0.0f32; 4];
-        assert_eq!(predator_graph_project_series(samples.as_ptr(), 2, 10, f32::NAN, 100.0, 0.0, 50.0, xy_out.as_mut_ptr()), 0);
-        assert_eq!(predator_graph_project_series(samples.as_ptr(), 2, 10, 100.0, f32::NAN, 0.0, 50.0, xy_out.as_mut_ptr()), 0);
-        assert_eq!(predator_graph_project_series(samples.as_ptr(), 2, 10, f32::INFINITY, 100.0, 0.0, 50.0, xy_out.as_mut_ptr()), 0);
-        assert_eq!(predator_graph_project_series(samples.as_ptr(), 2, 10, -50.0, 100.0, 0.0, 50.0, xy_out.as_mut_ptr()), 0);
+        assert_eq!(
+            predator_graph_project_series(
+                samples.as_ptr(),
+                2,
+                10,
+                f32::NAN,
+                100.0,
+                0.0,
+                50.0,
+                xy_out.as_mut_ptr()
+            ),
+            0
+        );
+        assert_eq!(
+            predator_graph_project_series(
+                samples.as_ptr(),
+                2,
+                10,
+                100.0,
+                f32::NAN,
+                0.0,
+                50.0,
+                xy_out.as_mut_ptr()
+            ),
+            0
+        );
+        assert_eq!(
+            predator_graph_project_series(
+                samples.as_ptr(),
+                2,
+                10,
+                f32::INFINITY,
+                100.0,
+                0.0,
+                50.0,
+                xy_out.as_mut_ptr()
+            ),
+            0
+        );
+        assert_eq!(
+            predator_graph_project_series(
+                samples.as_ptr(),
+                2,
+                10,
+                -50.0,
+                100.0,
+                0.0,
+                50.0,
+                xy_out.as_mut_ptr()
+            ),
+            0
+        );
 
         // Curve normalizer with excessive length
         let mut norm_pts = [predator_core::curve::ControlPoint::default(); 8];
-        assert_eq!(predator_curve_normalize(samples.as_ptr() as *const _, usize::MAX, norm_pts.as_mut_ptr(), 8), 8);
+        assert_eq!(
+            predator_curve_normalize(
+                samples.as_ptr() as *const _,
+                usize::MAX,
+                norm_pts.as_mut_ptr(),
+                8
+            ),
+            8
+        );
     }
 }
 
@@ -1647,7 +1953,8 @@ fn test_ffi_history_multithreaded_hammering_concurrency() {
         running.store(false, Ordering::Relaxed);
 
         for t in threads {
-            t.join().expect("History multithreaded hammering thread panicked!");
+            t.join()
+                .expect("History multithreaded hammering thread panicked!");
         }
 
         predator_history_destroy(hist);
@@ -1671,10 +1978,22 @@ fn test_ffi_concurrent_multithreaded_all_subsystems_hammering() {
             threads.push(thread::spawn(move || {
                 let handle = predator_curve_create(t % 4);
                 let pts = [
-                    ControlPoint { temp: 30, speed: 20 },
-                    ControlPoint { temp: 50, speed: 40 },
-                    ControlPoint { temp: 70, speed: 70 },
-                    ControlPoint { temp: 90, speed: 100 },
+                    ControlPoint {
+                        temp: 30,
+                        speed: 20,
+                    },
+                    ControlPoint {
+                        temp: 50,
+                        speed: 40,
+                    },
+                    ControlPoint {
+                        temp: 70,
+                        speed: 70,
+                    },
+                    ControlPoint {
+                        temp: 90,
+                        speed: 100,
+                    },
                 ];
                 let mut norm = [ControlPoint::default(); 8];
                 let mut temp = 25.0;
@@ -1696,7 +2015,10 @@ fn test_ffi_concurrent_multithreaded_all_subsystems_hammering() {
                 let th = predator_thermal_create();
                 let mut dec = NativeThermalDecision::idle();
                 while r.load(Ordering::Relaxed) {
-                    assert_eq!(predator_thermal_evaluate(th, 65.0, 60.0, 55, 15, 45, &mut dec), 0);
+                    assert_eq!(
+                        predator_thermal_evaluate(th, 65.0, 60.0, 55, 15, 45, &mut dec),
+                        0
+                    );
                     assert_eq!(predator_thermal_reset(th), 0);
                     thread::yield_now();
                 }
@@ -1729,9 +2051,19 @@ fn test_ffi_concurrent_multithreaded_all_subsystems_hammering() {
             threads.push(thread::spawn(move || {
                 let mut buf = [0u8; 64];
                 while r.load(Ordering::Relaxed) {
-                    let n = predator_procsync_executable_name(b"C:\\Games\\Cyberpunk2077\\bin\\x64\\Cyberpunk2077.exe".as_ptr(), 50, buf.as_mut_ptr(), 64);
+                    let n = predator_procsync_executable_name(
+                        b"C:\\Games\\Cyberpunk2077\\bin\\x64\\Cyberpunk2077.exe".as_ptr(),
+                        50,
+                        buf.as_mut_ptr(),
+                        64,
+                    );
                     assert!(n > 0);
-                    let s = predator_pipeguard_sanitize(b"STATUS\\r\\nOK\\0EXTRA".as_ptr(), 16, buf.as_mut_ptr(), 64);
+                    let s = predator_pipeguard_sanitize(
+                        b"STATUS\\r\\nOK\\0EXTRA".as_ptr(),
+                        16,
+                        buf.as_mut_ptr(),
+                        64,
+                    );
                     assert!(s > 0);
                     thread::yield_now();
                 }

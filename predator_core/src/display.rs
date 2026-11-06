@@ -213,6 +213,7 @@ struct NvidiaDdsApi {
     get_setting: NvCplApiGetSettingFn,
     set_setting: NvCplApiSetSettingFn,
     execute: NvCplApiExecuteFn,
+    lock: Mutex<()>,
 }
 
 unsafe impl Send for NvidiaDdsApi {}
@@ -249,8 +250,11 @@ fn init_dds_api() -> Option<NvidiaDdsApi> {
             candidates.push(format!(r"{}\System32\nvcpl.dll", sysroot));
         }
 
-        candidates.push(r"C:\Program Files\NVIDIA Corporation\NVIDIA App\NvCpl\nvcpl.dll".to_string());
-        candidates.push(r"C:\Program Files\NVIDIA Corporation\Control Panel Client\nvcpl.dll".to_string());
+        candidates
+            .push(r"C:\Program Files\NVIDIA Corporation\NVIDIA App\NvCpl\nvcpl.dll".to_string());
+        candidates.push(
+            r"C:\Program Files\NVIDIA Corporation\Control Panel Client\nvcpl.dll".to_string(),
+        );
         candidates.push(r"C:\Windows\System32\nvcpl.dll".to_string());
 
         for path in &candidates {
@@ -266,8 +270,10 @@ fn init_dds_api() -> Option<NvidiaDdsApi> {
             let p_init = GetProcAddress(handle, b"NvCplApiInit\0".as_ptr() as *const i8);
             let p_close = GetProcAddress(handle, b"NvCplApiClose\0".as_ptr() as *const i8);
             let p_get_info = GetProcAddress(handle, b"NvCplApiGetInfo\0".as_ptr() as *const i8);
-            let p_get_setting = GetProcAddress(handle, b"NvCplApiGetSetting\0".as_ptr() as *const i8);
-            let p_set_setting = GetProcAddress(handle, b"NvCplApiSetSetting\0".as_ptr() as *const i8);
+            let p_get_setting =
+                GetProcAddress(handle, b"NvCplApiGetSetting\0".as_ptr() as *const i8);
+            let p_set_setting =
+                GetProcAddress(handle, b"NvCplApiSetSetting\0".as_ptr() as *const i8);
             let p_execute = GetProcAddress(handle, b"NvCplApiExecute\0".as_ptr() as *const i8);
 
             if p_init.is_null()
@@ -296,6 +302,7 @@ fn init_dds_api() -> Option<NvidiaDdsApi> {
                 get_setting: mem::transmute(p_get_setting),
                 set_setting: mem::transmute(p_set_setting),
                 execute: mem::transmute(p_execute),
+                lock: Mutex::new(()),
             });
         }
     }
@@ -324,8 +331,7 @@ pub struct WmiActionRecord {
 }
 
 static LAST_WMI_ACTION: Mutex<Option<WmiActionRecord>> = Mutex::new(None);
-static MOCK_SUPPORTED_RATES: Mutex<Option<[i32; 16]>> = Mutex::new(None);
-static MOCK_SUPPORTED_COUNT: Mutex<usize> = Mutex::new(0);
+static MOCK_SUPPORTED_RATES: Mutex<Option<([i32; 16], usize)>> = Mutex::new(None);
 
 pub fn set_mock_mode(enabled: bool) {
     MOCK_ENABLED.store(enabled, Ordering::SeqCst);
@@ -340,23 +346,23 @@ pub fn set_mock_refresh_rate(hz: i32) {
 }
 
 pub fn set_mock_supported_refresh_rates(rates: &[i32]) {
-    let mut lock_rates = MOCK_SUPPORTED_RATES.lock().unwrap();
-    let mut lock_count = MOCK_SUPPORTED_COUNT.lock().unwrap();
+    let mut lock = MOCK_SUPPORTED_RATES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let mut arr = [0i32; 16];
     let count = rates.len().min(16);
     for i in 0..count {
         arr[i] = rates[i];
     }
-    *lock_rates = Some(arr);
-    *lock_count = count;
+    *lock = Some((arr, count));
 }
 
 pub fn get_last_wmi_action() -> Option<WmiActionRecord> {
-    *LAST_WMI_ACTION.lock().unwrap()
+    *LAST_WMI_ACTION.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 pub fn clear_last_wmi_action() {
-    *LAST_WMI_ACTION.lock().unwrap() = None;
+    *LAST_WMI_ACTION.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
 // ============================================================================
@@ -409,9 +415,10 @@ pub fn get_primary_device_name_buf(out_name: &mut [u16; 32]) -> bool {
 /// Guarantees ZERO heap allocations.
 pub fn enumerate_supported_refresh_rates(out: &mut [i32]) -> usize {
     if is_mock_mode() {
-        let lock_rates = MOCK_SUPPORTED_RATES.lock().unwrap();
-        let lock_count = *MOCK_SUPPORTED_COUNT.lock().unwrap();
-        if let Some(rates) = *lock_rates {
+        let lock = MOCK_SUPPORTED_RATES
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if let Some((rates, lock_count)) = *lock {
             let count = lock_count.min(out.len());
             for i in 0..count {
                 out[i] = rates[i];
@@ -430,15 +437,20 @@ pub fn enumerate_supported_refresh_rates(out: &mut [i32]) -> usize {
     unsafe {
         let mut dev_name = [0u16; 32];
         let has_dev = get_primary_device_name_buf(&mut dev_name);
-        let dev_ptr = if has_dev { dev_name.as_ptr() } else { std::ptr::null() };
+        let dev_ptr = if has_dev {
+            dev_name.as_ptr()
+        } else {
+            std::ptr::null()
+        };
 
         // Query current resolution to filter modes
         let mut cur_dm = DevModeW::default();
-        let (cur_w, cur_h) = if EnumDisplaySettingsW(dev_ptr, ENUM_CURRENT_SETTINGS, &mut cur_dm) != 0 {
-            (cur_dm.dm_pels_width, cur_dm.dm_pels_height)
-        } else {
-            (0, 0)
-        };
+        let (cur_w, cur_h) =
+            if EnumDisplaySettingsW(dev_ptr, ENUM_CURRENT_SETTINGS, &mut cur_dm) != 0 {
+                (cur_dm.dm_pels_width, cur_dm.dm_pels_height)
+            } else {
+                (0, 0)
+            };
 
         let mut dm = DevModeW::default();
         let mut mode_idx = 0u32;
@@ -516,7 +528,11 @@ pub fn get_current_refresh_rate() -> i32 {
     unsafe {
         let mut dev_name = [0u16; 32];
         let has_dev = get_primary_device_name_buf(&mut dev_name);
-        let dev_ptr = if has_dev { dev_name.as_ptr() } else { std::ptr::null() };
+        let dev_ptr = if has_dev {
+            dev_name.as_ptr()
+        } else {
+            std::ptr::null()
+        };
 
         let mut dm = DevModeW::default();
         if EnumDisplaySettingsW(dev_ptr, ENUM_CURRENT_SETTINGS, &mut dm) != 0 {
@@ -543,7 +559,11 @@ pub fn set_refresh_rate(hz: i32) -> Result<(), &'static str> {
     unsafe {
         let mut dev_name = [0u16; 32];
         let has_dev = get_primary_device_name_buf(&mut dev_name);
-        let dev_ptr = if has_dev { dev_name.as_ptr() } else { std::ptr::null() };
+        let dev_ptr = if has_dev {
+            dev_name.as_ptr()
+        } else {
+            std::ptr::null()
+        };
 
         let mut current_dm = DevModeW::default();
         if EnumDisplaySettingsW(dev_ptr, ENUM_CURRENT_SETTINGS, &mut current_dm) == 0 {
@@ -697,6 +717,7 @@ pub fn get_dds_status() -> DdsStatus {
     }
 
     if let Some(api) = get_dds_api() {
+        let _api_lock = api.lock.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             let mut info: NativeDdsStatusInfo = mem::zeroed();
             let mut size = mem::size_of::<NativeDdsStatusInfo>();
@@ -758,6 +779,7 @@ pub fn set_dds_mode(mode: i32) -> Result<(), &'static str> {
 
     let mut dds_succeeded = false;
     if let Some(api) = get_dds_api() {
+        let _api_lock = api.lock.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             let is_auto = mode == 1;
             let mux_state: u32 = match mode {
@@ -816,7 +838,7 @@ pub fn dispatch_acer_wmi_action(function: u8, value: u64) -> Result<u64, &'stati
 
     // Record action for verification and tests
     {
-        let mut lock = LAST_WMI_ACTION.lock().unwrap();
+        let mut lock = LAST_WMI_ACTION.lock().unwrap_or_else(|e| e.into_inner());
         *lock = Some(WmiActionRecord {
             function,
             value,
@@ -969,7 +991,16 @@ mod wmi_com {
         loc_release(locator);
 
         if conn_hr == 0 && !services.is_null() {
-            let _ = CoSetProxyBlanket(services, 10, 0, std::ptr::null_mut(), 0, 3, std::ptr::null_mut(), 0);
+            let _ = CoSetProxyBlanket(
+                services,
+                10,
+                0,
+                std::ptr::null_mut(),
+                0,
+                3,
+                std::ptr::null_mut(),
+                0,
+            );
             let svc_vtbl = *(services as *mut *mut usize);
             let svc_release: ReleaseFn = std::mem::transmute(*svc_vtbl.add(2));
             svc_release(services);
@@ -991,7 +1022,7 @@ mod tests {
 
     #[test]
     fn test_mock_display_lifecycle() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         set_mock_mode(true);
 
         // Test refresh rates enumeration
@@ -1101,7 +1132,7 @@ mod tests {
 
     #[test]
     fn test_wmi_packet_encoding() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         clear_last_wmi_action();
         set_mock_mode(true);
 

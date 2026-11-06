@@ -161,6 +161,11 @@ namespace PredatorControlApp
                 }
 
                 // Native Rust Acceleration path
+                if (_nativeHandle == IntPtr.Zero && PredatorNativeCore.IsNativeCoreAvailable)
+                {
+                    InitNative();
+                }
+
                 if (PredatorNativeCore.IsNativeCoreAvailable && _nativeHandle != IntPtr.Zero && safePoints != null && safePoints.Length > 0)
                 {
                     var nativePts = new NativeControlPoint[safePoints.Length];

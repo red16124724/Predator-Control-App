@@ -54,8 +54,8 @@ namespace PredatorControlApp
                         }
                         SaveUnderLock();
                     }
-                SyncProfilesToNative();
                 }
+                SyncProfilesToNative();
                 if (changed)
                 {
                     if (snapToExit != null) GameExited?.Invoke(snapToExit);
@@ -241,6 +241,7 @@ namespace PredatorControlApp
                     _profiles.Add(profile.Clone());
                 SaveUnderLock();
             }
+            SyncProfilesToNative();
         }
 
         public void SetPreGameSnapshot(DashboardSnapshot snapshot)
@@ -451,12 +452,20 @@ namespace PredatorControlApp
             {
                 while (PredatorNativeCore.GameProfilePollEvent(out var ev))
                 {
+                    lock (_lock)
+                    {
+                        if (_disposed || !_enabled) return;
+                    }
                     if (ev.EventType == 1) // Started
                     {
                         var prof = profilesSnapshot.FirstOrDefault(p => p.ProfileId == ev.ProfileId);
                         if (prof != null)
                         {
-                            lock (_lock) { _activeExe = prof.ExecutableName; }
+                            lock (_lock)
+                            {
+                                if (_disposed || !_enabled) return;
+                                _activeExe = prof.ExecutableName;
+                            }
                             GameDetected?.Invoke(prof.Clone());
                             return;
                         }
@@ -748,6 +757,7 @@ namespace PredatorControlApp
                         || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0
                         || BlockedExecutables.Contains(name)) continue;
                     p.ExecutableName = name;
+                    p.DisplayName ??= "";
                     SanitizeProfileValues(p);
                     accepted.Add(p);
                 }
@@ -774,9 +784,18 @@ namespace PredatorControlApp
                 if (_disposed) return;
                 _disposed = true;
                 _enabled = false;
-                                GameDetected = null;
+                GameDetected = null;
                 GameExited = null;
                 EnabledChanged = null;
+            }
+            if (PredatorNativeCore.IsNativeCoreAvailable)
+            {
+                try
+                {
+                    PredatorNativeCore.GameProfileClear();
+                    PredatorNativeCore.GameProfileShutdown();
+                }
+                catch { }
             }
             try
             {

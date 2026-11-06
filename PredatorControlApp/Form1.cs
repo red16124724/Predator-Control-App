@@ -3594,6 +3594,8 @@ namespace PredatorControlApp
 
         {
 
+            try { _trayMenu?.Dispose(); } catch { }
+
             _trayMenu = new ContextMenuStrip();
 
 
@@ -11384,9 +11386,11 @@ namespace PredatorControlApp
 
 
 
-        private void ApplyPowerMode(byte mode, PredatorButton btn)
+        private void ApplyPowerMode(byte mode, PredatorButton? btn)
 
         {
+
+            btn ??= PowerByteToBtn(mode);
 
             HighlightBtn(btn, ref _activePowerBtn);
 
@@ -12042,9 +12046,11 @@ namespace PredatorControlApp
 
 
 
-        private void ApplyFanMode(byte mode, PredatorButton btn)
+        private void ApplyFanMode(byte mode, PredatorButton? btn)
 
         {
+
+            btn ??= FanByteToBtn(mode);
 
             HighlightBtn(btn, ref _activeFanBtn);
 
@@ -17375,13 +17381,13 @@ namespace PredatorControlApp
 
 
 
-        private void HighlightBtn(PredatorButton btn, ref PredatorButton? tracker)
+        private void HighlightBtn(PredatorButton? btn, ref PredatorButton? tracker)
 
         {
 
-            if (tracker != null) tracker.IsActive = false;
+            if (tracker != null && !tracker.IsDisposed) tracker.IsActive = false;
 
-            btn.IsActive = true;
+            if (btn != null && !btn.IsDisposed) btn.IsActive = true;
 
             tracker = btn;
 

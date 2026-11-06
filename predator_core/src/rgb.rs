@@ -64,7 +64,11 @@ fn scale_byte(c: u8, scale: f64) -> u8 {
 
 #[inline]
 fn truncate_byte(value: f64) -> u8 {
-    if !value.is_finite() { 0 } else { value.clamp(0.0, 255.0) as u8 }
+    if !value.is_finite() {
+        0
+    } else {
+        value.clamp(0.0, 255.0) as u8
+    }
 }
 
 /// Exact port of `LightingEffectsManager.ColorFromHsv`.
@@ -209,7 +213,14 @@ pub struct RgbAnimator {
 }
 
 impl RgbAnimator {
-    pub fn new(effect_index: i32, base: Rgb8, brightness: u8, speed: u8, direction: u8, zone_count: usize) -> Self {
+    pub fn new(
+        effect_index: i32,
+        base: Rgb8,
+        brightness: u8,
+        speed: u8,
+        direction: u8,
+        zone_count: usize,
+    ) -> Self {
         Self {
             effect_index: effect_index.clamp(effect::FIRST_SOFTWARE, effect::LAST),
             base,
@@ -235,7 +246,13 @@ impl RgbAnimator {
 
     /// Render the next frame into `out` and advance the cursor.
     pub fn next_frame(&mut self, out: &mut [Rgb8]) -> usize {
-        let written = render_frame(self.effect_index, self.step, self.base, self.brightness, out);
+        let written = render_frame(
+            self.effect_index,
+            self.step,
+            self.base,
+            self.brightness,
+            out,
+        );
         self.step = self.step.wrapping_add(1);
         written
     }
@@ -255,7 +272,11 @@ impl RgbAnimator {
 /// and written in a single straight-line loop so the compiler emits packed
 /// `paddb`-style vector operations.
 pub fn blend_zones(current: &mut [Rgb8], target: &[Rgb8], t: f32) {
-    let t = if t.is_finite() { t.clamp(0.0, 1.0) } else { 0.0 };
+    let t = if t.is_finite() {
+        t.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
     let inv = 1.0 - t;
     let count = current.len().min(target.len());
     for i in 0..count {
@@ -287,12 +308,23 @@ mod tests {
 
     #[test]
     fn hsv_conversions_truncate_like_managed_renderer() {
-        assert_eq!(hsv_to_rgb(30.0, 1.0, 1.0), Rgb8 { r: 255, g: 127, b: 0 });
+        assert_eq!(
+            hsv_to_rgb(30.0, 1.0, 1.0),
+            Rgb8 {
+                r: 255,
+                g: 127,
+                b: 0
+            }
+        );
     }
 
     #[test]
     fn pulse_and_shift_truncate_like_managed_renderer() {
-        let base = Rgb8 { r: 100, g: 255, b: 0 };
+        let base = Rgb8 {
+            r: 100,
+            g: 255,
+            b: 0,
+        };
         let pulse = frame(effect::HEARTBEAT, 1, base, 100, 4);
         assert_eq!(pulse[0].r, 14);
         let shift = frame(8, 0, base, 100, 4);
@@ -307,7 +339,11 @@ mod tests {
 
     #[test]
     fn travelling_effect_lights_exactly_one_zone() {
-        let base = Rgb8 { r: 200, g: 10, b: 30 };
+        let base = Rgb8 {
+            r: 200,
+            g: 10,
+            b: 30,
+        };
         // step 0 -> zone 0 lit
         let f0 = frame(effect::SNAKE, 0, base, 100, 4);
         assert_eq!(f0[0], base);
@@ -324,27 +360,58 @@ mod tests {
         assert_eq!(f5.iter().filter(|color| **color != Rgb8::BLACK).count(), 1);
         for (step, expected) in [0, 1, 2, 3, 3, 2, 1, 0].into_iter().enumerate() {
             let colors = frame(effect::SNAKE, step as u64, base, 100, 4);
-            assert_eq!(colors.iter().position(|color| *color != Rgb8::BLACK), Some(expected));
-            assert_eq!(colors.iter().filter(|color| **color != Rgb8::BLACK).count(), 1);
+            assert_eq!(
+                colors.iter().position(|color| *color != Rgb8::BLACK),
+                Some(expected)
+            );
+            assert_eq!(
+                colors.iter().filter(|color| **color != Rgb8::BLACK).count(),
+                1
+            );
         }
     }
 
     #[test]
     fn travelling_brightness_scales_base_color() {
-        let base = Rgb8 { r: 200, g: 100, b: 50 };
+        let base = Rgb8 {
+            r: 200,
+            g: 100,
+            b: 50,
+        };
         let f = frame(effect::PING_PONG, 0, base, 50, 4);
-        assert_eq!(f[0], Rgb8 { r: 100, g: 50, b: 25 });
+        assert_eq!(
+            f[0],
+            Rgb8 {
+                r: 100,
+                g: 50,
+                b: 25
+            }
+        );
     }
 
     #[test]
     fn hue_cycle_matches_csharp_hsv_mapping() {
         // step 0, zone 1 (i=0) -> hue 60 -> yellow at full value
         let f = frame(effect::RAINBOW, 0, Rgb8::BLACK, 100, 4);
-        assert_eq!(f[0], Rgb8 { r: 255, g: 255, b: 0 });
+        assert_eq!(
+            f[0],
+            Rgb8 {
+                r: 255,
+                g: 255,
+                b: 0
+            }
+        );
         // zone 2 (i=1) -> hue 120 -> green
         assert_eq!(f[1], Rgb8 { r: 0, g: 255, b: 0 });
         // zone 3 (i=2) -> hue 180 -> cyan
-        assert_eq!(f[2], Rgb8 { r: 0, g: 255, b: 255 });
+        assert_eq!(
+            f[2],
+            Rgb8 {
+                r: 0,
+                g: 255,
+                b: 255
+            }
+        );
         // zone 4 (i=3) -> hue 240 -> blue
         assert_eq!(f[3], Rgb8 { r: 0, g: 0, b: 255 });
     }
@@ -353,12 +420,23 @@ mod tests {
     fn hue_cycle_uses_brightness_as_value() {
         let f = frame(effect::DISCO, 0, Rgb8::BLACK, 40, 1);
         // hue 60 at value 0.4 -> (102, 102, 0)
-        assert_eq!(f[0], Rgb8 { r: 102, g: 102, b: 0 });
+        assert_eq!(
+            f[0],
+            Rgb8 {
+                r: 102,
+                g: 102,
+                b: 0
+            }
+        );
     }
 
     #[test]
     fn pulse_is_zero_at_step_zero_and_peaks_later() {
-        let base = Rgb8 { r: 255, g: 255, b: 255 };
+        let base = Rgb8 {
+            r: 255,
+            g: 255,
+            b: 255,
+        };
         let f0 = frame(effect::HEARTBEAT, 0, base, 100, 4);
         assert_eq!(f0, vec![Rgb8::BLACK; 4]);
 
@@ -370,17 +448,31 @@ mod tests {
 
     #[test]
     fn shift_effect_swaps_primary_and_complementary() {
-        let base = Rgb8 { r: 200, g: 200, b: 200 };
+        let base = Rgb8 {
+            r: 200,
+            g: 200,
+            b: 200,
+        };
         // step 0 -> phase 0.5 -> both halves at ~half scale
         let f0 = frame(8, 0, base, 100, 2);
-        assert_eq!(f0[0], Rgb8 { r: 100, g: 100, b: 100 });
+        assert_eq!(
+            f0[0],
+            Rgb8 {
+                r: 100,
+                g: 100,
+                b: 100
+            }
+        );
         assert_eq!(f0[0], f0[1]);
     }
 
     #[test]
     fn zero_zones_is_safe() {
         let mut out: [Rgb8; 0] = [];
-        assert_eq!(render_frame(effect::RAINBOW, 0, Rgb8::BLACK, 100, &mut out), 0);
+        assert_eq!(
+            render_frame(effect::RAINBOW, 0, Rgb8::BLACK, 100, &mut out),
+            0
+        );
     }
 
     #[test]
@@ -406,8 +498,16 @@ mod tests {
 
     #[test]
     fn blend_endpoints_are_exact() {
-        let mut cur = vec![Rgb8 { r: 10, g: 20, b: 30 }];
-        let target = vec![Rgb8 { r: 200, g: 100, b: 50 }];
+        let mut cur = vec![Rgb8 {
+            r: 10,
+            g: 20,
+            b: 30,
+        }];
+        let target = vec![Rgb8 {
+            r: 200,
+            g: 100,
+            b: 50,
+        }];
         let original = cur.clone();
         blend_zones(&mut cur, &target, 0.0);
         assert_eq!(cur, original);
@@ -415,7 +515,14 @@ mod tests {
         assert_eq!(cur, target);
         let mut mid = vec![Rgb8 { r: 0, g: 0, b: 0 }];
         blend_zones(&mut mid, &target, 0.5);
-        assert_eq!(mid[0], Rgb8 { r: 100, g: 50, b: 25 });
+        assert_eq!(
+            mid[0],
+            Rgb8 {
+                r: 100,
+                g: 50,
+                b: 25
+            }
+        );
     }
 
     #[test]

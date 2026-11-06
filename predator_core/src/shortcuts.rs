@@ -86,16 +86,7 @@ const RESERVED_CTRL_KEYS: &[u32] = &[
 pub fn is_modifier_key(vk: u32) -> bool {
     matches!(
         vk,
-        0x10 | 0x11
-            | 0x12
-            | 0xA0
-            | 0xA1
-            | 0xA2
-            | 0xA3
-            | 0xA4
-            | 0xA5
-            | 0x5B
-            | 0x5C
+        0x10 | 0x11 | 0x12 | 0xA0 | 0xA1 | 0xA2 | 0xA3 | 0xA4 | 0xA5 | 0x5B | 0x5C
     )
 }
 
@@ -234,21 +225,39 @@ mod tests {
 
     #[test]
     fn rejects_system_keys() {
-        assert_eq!(validate(0x1B, true, false, false, false), E_RESERVED_SYSTEM_KEY);
-        assert_eq!(validate(0x09, false, true, false, false), E_RESERVED_SYSTEM_KEY);
-        assert_eq!(validate(0x90, true, false, false, false), E_RESERVED_SYSTEM_KEY);
+        assert_eq!(
+            validate(0x1B, true, false, false, false),
+            E_RESERVED_SYSTEM_KEY
+        );
+        assert_eq!(
+            validate(0x09, false, true, false, false),
+            E_RESERVED_SYSTEM_KEY
+        );
+        assert_eq!(
+            validate(0x90, true, false, false, false),
+            E_RESERVED_SYSTEM_KEY
+        );
     }
 
     #[test]
     fn rejects_os_owned_chords() {
         assert_eq!(validate(VK_SPACE, false, true, false, false), E_ALT_SPACE);
-        assert_eq!(validate(VK_DELETE, true, true, false, false), E_CTRL_ALT_DEL);
+        assert_eq!(
+            validate(VK_DELETE, true, true, false, false),
+            E_CTRL_ALT_DEL
+        );
         assert_eq!(validate(VK_RETURN, false, true, false, false), E_ALT_ENTER);
         // Escape and Tab are rejected earlier as reserved system keys, so the
         // Ctrl+Shift+Esc and Alt+Tab branches below can never be reached. The
         // ordering is preserved to stay byte-identical with the managed rules.
-        assert_eq!(validate(VK_ESCAPE, true, false, true, false), E_RESERVED_SYSTEM_KEY);
-        assert_eq!(validate(VK_TAB, false, true, false, false), E_RESERVED_SYSTEM_KEY);
+        assert_eq!(
+            validate(VK_ESCAPE, true, false, true, false),
+            E_RESERVED_SYSTEM_KEY
+        );
+        assert_eq!(
+            validate(VK_TAB, false, true, false, false),
+            E_RESERVED_SYSTEM_KEY
+        );
         assert_eq!(E_CTRL_SHIFT_ESC, 10);
         assert_eq!(E_ALT_TAB_OR_ESC, 11);
     }
@@ -265,12 +274,19 @@ mod tests {
     #[test]
     fn modifier_bits_inside_key_are_folded() {
         // Ctrl+Alt+E encoded in the Keys value itself.
-        assert_eq!(validate(0x45 | MOD_CONTROL | MOD_ALT, false, false, false, false), OK);
+        assert_eq!(
+            validate(0x45 | MOD_CONTROL | MOD_ALT, false, false, false, false),
+            OK
+        );
     }
 
     #[test]
     fn detects_duplicate_combinations() {
-        assert!(same_combination(0x45, true, true, false, false, 0x45, true, true, false, false));
-        assert!(!same_combination(0x45, true, true, false, false, 0x45, true, false, false, false));
+        assert!(same_combination(
+            0x45, true, true, false, false, 0x45, true, true, false, false
+        ));
+        assert!(!same_combination(
+            0x45, true, true, false, false, 0x45, true, false, false, false
+        ));
     }
 }

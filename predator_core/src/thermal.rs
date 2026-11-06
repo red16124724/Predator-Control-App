@@ -242,7 +242,9 @@ impl ThermalLimits {
 
         let clamped_tj = tj_max.clamp(30.0, 200.0);
         let throttle = (clamped_tj - d_start).clamp(0.0, 198.0);
-        let ceiling = (clamped_tj - d_ceil).max(throttle + 1.0).clamp(throttle + 1.0, 199.0);
+        let ceiling = (clamped_tj - d_ceil)
+            .max(throttle + 1.0)
+            .clamp(throttle + 1.0, 199.0);
         let critical = clamped_tj.max(ceiling).clamp(ceiling, 200.0);
         Self::new(throttle, ceiling, critical)
     }
@@ -260,7 +262,9 @@ impl ThermalLimits {
 
         let clamped_target = gpu_target.clamp(30.0, 197.0);
         let throttle = (clamped_target - d_start).clamp(0.0, 198.0);
-        let ceiling = clamped_target.max(throttle + 1.0).clamp(throttle + 1.0, 199.0);
+        let ceiling = clamped_target
+            .max(throttle + 1.0)
+            .clamp(throttle + 1.0, 199.0);
         let critical = (clamped_target + 3.0).max(ceiling).clamp(ceiling, 200.0);
         Self::new(throttle, ceiling, critical)
     }
@@ -307,8 +311,10 @@ impl Default for ThermalSafetyProfile {
 impl ThermalSafetyProfile {
     /// Normalize profile parameters ensuring safety invariants.
     pub fn normalize(mut self) -> Self {
-        let (cw, cc, cx) = Self::normalize_triplet(self.cpu_warn, self.cpu_ceiling, self.cpu_critical, 100.0);
-        let (gw, gc, gx) = Self::normalize_triplet(self.gpu_warn, self.gpu_ceiling, self.gpu_critical, 95.0);
+        let (cw, cc, cx) =
+            Self::normalize_triplet(self.cpu_warn, self.cpu_ceiling, self.cpu_critical, 100.0);
+        let (gw, gc, gx) =
+            Self::normalize_triplet(self.gpu_warn, self.gpu_ceiling, self.gpu_critical, 95.0);
 
         self.cpu_warn = cw;
         self.cpu_ceiling = cc;
@@ -316,28 +322,45 @@ impl ThermalSafetyProfile {
         self.gpu_warn = gw;
         self.gpu_ceiling = gc;
         self.gpu_critical = gx;
-        self.hysteresis = if self.hysteresis.is_finite() { self.hysteresis } else { 3.0 }.clamp(0.0, 15.0);
+        self.hysteresis = if self.hysteresis.is_finite() {
+            self.hysteresis
+        } else {
+            3.0
+        }
+        .clamp(0.0, 15.0);
         self.max_fan_floor = self.max_fan_floor.clamp(40, 100);
         self.cpu_power_cap_watts = self.cpu_power_cap_watts.clamp(5, 250);
         self.min_power_cap_watts = self.min_power_cap_watts.clamp(5, 250);
-        self.ema_alpha = if self.ema_alpha.is_finite() { self.ema_alpha } else { DEFAULT_EMA_ALPHA }.clamp(0.01, 1.0);
+        self.ema_alpha = if self.ema_alpha.is_finite() {
+            self.ema_alpha
+        } else {
+            DEFAULT_EMA_ALPHA
+        }
+        .clamp(0.01, 1.0);
         self
     }
 
     fn normalize_triplet(warn: f64, ceiling: f64, critical: f64, hard_max: f64) -> (f64, f64, f64) {
         let w = (if warn.is_finite() { warn } else { 75.0 }).clamp(30.0, hard_max - 2.0);
         let c = (if ceiling.is_finite() { ceiling } else { 95.0 }).clamp(w + 1.0, hard_max);
-        let x = (if critical.is_finite() { critical } else { hard_max }).clamp(c, hard_max.max(c));
+        let x = (if critical.is_finite() {
+            critical
+        } else {
+            hard_max
+        })
+        .clamp(c, hard_max.max(c));
         (w, c, x)
     }
 
     pub fn to_cpu_limits(&self) -> ThermalLimits {
-        let (warn, ceiling, critical) = Self::normalize_triplet(self.cpu_warn, self.cpu_ceiling, self.cpu_critical, 100.0);
+        let (warn, ceiling, critical) =
+            Self::normalize_triplet(self.cpu_warn, self.cpu_ceiling, self.cpu_critical, 100.0);
         ThermalLimits::new(warn, ceiling, critical)
     }
 
     pub fn to_gpu_limits(&self) -> ThermalLimits {
-        let (warn, ceiling, critical) = Self::normalize_triplet(self.gpu_warn, self.gpu_ceiling, self.gpu_critical, 95.0);
+        let (warn, ceiling, critical) =
+            Self::normalize_triplet(self.gpu_warn, self.gpu_ceiling, self.gpu_critical, 95.0);
         ThermalLimits::new(warn, ceiling, critical)
     }
 }
@@ -419,7 +442,9 @@ impl ThermalCoordinator {
 
     /// Configure EMA alpha for both CPU and GPU channels.
     pub fn set_ema_alpha(&mut self, alpha: f64) {
-        if !alpha.is_finite() || alpha <= 0.0 { return; }
+        if !alpha.is_finite() || alpha <= 0.0 {
+            return;
+        }
         self.profile.ema_alpha = alpha.clamp(0.01, 1.0);
         self.cpu_ema.set_alpha(alpha);
         self.gpu_ema.set_alpha(alpha);
@@ -595,8 +620,16 @@ impl ThermalCoordinator {
                 cpu_fan_floor: 0,
                 gpu_fan_floor: 0,
                 cpu_power_cap_watts: -1,
-                cpu_temp: if cpu_raw.is_finite() && cpu_raw > 0.0 { cpu_raw } else { 0.0 },
-                gpu_temp: if gpu_raw.is_finite() && gpu_raw > 0.0 { gpu_raw } else { 0.0 },
+                cpu_temp: if cpu_raw.is_finite() && cpu_raw > 0.0 {
+                    cpu_raw
+                } else {
+                    0.0
+                },
+                gpu_temp: if gpu_raw.is_finite() && gpu_raw > 0.0 {
+                    gpu_raw
+                } else {
+                    0.0
+                },
             };
         }
 
@@ -730,7 +763,11 @@ impl AntiThrottleEngine {
     pub fn new(hold_duration_ms: i64) -> Self {
         Self {
             tripwire_locked_until_ms: 0,
-            hold_duration_ms: if hold_duration_ms > 0 { hold_duration_ms } else { DEFAULT_TRIPWIRE_HOLD_MS },
+            hold_duration_ms: if hold_duration_ms > 0 {
+                hold_duration_ms
+            } else {
+                DEFAULT_TRIPWIRE_HOLD_MS
+            },
         }
     }
 
@@ -739,7 +776,9 @@ impl AntiThrottleEngine {
     }
 
     pub fn is_tripwire_locked(&self, now_ms: i64, temp: f64, throttle_thresh: f64) -> bool {
-        self.tripwire_locked_until_ms > 0 && now_ms < self.tripwire_locked_until_ms && temp > throttle_thresh
+        self.tripwire_locked_until_ms > 0
+            && now_ms < self.tripwire_locked_until_ms
+            && temp > throttle_thresh
     }
 
     /// Evaluates transient thermal conditions, updates the tripwire latch, and calculates the PL1 power cap.
@@ -756,7 +795,8 @@ impl AntiThrottleEngine {
     ) -> (Option<i32>, bool) {
         // Sensor blackout or non-finite inputs
         if !temp.is_finite() || temp <= 0.0 {
-            let was_locked = self.tripwire_locked_until_ms > 0 && now_ms < self.tripwire_locked_until_ms;
+            let was_locked =
+                self.tripwire_locked_until_ms > 0 && now_ms < self.tripwire_locked_until_ms;
             return (None, was_locked);
         }
 
@@ -775,7 +815,11 @@ impl AntiThrottleEngine {
         let target = safe_target.max(5);
         let min_power = min_w.max(5);
         let effective_min = min_power.min(target);
-        let tdp = if base_tdp > 0 { base_tdp } else { effective_min.max(target) };
+        let tdp = if base_tdp > 0 {
+            base_tdp
+        } else {
+            effective_min.max(target)
+        };
 
         // Critical hit or tripwire locked: drop immediately to effective minimum
         if temp >= critical_thresh || is_locked {
@@ -820,11 +864,14 @@ pub unsafe extern "C" fn predator_antithrottle_evaluate(
     out_tripwire_locked: *mut i32,
 ) -> i32 {
     crate::safe_ffi(-1, || {
-        if !crate::is_valid_mut_ptr(out_power_cap) || !crate::is_valid_mut_ptr(out_tripwire_locked) {
+        if !crate::is_valid_mut_ptr(out_power_cap) || !crate::is_valid_mut_ptr(out_tripwire_locked)
+        {
             return -1;
         }
 
-        let mut engine = GLOBAL_ANTITHROTTLE.lock().unwrap_or_else(|e| e.into_inner());
+        let mut engine = GLOBAL_ANTITHROTTLE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if hold_ms < 0 {
             engine.reset_tripwire();
             engine.hold_duration_ms = hold_ms.abs();
@@ -859,12 +906,25 @@ mod tests {
     #[test]
     fn non_finite_profile_values_use_managed_defaults() {
         let profile = ThermalSafetyProfile {
-            cpu_warn: f64::NAN, cpu_ceiling: f64::INFINITY, cpu_critical: f64::NAN,
-            gpu_warn: f64::NEG_INFINITY, gpu_ceiling: f64::NAN, gpu_critical: f64::INFINITY,
-            hysteresis: f64::NAN, ema_alpha: f64::NAN, ..ThermalSafetyProfile::default()
-        }.normalize();
-        assert_eq!((profile.cpu_warn, profile.cpu_ceiling, profile.cpu_critical), (75.0, 95.0, 100.0));
-        assert_eq!((profile.gpu_warn, profile.gpu_ceiling, profile.gpu_critical), (75.0, 95.0, 95.0));
+            cpu_warn: f64::NAN,
+            cpu_ceiling: f64::INFINITY,
+            cpu_critical: f64::NAN,
+            gpu_warn: f64::NEG_INFINITY,
+            gpu_ceiling: f64::NAN,
+            gpu_critical: f64::INFINITY,
+            hysteresis: f64::NAN,
+            ema_alpha: f64::NAN,
+            ..ThermalSafetyProfile::default()
+        }
+        .normalize();
+        assert_eq!(
+            (profile.cpu_warn, profile.cpu_ceiling, profile.cpu_critical),
+            (75.0, 95.0, 100.0)
+        );
+        assert_eq!(
+            (profile.gpu_warn, profile.gpu_ceiling, profile.gpu_critical),
+            (75.0, 95.0, 95.0)
+        );
         assert_eq!(profile.hysteresis, 3.0);
         assert_eq!(profile.ema_alpha, DEFAULT_EMA_ALPHA);
     }
@@ -991,19 +1051,34 @@ mod tests {
         };
 
         // Below warn: no cap
-        assert_eq!(ThermalCoordinator::compute_power_cap(70.0, &profile, 65, 15, 45), -1);
+        assert_eq!(
+            ThermalCoordinator::compute_power_cap(70.0, &profile, 65, 15, 45),
+            -1
+        );
 
         // At warn (75°C): target watts 65
-        assert_eq!(ThermalCoordinator::compute_power_cap(75.0, &profile, 65, 15, 45), 65);
+        assert_eq!(
+            ThermalCoordinator::compute_power_cap(75.0, &profile, 65, 15, 45),
+            65
+        );
 
         // Midpoint (85°C): halfway between target 65W and ceiling cap 45W = 55W
-        assert_eq!(ThermalCoordinator::compute_power_cap(85.0, &profile, 65, 15, 45), 55);
+        assert_eq!(
+            ThermalCoordinator::compute_power_cap(85.0, &profile, 65, 15, 45),
+            55
+        );
 
         // At ceiling (95°C): ceiling cap 45W
-        assert_eq!(ThermalCoordinator::compute_power_cap(95.0, &profile, 65, 15, 45), 45);
+        assert_eq!(
+            ThermalCoordinator::compute_power_cap(95.0, &profile, 65, 15, 45),
+            45
+        );
 
         // At critical (100°C): floor 15W
-        assert_eq!(ThermalCoordinator::compute_power_cap(100.0, &profile, 65, 15, 45), 15);
+        assert_eq!(
+            ThermalCoordinator::compute_power_cap(100.0, &profile, 65, 15, 45),
+            15
+        );
     }
 
     #[test]
@@ -1094,7 +1169,11 @@ mod tests {
 
         // 5. During hold duration (now = 2000ms < 4300ms, temp = 80 C > 75 C): locked remains active!
         let (cap, locked) = engine.evaluate(80.0, 2000, 75.0, 95.0, 100.0, 65, 45, 15);
-        assert_eq!(cap, Some(15), "Tripwire lockout must enforce minimum power cap");
+        assert_eq!(
+            cap,
+            Some(15),
+            "Tripwire lockout must enforce minimum power cap"
+        );
         assert!(locked);
 
         // 6. After hold duration expired (now = 4500ms > 4300ms, temp = 80 C): lockout lifts!
@@ -1112,9 +1191,8 @@ mod tests {
     #[test]
     fn test_zero_temperature_clears_latch() {
         let mut latched = true;
-        let floor = ThermalCoordinator::compute_floor(
-            0.0, 75.0, 95.0, 100.0, 100, true, &mut latched, 3.0,
-        );
+        let floor =
+            ThermalCoordinator::compute_floor(0.0, 75.0, 95.0, 100.0, 100, true, &mut latched, 3.0);
         assert_eq!(floor, 0);
         assert!(!latched);
     }
