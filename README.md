@@ -5,14 +5,14 @@
 
 <div align="center">
 
-[![Release v1.5.5](https://img.shields.io/badge/Release-v1.5.5%20Verified-blue?style=for-the-badge&logo=github)](https://github.com/red16124724/Predator-Control-App/releases/tag/v1.5.5)
+[![Release v1.5.8](https://img.shields.io/badge/Release-v1.5.8%20Verified-blue?style=for-the-badge&logo=github)](https://github.com/red16124724/Predator-Control-App/releases/tag/v1.5.8)
 [![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/red16124724/Predator-Control-App/actions)
 [![Tech Stack](https://img.shields.io/badge/Stack-.NET%2010%20%7C%20Rust%20Core-orange?style=for-the-badge&logo=dotnet)](https://github.com/red16124724/Predator-Control-App)
 [![Tests Passing](https://img.shields.io/badge/Tests-2%2C460%20Passing%20(100%25)-success?style=for-the-badge&logo=checkmarx)](https://github.com/red16124724/Predator-Control-App)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-informational?style=for-the-badge&logo=windows)](https://github.com/red16124724/Predator-Control-App)
 
-[Download v1.5.5 Portable](https://github.com/red16124724/Predator-Control-App/releases/latest) • [Supported Hardware](#-supported-hardware-matrix) • [Architecture](#-visual-architecture) • [CLI & Shortcuts](#-keyboard-shortcuts--command-line-arguments) • [Quick Start](#-quick-start)
+[Download v1.5.8 Portable](https://github.com/red16124724/Predator-Control-App/releases/latest) • [Supported Hardware](#-supported-hardware-matrix) • [Architecture](#-visual-architecture) • [CLI & Shortcuts](#-keyboard-shortcuts--command-line-arguments) • [Quick Start](#-quick-start)
 
 </div>
 
@@ -25,7 +25,7 @@ Stock OEM utilities (**PredatorSense** & **NitroSense**) consume up to **500 MB+
 **Predator Control App** replaces OEM bloat with a standalone single binary:
 - **Instant Response (< 1ms)**: Zero Electron, zero webviews — pure native WinForms on .NET 10 with a high-throughput Rust kernel interop core (`predator_core.dll`).
 - **Zero Background Drain**: Minimal memory footprint (~18-28 MB private working set) and near-zero idle CPU usage (< 0.1%).
-- **Dedicated Embedded Display, BIOS & Game Sync Menus**: Dedicated full-sized pages for Display Settings (NVIDIA Advanced Optimus DDS, 60Hz/MaxHz modes, LCD Overdrive), BIOS & Firmware Settings (dynamic hardware architecture badge querying Win32_BIOS/WMI with zero hardcoding, two-tier safety gates), and Game Sync (event-driven foreground game profiles).
+- **Dedicated Embedded Display & Game Sync Menus**: Dedicated full-sized pages for Display Settings (Hardware BIOS MUX Switch, 60Hz/MaxHz modes, LCD Overdrive) and Game Sync (event-driven foreground game profiles).
 - **Helios Neo & AI Lighting Stability**: Eliminates periodic RGB keyboard blinking on Helios Neo 16/16s/18 and 16 AI series by suppressing redundant EC/WMI reassertions.
 - **Deep Ring-0 Hardware Access**: Direct Embedded Controller (EC) fan registers, ACPI PPCC table parsing, and Intel MCHBAR MMIO / MSR `0x610` power limit management via signed PawnIO driver.
 
@@ -68,8 +68,8 @@ Stock OEM utilities (**PredatorSense** & **NitroSense**) consume up to **500 MB+
 | **❄️ Intelligent Fan Curves & Hysteresis** | Smooth temperature-to-RPM curves, dual/triple fan support, and Acer CoolBoost hardware ceiling toggle. | Multi-point curve follower with EMA spike-damping to eliminate fan revving during transient CPU spikes. |
 | **🔋 CPU PL1/PL2 Power Limits** | Dynamic sustained (PL1) and burst (PL2) wattage tuning with BIOS default rollback protection. | Signed PawnIO Ring-0 MMIO/MSR driver interop with directional split-write hazard protection and MCHBAR sync. |
 | **🩺 Battery Calibration Wizard** | Integrated battery health diagnostics, wear percentage tracking, and automated recalibration. | Hardware fuel-gauge recalibration workflow with automated wake-lock protection and real-time EMA discharge ETA calculation. |
-| **🖥️ Display & GPU Switching (DDS)** | Dedicated Display Settings menu: NVIDIA Advanced Optimus mode switching (Auto, Integrated, Dedicated), 60 Hz and Max Hz modes, and LCD Overdrive response acceleration. | Win32 display enumeration, NvAPI DDS interop, and dynamic refresh switching. |
-| **⚙️ Acer BIOS & Firmware GUI** | Dedicated BIOS Settings menu with live queried hardware architecture badge, two-tier safety gates, categorized settings, and defaults restoration. | Dynamic querying of Win32_BIOS, Win32_ComputerSystem, Win32_Processor with zero hardcoded values, ACPI-WMI, and direct firmware writes. |
+| **🖥️ Display & GPU Switching (Hardware MUX Switch)** | Dedicated Display Settings menu: Hardware BIOS MUX switch (Automatic, Integrated Only, Discrete Only) with reboot prompt, 60 Hz and Max Hz modes, and LCD Overdrive response acceleration. | Win32 display enumeration, Acer BIOS/ACPI/WMI MUX switching, and dynamic refresh switching. |
+| **⚙️ Live Read-Only BIOS Architecture Badge** | Real-time diagnostic badge displaying queried motherboard and BIOS firmware architecture in Settings & Info without modification risks. | Dynamic querying of Win32_BIOS, Win32_ComputerSystem, and Win32_Processor with zero hardcoded values. |
 | **🎮 Event-Driven Game Profiles** | Dedicated Game Sync menu: master toggle switch, active game detection status, profile list, and automatic process-aware performance, thermal, and display mode switching. | Native Rust ring-buffer event queue, foreground debouncing, and automated default profile restoration. |
 | **⌨️ Custom Shortcuts & Key Interception** | Dedicated Predator/NitroSense key capture and customizable system-wide mode hotkeys. | Low-level Win32 `RawInput` hooks with fullscreen game preemption (`AttachThreadInput` + `SetWindowPos TOPMOST`). |
 

@@ -20,7 +20,7 @@ public class NativeLibraryTrustTests
         Assert.True(PredatorNativeCore.IsNativeCoreAvailable);
         Assert.Equal("Embedded, verified", PredatorNativeCore.LoadSource);
         string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "PredatorControlApp", "native", "v1.5.5", digest, "predator_core.dll");
+            "PredatorControlApp", "native", "v1.5.8", digest, "predator_core.dll");
         using var cached = File.OpenRead(path);
         Assert.Equal(digest, Convert.ToHexString(SHA256.HashData(cached)));
     }

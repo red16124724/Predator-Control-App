@@ -8,11 +8,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationIcon>appicon.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>1.5.5</Version>
-    <InformationalVersion>1.5.5</InformationalVersion>
+    <Version>1.5.8</Version>
+    <InformationalVersion>1.5.8</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
-    <AssemblyVersion>1.5.5.0</AssemblyVersion>
-    <FileVersion>1.5.5.0</FileVersion>
+    <AssemblyVersion>1.5.8.0</AssemblyVersion>
+    <FileVersion>1.5.8.0</FileVersion>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>

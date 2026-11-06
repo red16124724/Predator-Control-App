@@ -1,26 +1,34 @@
-# Predator Control App v1.5.5 Release Notes & Audit Summary
+# Predator Control App v1.5.8 Release Notes & Audit Summary
 
 The sidebar version label displays â€œMade by RED4724â€. This local build is unsigned; trusted signing requires a suitable code-signing certificate and signing tool.
 
 Startup-check update verification: the Release publish succeeded and 13 focused .NET tests passed, including one-shot scheduling and cancellation. A live GitHub check, hidden-startup UI, and hardware behavior were not exercised in this verification.
 
-Current local 1.5.5 improvements: one update check on startup, including hidden launches, and manual checks without periodic polling; mandatory asset-specific SHA-256, upstream replacement warning and previous-executable backup; verified embedded native library; on-demand native initialization; and a compatibility report. The executable remains unsigned; physical hardware and live update installation were not tested.
+Current local 1.5.8 improvements: one update check on startup, including hidden launches, and manual checks without periodic polling; mandatory asset-specific SHA-256, upstream replacement warning and previous-executable backup; verified embedded native library; on-demand native initialization; and a compatibility report. The executable remains unsigned; physical hardware and live update installation were not tested.
 
 ## Executive Overview
-Version 1.5.5 brings a comprehensive codebase audit, bug fix, and stabilization overhaul across the C# .NET 10 WinForms UI, native Rust Core (predator_core.dll), Ring-0 PawnIO hardware drivers, and the complete 2,460-test suite (285 Rust + 2,175 .NET).
+Version 1.5.8 brings UI typography and scaling fixes, complete removal of BIOS modification controls and safety gates (while preserving hardware MUX switch controls), live read-only hardware architecture diagnostics, and comprehensive codebase stabilization across the C# .NET 10 WinForms UI, native Rust Core (predator_core.dll), Ring-0 PawnIO hardware drivers, and the complete test suite.
 
 
-### UI Typography Normalization & BIOS Modification Settings Removal (Update 2026-11-06)
-- **UI Typography Normalization & Font Scaling Resolution**:
-  - Eliminated text size blow-up and excessive bold formatting across all cards and views.
-  - Removed manual font point size DPI multiplication from `UpdateDpiFonts()`; points are automatically scaled by GDI under Windows PerMonitorV2, preventing double-scaling.
-  - Completely removed recursive control font rescaling (`RescaleControlFonts()`) across all forms so fonts never compound on DPI events.
-  - Restored clean typography hierarchy: 8.5pt Bold card headers, 9pt Regular readable body text, and 9pt Bold strictly reserved for telemetry values and active states.
-- **100% Removal of BIOS Modifying Settings (Retaining Hardware MUX Switch)**:
-  - Completely removed BIOS Settings sidebar navigation button (`_btnNavBios`), panel (`_pnlBios`), and all BIOS modifying controls (`BuildBiosPage()`, `PopulateEmbeddedBiosRows()`, `RestoreBiosDefaults()`).
-  - Streamlined sidebar navigation to 7 tabs: Dashboard, Fans & Cooling, RGB Lighting, Display Settings, Game Sync, System & Power, Settings & Info.
-  - Live BIOS hardware architecture identity (`HardwareIdentity.GetBiosHardwareBadge()`) displayed under Settings & Info for full system visibility without modification controls.
-  - Hardware MUX switch in Display Settings (`_pnlDisplay` and `DisplaySettingsForm`) is 100% retained with reboot prompts and ACPI/WMI backend querying.
+## Predator Control App v1.5.8 Highlights (2026-11-06)
+
+- **UI Typography & Scaling Fix**:
+  - Removed duplicate font scaling and excessive bold text across all cards, restoring clean, sharp 9pt regular fonts and eliminating text overlapping.
+  - Removed manual font point size DPI multiplication from `UpdateDpiFonts()`; GDI per-monitor DPI handles font point-to-pixel scaling automatically under PerMonitorV2, preventing double-scaling.
+  - Completely eliminated `RescaleControlFonts()` recursive loops across all forms (`Form1`, `DisplaySettingsForm`, `BiosSettingsForm`, `FanCurveForm`, `GameSyncForm`, `HardwareCapabilitiesForm`) so font sizes never compound on DPI transitions or form activation.
+  - Re-balanced typography hierarchy: crisp 8.5pt Bold card headers, legible 9pt Regular body text for descriptions and labels, with 9pt Bold strictly reserved for real-time telemetry numbers and active statuses.
+- **BIOS Setting Removal (100%)**:
+  - Removed all BIOS modifying controls and safety gates 100%.
+  - Completely removed the "BIOS Settings" sidebar tab, navigation button (`_btnNavBios`), and panel (`_pnlBios`).
+  - Completely excised all BIOS modifying controls and methods: `BuildBiosPage()`, `PopulateEmbeddedBiosRows()`, `SwitchBiosCategory()`, `RestoreBiosDefaults()`, `_chkEnableBiosModsSys`, `_chkAllowDangerousBiosSys`, and `trayBiosSettings`.
+  - Streamlined sidebar navigation to 7 clean tabs: Dashboard, Fans & Cooling, RGB Lighting, Display Settings, Game Sync, System & Power, Settings & Info.
+- **MUX Switch Preservation**:
+  - Fully retained hardware MUX switch controls in Display Settings (`_pnlDisplay` and `DisplaySettingsForm`) with BIOS/ACPI/WMI backend querying and safe reboot prompt.
+  - Direct hardware MUX modes supported: Automatic (Optimus MUX), Integrated Only (iGPU MUX), and Discrete Only (dGPU MUX).
+  - Mandatory system reboot prompt and confirmation (`shutdown.exe /r /t 5`) preserved for ACPI/WMI hardware display switching.
+- **Live Read-Only BIOS Architecture Badge**:
+  - Placed in Settings & Info diagnostic card (`_pnlSettings`) without modification risks.
+  - Live hardware architecture identity: BIOS version, model name, SMBIOS version, and architecture badge (`HardwareIdentity.GetBiosHardwareBadge()`) dynamically queried without hardcoded values.
 
 ### Comprehensive Stress Testing, Chaos Fuzzing & Bug Remediation (Update 2026-11-06)
 - **App-Wide Chaos, Fuzzing & Concurrency Stress Verification**:

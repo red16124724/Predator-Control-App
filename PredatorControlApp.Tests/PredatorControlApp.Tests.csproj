@@ -6,7 +6,7 @@
     <IsPackable>false</IsPackable>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>1.5.5</Version>
+    <Version>1.5.8</Version>
     <NoWarn>$(NoWarn);xUnit1031</NoWarn>
   </PropertyGroup>
 

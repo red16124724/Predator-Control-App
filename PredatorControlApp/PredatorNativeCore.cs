@@ -105,7 +105,7 @@ namespace PredatorControlApp
     public static class PredatorNativeCore
     {
         private const string DllName = "predator_core.dll";
-        private const string VersionString = "v1.5.5";
+        private const string VersionString = "v1.5.8";
         private static IntPtr _nativeLibraryHandle = IntPtr.Zero;
         private static readonly bool _isLoaded;
         private static readonly object _syncLock = new();
