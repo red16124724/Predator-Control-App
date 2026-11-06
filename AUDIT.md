@@ -117,6 +117,12 @@ Comprehensive multi-agent stress test, chaos engineering, UI rendering validatio
 - **Keyboard Lighting Transport Fallback Hardening (`KeyboardLightingController.cs`)**: Resolved transport reachability check to query capability-probed `LightingServiceReachable` and `CommandInterceptor`, preventing unconfigured socket timeouts when per-key scope is gated off on 4-zone devices.
 - **Exhaustive Unit Test Verification (`AcerLaptopModelCatalogTests.cs`)**: Full test suite of 2,082 managed unit and stress tests passed with 100% success (0 failed, 0 skipped), alongside 185 native Rust unit and FFI stress tests.
 
+### 6. Embedded Menus Redesign, Dynamic Architecture Badge & 100% Feature Pruning (Update 2026-11-06)
+- **3 Dedicated Embedded Menus**: "BIOS Settings", "Display Settings", and "Game Sync" embedded as full dedicated panels within the app (_pnlBios, _pnlDisplay, _pnlGameSync), integrated with 8-tab sidebar navigation.
+- **Dynamic BIOS & Hardware Architecture Querying**: Zero hardcoded values. Queries Win32_BIOS, Win32_ComputerSystem, Win32_Processor, registry (HKLM\HARDWARE\DESCRIPTION\System\BIOS, CentralProcessor\0), and RuntimeInformation.OSArchitecture dynamically via DeviceBiosInfo.
+- **100% Complete Feature Pruning**: Removed Acer BlueLight Shield, GPU Overclock mentions, Supervisor Password UI prompts/state, and Dynamic Refresh Rate dropdown (retaining 60 Hz and Max Hz buttons).
+- **Test Verification**: 2,179 .NET tests passed + 285 Rust tests passed = 2,464 total tests passing (100% pass rate).
+
 ### 5. Multi-Agent Codebase Stress Hardening & Full-Stack Defect Elimination (Update 2026-11-03)
 - **UI Navigation Key Loss Prevention (CustomShortcutsForm.cs)**: Handled PreviewKeyDown on 	xtShortcut setting e.IsInputKey = true, preventing Tab/Enter/Arrows from losing focus during shortcut recording.
 - **WinForms Compiler Warnings & Concurrency Guards (Form1.cs, Form1.Designer.cs)**: Resolved all WinForms disposal and nullability compiler warnings (CS8602, CS8625); hardened SafeBeginInvoke against disposal and racing window handle recreations.
