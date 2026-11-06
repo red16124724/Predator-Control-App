@@ -10,6 +10,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 
+## [1.5.5 Imported Features, Hardware Stress Hardening & Full Bug Remediation] - 2026-11-06
+
+Exhaustive stress testing, full codebase bug remediation, and advanced feature consolidation from OpenSense and PreySense across native Rust (predator_core.dll) and managed C# WinForms (PredatorControlApp):
+
+### Imported Features (OpenSense & PreySense Consolidation)
+- **Advanced Display & GPU Switching System** (display.rs <-> DisplaySettingsForm.cs, DisplayManager.cs):
+  - NVIDIA Advanced Optimus (Dynamic Display Switch / DDS) mode switching (Auto, Optimus, dGPU).
+  - High-precision display refresh rate detection, regex fuzz-filtering, and hardware-accelerated modeswitching (30 Hz to 360 Hz+).
+  - BlueLight Shield software gamma-ramp calculation in Rust (predator_display_calculate_gamma_ramp) with debounced disk persistence (250ms).
+  - LCD Overdrive toggle (3ms response time boost) dispatched through direct Acer ACPI WMI packets.
+- **Acer BIOS & Firmware Settings GUI System** (bios.rs, uefi.rs, acpi.rs <-> BiosSettingsForm.cs, BiosManager.cs):
+  - Unified firmware configuration supporting Acer Predator (Helios, Triton) and Acer Nitro (Nitro 5, 14, 16, 17, 18, Nitro V) across 3 access tiers:
+    - Mode 1: High-level Acer ACPI-WMI (root\\wmi Acer_BIOSSetting).
+    - Mode 2: Direct ACPI evaluation and firmware method dispatch.
+    - Mode 3: Direct UEFI NVRAM variable read/write via Win32 GetFirmwareEnvironmentVariableEx.
+  - Two-tier safety gates: 'Enable Modifications' master gate and 'Allow Dangerous Settings' confirmation modal with hardware safety warnings.
+  - Automatic setting risk categorization (Safe, Normal, Dangerous), options list validation, and memory-zeroized supervisor password caching.
+- **Event-Driven Game Profile Automation** (game_profile.rs <-> GameSyncController.cs):
+  - Foreground window process tracking with 300ms debouncing to prevent thrashing on Alt+Tab.
+  - Native ring buffer event queue (predator_game_profile_poll_events) matching executable names to custom power, fan, lighting, and GPU modes.
+  - Automatic fallback to default profile when game terminates or loses focus.
+
+### Bug Remediation & Structural Hardening
+- **Concurrency & Deadlock Elimination**:
+  - GameSyncController: Fixed lock-order inversion deadlock between managed locks and native Rust FFI mutexes.
+  - ThemeManager: Replaced fragile main.BeginInvoke on arbitrary open test forms with direct SafeInvokeThemeChanged dispatching, eliminating dropped UI events and test deadlocks.
+  - PawnIoController: Protected ReadMmio32 and ReadMmio64 under _ioLock and added ObjectDisposedException resilience on background shutdown.
+- **Memory Safety & Buffer Integrity**:
+  - PredatorNativeCore.BiosGetSettingInfo: Fixed 128-byte managed buffer allocation for 512-byte C-ABI contract.
+  - PredatorNativeCore.DisplayGetSupportedRefreshRates: Clamped copy length to prevent buffer overruns on displays with >32 modes.
+  - predator_core::bios.rs: Fixed two-tier safety gate bypass where unknown settings evaluated existence before risk.
+- **UI Lifecycle & GDI Leak Remediation**:
+  - DisplaySettingsForm & BiosSettingsForm: Cached all 41 dynamic font allocations into static font instances (s_fontMain, s_fontTitle), eliminating GDI leaks across rapid open/close cycles (measured delta < 15 over 50 iterations).
+  - BiosSettingsForm: Added explicit disposal of orphaned TabPage and child controls in PopulateCategories().
+  - Converted blocking MessageBox.Show dialogs to testable MessageBoxHandler delegates.
+- **State Loss & Settings Resilience**:
+  - AppSettings: Restored missing DdsMode, BlueLightShieldMode, BiosModificationsEnabled, and BiosDangerousAllowed to CreateSnapshot(), Sanitize(), and disk JSON serialization.
+  - RegistrySafety: Persisted DdsMode and LcdOverdrive across registry storage to survive reboots.
+  - AntiThrottleSafety: Fixed tripwire floor lockout regression when operating at or above thermal ceiling.
+
+### Test Matrix Verification
+- **Native Rust Core Tests**: **285 / 285 Passed (100%)** across 6 test suites (lib.rs, adversarial_imported_features_stress_tests.rs, bios_c_abi_tests.rs, ffi_fuzz_and_stress_tests.rs, game_profile_tests.rs, migration_7_subsystems_tests.rs).
+- **Managed .NET Application Tests**: **2,175 / 2,175 Passed (100%)** with zero skipped and zero failed.
+- **Combined Test Verification**: **2,460 / 2,460 Total Tests Passed (100% Pass Rate)**.
+
+---
+
 ## [1.5.5 Native Rust 7-Subsystem Migration & Hardening Consolidation] - 2026-11-05
 
 Full architectural consolidation of 7 performance-critical and hardware-interfacing subsystems from managed C# into native Rust (`predator_core.dll`), providing zero-allocation execution, Ring-0 write hazard elimination, microsecond latency reduction, and 100% panic-isolated C-ABI contracts:

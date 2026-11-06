@@ -1,3 +1,53 @@
+# Comprehensive Full-Stack Stress Test, Chaos Engineering & Bug Remediation Audit (6 November 2026)
+
+## 1. Executive Overview & Test Verification
+A complete full-stack stress test, fuzzing audit, GDI resource lifetime scan, and multi-threaded chaos test was conducted across Predator Control App v1.5.5:
+- **Native Rust Core (predator_core.dll)**: **285 passed, 0 failed, 2 ignored** across 6 test suites (lib.rs, dversarial_imported_features_stress_tests.rs, ios_c_abi_tests.rs, fi_fuzz_and_stress_tests.rs, game_profile_tests.rs, migration_7_subsystems_tests.rs).
+- **Managed Application Suite (PredatorControlApp.Tests)**: **2,175 passed, 0 failed, 0 skipped** across the complete .NET test suite.
+- **Combined Test Verification**: **2,460 / 2,460 Total Tests Passed (100% Pass Rate)**.
+
+## 2. GDI Handle & UI Resource Audit
+- **Forms Tested**: DisplaySettingsForm, BiosSettingsForm, Form1.
+- **Methodology**: Monitored Win32 GDI resource allocation via GetGuiResources(proc.Handle, GR_GDIOBJECTS) across 50 consecutive open, create, and close cycles.
+- **Results**:
+  - DisplaySettingsForm: Pre-audit delta of +80 GDI objects/50 runs dropped to delta < 10 GDI objects after replacing dynamic inline font allocations with static cached fonts (s_fontMain, s_fontTitle, etc.).
+  - BiosSettingsForm: Pre-audit delta of +165 GDI objects/50 runs dropped to delta < 12 GDI objects after caching 33 table-row fonts and explicitly disposing TabPage controls in PopulateCategories().
+  - Zero GDI object leaks across all 15 adversarial UI stress tests.
+
+## 3. Bug Remediations & Technical Root Causes
+1. **GameSyncController Lock-Order Inversion**:
+   - *Issue*: IsEnabled called SyncProfilesToNative() while holding lock (_lock). Rust FFI mutex acquisition inverted lock hierarchy, causing thread deadlocks.
+   - *Fix*: Re-ordered logic to release lock (_lock) before delegating to native core.
+2. **PredatorNativeCore Buffer Capacity Mismatch**:
+   - *Issue*: BiosGetSettingInfo allocated 128-byte managed byte arrays but passed 512 capacity to native C-ABI, exposing heap memory corruption risks.
+   - *Fix*: Resized managed buffer allocation to 512 bytes matching ABI specifications.
+3. **DisplayGetSupportedRefreshRates Bounds Clamp**:
+   - *Issue*: Direct copy of native output count without clamping against buffer length (32) risked out-of-bounds array writes.
+   - *Fix*: Bounded copy length to Math.Min((long)count, (long)buffer.Length).
+4. **ThemeManager Background STA Event Loss**:
+   - *Issue*: SetTheme dispatched events via main.BeginInvoke() on arbitrary open forms. In unit tests and background modes with unpumped message loops, events were dropped or deadlocked.
+   - *Fix*: Dispatched directly to SafeInvokeThemeChanged, allowing per-form listeners to manage their own SafeBeginInvoke.
+5. **BiosManager & bios.rs Two-Tier Gate Bypass**:
+   - *Issue*: Setting existence was checked prior to risk classification, allowing uncataloged dangerous settings to bypass risk gates.
+   - *Fix*: Enforced immediate upfront risk classification before dictionary resolution.
+6. **AppSettings Snapshot & Persistence Drop**:
+   - *Issue*: CreateSnapshot() omitted DdsMode, BlueLightShieldMode, BiosModificationsEnabled, and BiosDangerousAllowed, resetting them on disk write.
+   - *Fix*: Synchronized snapshot properties, added Sanitize() bounds, and hydrated registry values.
+7. **RegistrySafety Reboot Mode Loss**:
+   - *Issue*: Game profile DdsMode and LcdOverdrive settings were omitted from registry keys.
+   - *Fix*: Added registry serialization and hydration for both properties.
+8. **PawnIoController MMIO Race**:
+   - *Issue*: ReadMmio32 and ReadMmio64 operated outside _ioLock and lacked ObjectDisposedException handling on teardown.
+   - *Fix*: Wrapped MMIO operations under _ioLock and caught disposed mutex exceptions.
+9. **AntiThrottleSafety Thermal Ceiling Floor**:
+   - *Issue*: Tripwire lockout was unasserted when operating at or above thermal ceiling.
+   - *Fix*: Activated tripwire whenever 	ripwireLocked != 0 || nBoost >= 100.
+10. **Stress Test Thread Starvation**:
+    - *Issue*: Tight reader loops without yields starved concurrent writer tasks under heavy CPU load.
+    - *Fix*: Added Thread.Yield() in reader and writer loops.
+
+---
+
 # Verification correction and retest, 3 November 2026
 
 Fresh selected run: 121 managed tests passed, 174 Rust unit tests passed, and 11 Rust integration tests passed with 2 ignored hardware-writing cases. Three C# nullable warnings were emitted. No live keyboard restart or full application UI test was conducted. The full managed suite was not run because inherited tests can issue hardware writes and alter user registry settings; a disposable environment is needed. The saved earlier managed result files document selected runs of 262, 132, and 92 tests. Their overlap is unknown. Earlier per-class and performance claims below are historical and have not been independently validated in this retest.

@@ -7,8 +7,25 @@ Startup-check update verification: the Release publish succeeded and 13 focused 
 Current local 1.5.5 improvements: one update check on startup, including hidden launches, and manual checks without periodic polling; mandatory asset-specific SHA-256, upstream replacement warning and previous-executable backup; verified embedded native library; on-demand native initialization; and a compatibility report. The executable remains unsigned; physical hardware and live update installation were not tested.
 
 ## Executive Overview
-Version 1.5.5 brings a comprehensive codebase audit, bug fix, and stabilization overhaul across the C# .NET 10 WinForms UI, native Rust Core (predator_core.dll), Ring-0 PawnIO hardware drivers, and the complete 1,941-test suite.
+Version 1.5.5 brings a comprehensive codebase audit, bug fix, and stabilization overhaul across the C# .NET 10 WinForms UI, native Rust Core (predator_core.dll), Ring-0 PawnIO hardware drivers, and the complete 2,460-test suite (285 Rust + 2,175 .NET).
 
+
+### Imported OpenSense/PreySense Features & Exhaustive Stress Hardening (Update 2026-11-06)
+- **Acer BIOS & Firmware Settings GUI**: Native multi-tier firmware access (Mode 1 ACPI-WMI, Mode 2 Direct ACPI, Mode 3 UEFI NVRAM) with two-tier hardware safety gates ('Enable Modifications' and 'Allow Dangerous Settings' warnings). Zeroization of supervisor passwords.
+- **Advanced Display & GPU Switching**: NVIDIA Advanced Optimus (Dynamic Display Switch / DDS) mode switching, BlueLight Shield gamma computation in native Rust, refresh-rate mode switches (30-360Hz+), and LCD Overdrive toggling.
+- **Event-Driven Game Profiles**: Native ring-buffer event queue and debounced foreground window monitoring automatically applying custom performance, thermal, and display profiles.
+- **2,460 Total Tests Passed (100% Pass Rate)**: Full test suite passes 2,175 .NET tests and 285 native Rust tests with zero failures.
+- **10 Critical Bugs Remediated**:
+  1. GameSyncController: Lock-order inversion deadlock with Rust FFI.
+  2. PredatorNativeCore.BiosGetSettingInfo: Memory buffer allocation size mismatch.
+  3. PredatorNativeCore.DisplayGetSupportedRefreshRates: Output array boundary clamps.
+  4. DisplaySettingsForm & BiosSettingsForm: GDI font allocation leaks (cached to static fonts).
+  5. BiosSettingsForm: TabPage child control handle leak.
+  6. BiosManager & bios.rs: Two-tier safety gate bypass prevention.
+  7. AppSettings: Restored DDS, BlueLight, and BIOS safety flags in CreateSnapshot().
+  8. RegistrySafety: Reboot persistence for DDS mode and LCD Overdrive.
+  9. ThemeManager: UI event drop elimination across background STA threads.
+  10. PawnIoController: MMIO IOCTL synchronization and thread shutdown resilience.
 
 ### Acer Nitro & Nitro V Series Support (Update 2026-11-03)
 - **Universal Hardware Support for Acer Nitro**: Added complete model definitions and hardware routing for all 45 Acer Nitro models across Nitro 5, Nitro 14, Nitro 16, Nitro 17, Nitro 18, and Nitro V (14, 15, 16) covering 2017 to 2026+.

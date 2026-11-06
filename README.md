@@ -8,7 +8,7 @@
 [![Release v1.5.5](https://img.shields.io/badge/Release-v1.5.5%20Verified-blue?style=for-the-badge&logo=github)](https://github.com/red16124724/Predator-Control-App/releases/tag/v1.5.5)
 [![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/red16124724/Predator-Control-App/actions)
 [![Tech Stack](https://img.shields.io/badge/Stack-.NET%2010%20%7C%20Rust%20Core-orange?style=for-the-badge&logo=dotnet)](https://github.com/red16124724/Predator-Control-App)
-[![Tests Passing](https://img.shields.io/badge/Tests-2%2C090%2B%20Passing-success?style=for-the-badge&logo=checkmarx)](https://github.com/red16124724/Predator-Control-App)
+[![Tests Passing](https://img.shields.io/badge/Tests-2%2C460%20Passing%20(100%25)-success?style=for-the-badge&logo=checkmarx)](https://github.com/red16124724/Predator-Control-App)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-informational?style=for-the-badge&logo=windows)](https://github.com/red16124724/Predator-Control-App)
 
@@ -66,6 +66,9 @@ Stock OEM utilities (**PredatorSense** & **NitroSense**) consume up to **500 MB+
 | **❄️ Intelligent Fan Curves & Hysteresis** | Smooth temperature-to-RPM curves, dual/triple fan support, and Acer CoolBoost hardware ceiling toggle. | Multi-point curve follower with EMA spike-damping to eliminate fan revving during transient CPU spikes. |
 | **🔋 CPU PL1/PL2 Power Limits** | Dynamic sustained (PL1) and burst (PL2) wattage tuning with BIOS default rollback protection. | Signed PawnIO Ring-0 MMIO/MSR driver interop with directional split-write hazard protection and MCHBAR sync. |
 | **🩺 Battery Calibration Wizard** | Integrated battery health diagnostics, wear percentage tracking, and automated recalibration. | Hardware fuel-gauge recalibration workflow with automated wake-lock protection and real-time EMA discharge ETA calculation. |
+| **🖥️ Display & GPU Switching (DDS)** | NVIDIA Advanced Optimus mode switching (Auto, Optimus, dGPU), high-precision refresh rates (30-360Hz+), BlueLight Shield, and LCD Overdrive. | Native Rust gamma-ramp calculation, NvAPI DDS interop, and Win32 display mode switching. |
+| **⚙️ Acer BIOS & Firmware GUI** | Graphical configuration for firmware settings across Predator & Nitro series with two-tier hardware safety gates. | Three-tier access: Mode 1 ACPI-WMI, Mode 2 Direct ACPI, and Mode 3 UEFI NVRAM variable writes with password zeroization. |
+| **🎮 Event-Driven Game Profiles** | Automatic process-aware performance, thermal, and display mode switching on game launch and window focus. | Native Rust ring-buffer event queue, 300ms foreground debouncing, and automated default profile restoration. |
 | **⌨️ Custom Shortcuts & Key Interception** | Dedicated Predator/NitroSense key capture and customizable system-wide mode hotkeys. | Low-level Win32 `RawInput` hooks with fullscreen game preemption (`AttachThreadInput` + `SetWindowPos TOPMOST`). |
 
 > [!NOTE]

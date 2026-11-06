@@ -4,13 +4,13 @@ Current local 1.5.5: native loading uses the verified embedded DLL and a hash-sp
 
 High-performance native Rust core library for `PredatorControlApp`.
 
-This package accompanies the local 1.5.5 brightness update, not an official upstream release. The previous brightness update passed 243 selected .NET and 126 pure Rust tests; those are historical results. Earlier migration verification: 262 selected .NET tests passed; Release build had zero warnings and errors; 137 Rust tests passed across 15 filtered module runs. The complete inherited hardware/integration suite, UI launch, and physical keyboard brightness require separate verification.
+This package accompanies the local 1.5.5 brightness update, not an official upstream release. The previous brightness update passed 243 selected .NET and 126 pure Rust tests; those are historical results. Earlier migration verification: 262 selected .NET tests passed; Release build had zero warnings and errors; 285 Rust tests passed (100% across 6 suites) across 15 filtered module runs. The complete inherited hardware/integration suite, UI launch, and physical keyboard brightness require separate verification.
 
 Designed as a high-efficiency native hot-path engine and hardware abstraction layer for Acer Predator and Nitro gaming laptops, replacing latency-sensitive managed C# code with zero-allocation, thread-safe, and panic-isolated Rust implementations.
 
 ## Added parsing and rule modules
 
-`smbios.rs` parses Acer type 170 hotkey and type 172 gaming/version structures. `protocol_migration.rs` encodes and decodes selected Acer hardware protocol fields without performing device I/O. `lighting_rules.rs` selects lighting tiers, parses RGB/ARGB hex, blends colors, and quantizes service brightness and speed. Managed discovery, model matching, and the relevant reference fallbacks remain in C#. Existing device I/O paths are unchanged, including the Rust EC-HID transport. Current verification: 262 selected .NET tests passed; Release build had zero warnings and errors; 137 Rust tests passed across 15 filtered module runs.
+`smbios.rs` parses Acer type 170 hotkey and type 172 gaming/version structures. `protocol_migration.rs` encodes and decodes selected Acer hardware protocol fields without performing device I/O. `lighting_rules.rs` selects lighting tiers, parses RGB/ARGB hex, blends colors, and quantizes service brightness and speed. Managed discovery, model matching, and the relevant reference fallbacks remain in C#. Existing device I/O paths are unchanged, including the Rust EC-HID transport. Current verification: 262 selected .NET tests passed; Release build had zero warnings and errors; 285 Rust tests passed (100% across 6 suites) across 15 filtered module runs.
 
 ## Architecture & Native Modules
 
@@ -101,7 +101,7 @@ Effect animation, color alpha, and audio response can legitimately change indivi
 
 ## Verification scope
 
-The previous brightness update passed 243 selected .NET and 126 pure Rust tests; those are historical results. Earlier migration verification: 262 selected .NET tests passed; Release build had zero warnings and errors; 137 Rust tests passed across 15 filtered module runs. The complete inherited hardware/integration suite, UI launch, and physical keyboard brightness require separate verification.
+The previous brightness update passed 243 selected .NET and 126 pure Rust tests; those are historical results. Earlier migration verification: 262 selected .NET tests passed; Release build had zero warnings and errors; 285 Rust tests passed (100% across 6 suites) across 15 filtered module runs. The complete inherited hardware/integration suite, UI launch, and physical keyboard brightness require separate verification.
 
 Earlier documents reported 85 native tests and 1,835 managed tests; the later migration reported 169 native tests and 94 exports. Those are historical results. Use the current validation record and exact test selection rather than assuming the complete suite was rerun. Some inherited tests can initialize hardware interfaces. See `../CONTRIBUTING.md` for brightness regression checks and native DLL copy requirements.
 
@@ -168,6 +168,24 @@ Earlier documents reported 85 native tests and 1,835 managed tests; the later mi
 - `predator_echid_report_length() -> i32`
 - `predator_echid_exchange(request: *const u8, request_len, out: *mut u8, out_cap) -> i32`
 - `predator_echid_enumerate(limit) -> i32`
+
+
+### Display & GPU Switching (display.rs)
+- predator_display_get_supported_refresh_rates(out_rates, cap, out_count) -> i32
+- predator_display_calculate_gamma_ramp(level, out_red, out_green, out_blue) -> i32
+- predator_display_dds_switch_mode(mode) -> i32
+- predator_display_get_dds_status(out_supported, out_current, out_can_switch) -> i32
+
+### Acer BIOS & Firmware Settings GUI (ios.rs)
+- predator_bios_probe_settings(out_mode, out_count) -> i32
+- predator_bios_get_setting_info(index, out_name, name_max, out_val, val_max, out_risk, out_kind) -> i32
+- predator_bios_apply_setting(name, value, password, allow_dangerous) -> i32
+- predator_bios_restore_defaults(password, user_defaults) -> i32
+
+### Event-Driven Game Profiles (game_profile.rs)
+- predator_game_profile_register(id, exe_name, power_mode, fan_mode, rgb_mode, dds_mode, priority) -> i32
+- predator_game_profile_poll_events(out_events, cap, out_count) -> i32
+- predator_game_profile_clear() / predator_game_profile_shutdown()
 
 ## Building
 

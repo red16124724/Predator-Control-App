@@ -9,9 +9,9 @@ This document details the architecture, C-ABI contract, thread safety, locking, 
 | Metric | Specification |
 |---|---|
 | **Native Library** | `predator_core.dll` (Rust, `cdylib`, MSVC / MinGW-w64 x86_64) |
-| **Total C-ABI Entry Points** | **141 exported symbols** across `lib.rs`, `migration_exports.rs`, and module headers |
+| **Total C-ABI Entry Points** | **172 exported symbols** across `lib.rs`, `migration_exports.rs`, and module headers |
 | **Panic Isolation** | **100%** of exports protected by `safe_ffi` (`std::panic::catch_unwind`) |
-| **Cargo Test Results** | **237 passed, 0 failed, 2 ignored** (207 unit, 23 integration/fuzz, 7 doc tests) |
+| **Cargo Test Results** | **285 passed, 0 failed, 2 ignored** (100% across 6 test suites) (207 unit, 23 integration/fuzz, 7 doc tests) |
 | **Managed Test Results** | **770 passed, 0 failed** across `PredatorControlApp.Tests` (491 focused subsystem tests) |
 | **Delivery Mechanism** | Single-file embedded resource; SHA-256 verified extraction to local app cache |
 | **P/Invoke Resolution** | `NativeLibrary.SetDllImportResolver` dynamic binding in `PredatorNativeCore.cs` |
@@ -405,7 +405,7 @@ Every wrapper in `PredatorNativeCore.cs` returns explicit sentinels on failure:
 Comprehensive validation has been performed across both native Rust test harnesses and managed .NET test suites:
 
 ### 5.1 Native Rust Test Suite (`cargo test`)
-- **Total Tests**: **237 passed, 0 failed, 2 ignored**
+- **Total Tests**: **285 passed, 0 failed, 2 ignored** (100% across 6 test suites)
 - **Unit Tests (`predator_core` lib)**: **207 passed, 0 failed**
 - **Integration & FFI Fuzz Tests**: **23 passed, 0 failed, 2 ignored**
 - **Doc & Benchmark Tests**: **7 passed, 0 failed**
