@@ -26,7 +26,6 @@ Stock OEM utilities (**PredatorSense** & **NitroSense**) consume up to **500 MB+
 - **Instant Response (< 1ms)**: Zero Electron, zero webviews — pure native WinForms on .NET 10 with a high-throughput Rust kernel interop core (`predator_core.dll`).
 - **Zero Background Drain**: Minimal memory footprint (~18-28 MB private working set) and near-zero idle CPU usage (< 0.1%).
 - **Dedicated Embedded Display & Game Sync Menus**: Dedicated full-sized pages for Display Settings (Hardware BIOS MUX Switch, 60Hz/MaxHz modes, LCD Overdrive) and Game Sync (event-driven foreground game profiles).
-- **Helios Neo & AI Lighting Stability**: Eliminates periodic RGB keyboard blinking on Helios Neo 16/16s/18 and 16 AI series by suppressing redundant EC/WMI reassertions.
 - **Deep Ring-0 Hardware Access**: Direct Embedded Controller (EC) fan registers, ACPI PPCC table parsing, and Intel MCHBAR MMIO / MSR `0x610` power limit management via signed PawnIO driver.
 
 ---
@@ -74,11 +73,6 @@ Stock OEM utilities (**PredatorSense** & **NitroSense**) consume up to **500 MB+
 | **🎮 Event-Driven Game Profiles** | Dedicated Game Sync menu: master toggle switch, active game detection status, profile list (only the profiles you add yourself, with an explicit empty state when none exist), and automatic process-aware performance, thermal, and display mode switching. | Native Rust ring-buffer event queue, foreground debouncing, and automated default profile restoration. Profiles persist to `%LOCALAPPDATA%\PredatorControl\game_sync.json` plus the registry mirror; load-time validation drops malformed and duplicate entries, and tests run against temporary files so they can never seed the user's store. |
 | **⌨️ Custom Shortcuts & Key Interception** | Dedicated Predator/NitroSense key capture and customizable system-wide mode hotkeys. | Low-level Win32 `RawInput` hooks with fullscreen game preemption (`AttachThreadInput` + `SetWindowPos TOPMOST`). |
 
-> [!NOTE]
-> **Keyboard Brightness & Exterior Lighting Architecture:**
-> - **Guaranteed Brightness Persistence**: Keyboard brightness level (`KeyboardBrightnessLevel` strictly synchronized with `RgbBrightness`) is immediately committed and flushed to the Windows Registry upon slider release. This guarantees saved brightness levels persist across system reboots, Windows Fast Startup, power transitions (sleep/resume), and application restarts without reverting to 100%.
-> - **Complete Lid Logo Detachment**: The laptop lid logo RGB is fully decoupled from the application by eliminating `SetGamingLEDColor` zone `0x01` logo payloads and OpenRGB device 0 triggers. The lid logo remains entirely under OEM hardware/BIOS defaults and is never overridden or clobbered.
-
 ---
 
 ## 📦 Distribution: a single executable
@@ -95,10 +89,6 @@ Predator Control App ships as **one file**: `PredatorControlApp.exe`. It is a se
 dotnet publish PredatorControlApp/PredatorControlApp.csproj -c Release -r win-x64 \
   --self-contained true -p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false -o publish
 ```
-
-This layout is a standing project requirement (see `AGENTS.md`).
-
----
 
 ## 💻 Supported Hardware Matrix
 
