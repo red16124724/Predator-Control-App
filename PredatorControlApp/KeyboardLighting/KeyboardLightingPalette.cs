@@ -94,16 +94,19 @@ namespace PredatorControlApp
             return false;
         }
 
+        /// <summary>
+        /// Linear per-channel blend; `amount` is clamped to 0..1 and channels use
+        /// the same rounding as the native implementation.
+        /// </summary>
         public static Color Blend(Color a, Color b, double amount)
         {
-            if (NativeLightingRules.TryBlend(a, b, amount, out Color native)) return native;
-
-            double t = Math.Clamp(amount, 0.0, 1.0);
+            double t = Math.Clamp(amount, 0, 1);
             return Color.FromArgb(
                 (int)Math.Round(a.A + (b.A - a.A) * t),
                 (int)Math.Round(a.R + (b.R - a.R) * t),
                 (int)Math.Round(a.G + (b.G - a.G) * t),
                 (int)Math.Round(a.B + (b.B - a.B) * t));
         }
+
     }
 }

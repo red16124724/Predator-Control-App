@@ -1,16 +1,16 @@
 # predator_core
 
-Current local 1.5.5: native loading uses the verified embedded DLL and a hash-specific cache. Telemetry and PawnIO are initialized on demand; actual performance and hardware behavior require measurement.
+Current local 1.5.8: native loading uses the verified embedded DLL and a hash-specific cache. Telemetry and PawnIO are initialized on demand; actual performance and hardware behavior require measurement.
 
 High-performance native Rust core library for `PredatorControlApp`.
 
-This package accompanies the local 1.5.5 brightness update, not an official upstream release. The previous brightness update passed 243 selected .NET and 126 pure Rust tests; those are historical results. Earlier migration verification: 262 selected .NET tests passed; Release build had zero warnings and errors; 285 Rust tests passed (100% across 6 suites) across 15 filtered module runs. The complete inherited hardware/integration suite, UI launch, and physical keyboard brightness require separate verification.
+This package accompanies the local 1.5.8 update, not an official upstream release. The previous brightness update passed 243 selected .NET and 126 pure Rust tests; those are historical results. Earlier migration verification: 262 selected .NET tests passed; Release build had zero warnings and errors; 342 Rust tests passed (100% across the crate suites, 2 hardware-only tests ignored). The complete inherited hardware/integration suite, UI launch, and physical keyboard brightness require separate verification.
 
 Designed as a high-efficiency native hot-path engine and hardware abstraction layer for Acer Predator and Nitro gaming laptops, replacing latency-sensitive managed C# code with zero-allocation, thread-safe, and panic-isolated Rust implementations.
 
 ## Added parsing and rule modules
 
-`smbios.rs` parses Acer type 170 hotkey and type 172 gaming/version structures. `protocol_migration.rs` encodes and decodes selected Acer hardware protocol fields without performing device I/O. `lighting_rules.rs` selects lighting tiers, parses RGB/ARGB hex, blends colors, and quantizes service brightness and speed. Managed discovery, model matching, and the relevant reference fallbacks remain in C#. Existing device I/O paths are unchanged, including the Rust EC-HID transport. Current verification: 262 selected .NET tests passed; Release build had zero warnings and errors; 285 Rust tests passed (100% across 6 suites) across 15 filtered module runs.
+`smbios.rs` parses Acer type 170 hotkey and type 172 gaming/version structures. `protocol_migration.rs` encodes and decodes selected Acer hardware protocol fields without performing device I/O. `lighting_rules.rs` selects lighting tiers, parses RGB/ARGB hex, blends colors, and quantizes service brightness and speed. `wmi_codec.rs`, `capability.rs` and `gameprobe.rs` hold the WMI fan/mode payload codecs, the fan-table and capability policy, and the RawInput/media/process-matching decisions. Managed discovery, model matching, and the relevant reference fallbacks remain in C#. Existing device I/O paths are unchanged, including the Rust EC-HID transport. Current verification: 2,217 managed tests pass (0 failed, 0 skipped); the Release build has zero warnings and errors; 342 Rust tests passed (100% across the crate suites, 2 hardware-only tests ignored).
 
 ## Architecture & Native Modules
 
@@ -95,13 +95,13 @@ Effect animation, color alpha, and audio response can legitimately change indivi
 ## Single-File Portable Deployment
 
 - `predator_core.dll` is embedded directly into `PredatorControlApp` as an embedded resource (`<EmbeddedResource Include="predator_core.dll" />`).
-- At runtime, `PredatorNativeCore` verifies the extracted DLL in `%LocalAppData%\PredatorControlApp\native\v1.5.5\<SHA-256>\predator_core.dll` against the embedded stream using SHA-256.
+- At runtime, `PredatorNativeCore` verifies the extracted DLL in `%LocalAppData%\PredatorControlApp\native\v1.5.8\<SHA-256>\predator_core.dll` against the embedded stream using SHA-256.
 - Extraction is synchronized across concurrent instances using a named Win32 mutex (`Local\PredatorControlApp_Dll_Extract_Lock`).
 - Dynamic linking is wired automatically via `NativeLibrary.SetDllImportResolver`.
 
 ## Verification scope
 
-The previous brightness update passed 243 selected .NET and 126 pure Rust tests; those are historical results. Earlier migration verification: 262 selected .NET tests passed; Release build had zero warnings and errors; 285 Rust tests passed (100% across 6 suites) across 15 filtered module runs. The complete inherited hardware/integration suite, UI launch, and physical keyboard brightness require separate verification.
+The previous brightness update passed 243 selected .NET and 126 pure Rust tests; those are historical results. Earlier migration verification: 262 selected .NET tests passed; Release build had zero warnings and errors; 342 Rust tests passed (100% across the crate suites, 2 hardware-only tests ignored). The complete inherited hardware/integration suite, UI launch, and physical keyboard brightness require separate verification.
 
 Earlier documents reported 85 native tests and 1,835 managed tests; the later migration reported 169 native tests and 94 exports. Those are historical results. Use the current validation record and exact test selection rather than assuming the complete suite was rerun. Some inherited tests can initialize hardware interfaces. See `../CONTRIBUTING.md` for brightness regression checks and native DLL copy requirements.
 

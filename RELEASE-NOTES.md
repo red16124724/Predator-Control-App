@@ -30,6 +30,49 @@ Version 1.5.8 brings UI typography and scaling fixes, complete removal of BIOS m
   - Placed in Settings & Info diagnostic card (`_pnlSettings`) without modification risks.
   - Live hardware architecture identity: BIOS version, model name, SMBIOS version, and architecture badge (`HardwareIdentity.GetBiosHardwareBadge()`) dynamically queried without hardcoded values.
 
+### Native Rust Expansion & Audit Fixes (Update 2026-11-07)
+
+- **Three new native modules** (`wmi_codec.rs`, `capability.rs`, `gameprobe.rs`; 646 lines, 17 new C-ABI exports) move the pure decision logic into `predator_core`.
+- **Six further areas migrated** (`power_limits.rs`, `service_proto.rs`, `settings_policy.rs`, `theme_policy.rs`, `wmi_payload.rs`, `catalog_policy.rs`): power-limit clamp/estimate/default policy, MMIO decode and deviation, Acer service packet framing and effect canonicalisation, settings clamps and allowed-limit sanitisation, the power-mode palette, WMI fan payload layouts and the model-catalog heuristic chain. The crate now exports **218 entry points across 37 modules**.
+- **WMI codec**: tachometer/fan decoding, mode LED palette, non-destructive mode payload, extended system-fan payload, fan-speed payload encoding and the confirmed-mode anti-blinking short-circuit.
+- **Capability policy**: factory EC fan-table detection, fan-table clamping/decoding, tri-state capability-override merging and mode-default finalisation.
+- **Game probe**: RawInput vendor-packet classification, key debounce, media-poll caching and process/profile name matching.
+- Every call site keeps its original managed implementation as a fallback when the native core is missing, so behaviour degrades gracefully.
+
+### Game Sync Profile Table Cleanup (Update 2026-11-07)
+
+- **Invented profiles removed**: the Configured Game Profiles table was listing 45 placeholder entries (`Game_0.exe`…`Game_9.exe`, `FakeGame`, `CorruptGame`, `Updated 50`, `DoomEternal.exe`, Russian and CJK sample names) that no user had added. They came from stress tests that constructed `GameSyncController` with the default save path and therefore wrote their fixtures into the real `game_sync.json` and the `HKCU\SOFTWARE\PredatorControl\Profiles` registry hive.
+- **Store cleaned**: `game_sync.json`, its `.bak` companion and all 45 registry profile sub-keys now hold zero profiles (Game Sync stays disabled until the user enables it). A copy of the polluted JSON is kept in the workspace as evidence.
+- **Load-time validation**: `GameSyncController.Load()` validates every stored profile and drops case-insensitive duplicates, so corrupt or repeated records never reach the UI.
+- **Test isolation**: the five remaining tests that used the production path now receive a unique temporary JSON file, so future runs cannot repopulate the user's store.
+- **UI**: the profiles card shows an explicit empty state when nothing is configured and lists only the user's own profiles; the same controller backs the Advanced Editor list.
+
+### Single-File Distribution Guarantee (Update 2026-11-07)
+
+- **One executable, everything inside**: `PredatorControlApp.exe` is a self-contained .NET 10 single-file build that carries the .NET runtime, all managed dependencies, the native `predator_core.dll` (embedded resource, extracted to a hash-specific cache after hash verification) and the PawnIO payload images.
+- **No loose content either**: `IncludeAllContentForSelfExtract` is now enabled together with `IncludeNativeLibrariesForSelfExtract`, so content and native files are bundled rather than copied beside the executable.
+- **Verified layout**: publishing into an empty folder yields exactly one file (`PredatorControlApp.exe`); no `.dll`, `.deps.json`, `.runtimeconfig.json`, icon or `.bin` sidecars.
+- **Stale symbol file removed**: the root `PredatorControlApp.pdb` belonged to the previous build and did not match the shipped executable.
+- **Recorded as a standing rule**: packaging requirements and the verification command are documented in `AGENTS.md` and the README distribution section.
+
+### Full Stress Sweep & Codebase Scan (Update 2026-11-07)
+
+- **Managed suite**: 2,217 passed, 0 failed, 0 skipped in 6 m 57 s — the complete stress, chaos, concurrency, fuzz and UI-lifecycle coverage across dashboard, fans, RGB, display/MUX, Game Sync, thermal safety, IPC, updater and power limits.
+- **Release build**: 0 errors; the 30 remaining warnings are `CS0618` notices for the deliberately retired BIOS-modification members.
+- **Whole-source scan**: no inverted `Math.Clamp` bounds (0 of 453 call sites), no unguarded numeric parsing (all 8 `Convert`/`Parse` sites are inside `try` or use `TryParse`), the single `First()` after `Skip(1)` is guarded by a `Count >= 3` check, all WinForms timers are disposed, `Process.GetProcesses()` handles are released in `finally`, there is no `Application.DoEvents` reentrancy, the single `async void` handler is fully guarded, and blocking async waits are bounded with timeouts and fallbacks.
+- **Outcome**: no reproducible defect found, so no behavioural change was made; the executable was republished from the audited source as a single file with all binaries embedded.
+- **Not verified on hardware**: EC/WMI/PawnIO writes, MUX switching, real brightness changes, live update installation and interactive UI rendering were not exercised physically; UI evidence comes from the STA lifecycle/disposal stress tests, not a visual inspection.
+- **Fixed**: capability-override tri-state misalignment (a `ModeKey` override was applied to the `HasEcHid` slot and ignored); `NearestFanSpeed` had lost Acer protocol-encoder precedence; the native BIOS fallback invented "Enabled (10%)" for any non-zero SMBIOS gaming record `0x15`; `PowerModeSwitchGuard` now cancels its pending delays on disposal.
+- **Verification**: 2,217 managed tests passing (0 failed, 0 skipped) and 342 native Rust tests passing (2 hardware-only tests ignored). The executable was republished as a self-contained single file with the native core embedded; no `predator_core.dll` sidecar is shipped.
+
+### Power-Mode PL1/PL2 Enforcement & Transport Retry Fixes (Update 2026-11-06)
+
+- **Custom CPU power limits now survive every mode transition.** `CpuPowerLimitController.ApplyForModeSwitchAsync` writes the new mode's saved PL1/PL2 at 0, 250, 600 and 1200 ms, re-reads the per-mode settings on each pass, and invalidates the applied-wattage cache first so even a same-wattage mode change rewrites MSR `0x610` and MMIO `0xFED159A0`/`0xFED159A4`.
+- **Watchdog verifies both registers.** The periodic verifier reads back MSR `0x610` and the MMIO mirror (lock-bit aware) and re-applies via the PL2-before-PL1 directional path when either deviates by ≥ 1 W.
+- **Every switch path is wired:** power-mode buttons, tray menu, physical Mode/Turbo key, GameSync profile launch/exit, custom keyboard shortcuts, the switch guard's `onApplied` callback, and AC/DC transitions that keep the current mode (the EC still reloads its thermal table).
+- **No more false success caching.** `WmiController` keeps a separate confirmed-mode cache for the anti-blinking redundant-write short-circuit, so a failed EC/WMI mode write is retried instead of being reported as applied; failed `SetGamingFanSpeed` writes invalidate their cache so the same fan percentage retries.
+- **Verification:** 0 build errors; 2,211 managed tests passing, 0 failed, 0 skipped (9 new regression tests). Actual EC hardware behaviour was not exercised.
+
 ### Comprehensive Stress Testing, Chaos Fuzzing & Bug Remediation (Update 2026-11-06)
 - **App-Wide Chaos, Fuzzing & Concurrency Stress Verification**:
   - Implemented FullAppExhaustiveChaosAndStressTests.cs (13 tests, all passed in 22s) covering AppSettings numerical fuzzing, massive strings (100k) & SQL/XSS injection, corrupted JSON/registry recovery, 20-thread concurrent state mutations (2,000 parallel ops), UI navigation chaos across 8 panels (800 rapid switches), concurrent MUX mode toggling, BiosManager safety gate fuzzing, extreme telemetry loads (-500°C to 1250°C, 50k RPM, D3Cold sleep transitions), fan curve follower oscillations (1,000 rapid cycles), and GameSync rapid switching (400 events/sec).
@@ -168,7 +211,7 @@ Run `Source/Verify-Brightness.ps1` for the audited test selection. Raw test resu
 
 To return to the pre-migration app, exit the running app from its tray menu and run `Rollback/PredatorControlApp-before-rust-migration.exe`. The prior Downloads folder was preserved. The source history bundle and migration patch are in `Verification`; source checkpoint: `1201b1d9ececfaba754e5ea0e95655939a0069e2`.
 
-This earlier release was unsigned. See the current 1.5.5 improvements note above for updated behavior.
+This earlier release was unsigned. See the current 1.5.8 improvements notes above for updated behavior.
 
 Local audit update: see AUDIT.md at the source root for fixes, exact verification scope, and unresolved hardware-policy findings.
 

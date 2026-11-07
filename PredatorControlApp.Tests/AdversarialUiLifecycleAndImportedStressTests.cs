@@ -353,7 +353,7 @@ namespace PredatorControlApp.Tests
         {
             StaTestRunner.Run(() =>
             {
-                var controller = new GameSyncController();
+                var controller = new GameSyncController(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "gamesync_" + System.Guid.NewGuid().ToString("N") + ".json"));
                 using var form = new GameSyncForm(controller, 165);
                 form.CreateControl();
 

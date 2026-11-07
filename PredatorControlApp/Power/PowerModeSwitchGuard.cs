@@ -219,6 +219,9 @@ namespace PredatorControlApp
                 _pendingMode = -1;
                 _workerRunning = false;
             }
+
+            // Cancel in-flight interval/settle delays so no work resumes after disposal.
+            try { _cts.Cancel(); } catch { }
         }
     }
 

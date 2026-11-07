@@ -9,10 +9,10 @@ This document details the architecture, C-ABI contract, thread safety, locking, 
 | Metric | Specification |
 |---|---|
 | **Native Library** | `predator_core.dll` (Rust, `cdylib`, MSVC / MinGW-w64 x86_64) |
-| **Total C-ABI Entry Points** | **172 exported symbols** across `lib.rs`, `migration_exports.rs`, and module headers |
+| **Total C-ABI Entry Points** | **218 exported symbols** across `lib.rs`, `migration_exports.rs`, `wmi_codec.rs`, `capability.rs`, `gameprobe.rs`, `power_limits.rs`, `service_proto.rs`, `settings_policy.rs`, `theme_policy.rs`, `wmi_payload.rs`, `catalog_policy.rs` and module headers (37 modules) |
 | **Panic Isolation** | **100%** of exports protected by `safe_ffi` (`std::panic::catch_unwind`) |
-| **Cargo Test Results** | **285 passed, 0 failed, 2 ignored** (100% across 6 test suites) (207 unit, 23 integration/fuzz, 7 doc tests) |
-| **Managed Test Results** | **770 passed, 0 failed** across `PredatorControlApp.Tests` (491 focused subsystem tests) |
+| **Cargo Test Results** | **306 passed, 0 failed, 2 ignored** (100% across the crate suites, including the new WMI-codec, capability and game-probe tests) |
+| **Managed Test Results** | **2,217 passed, 0 failed, 0 skipped** across `PredatorControlApp.Tests` (v1.5.8 full suite; 770 was the migration-time count) |
 | **Delivery Mechanism** | Single-file embedded resource; SHA-256 verified extraction to local app cache |
 | **P/Invoke Resolution** | `NativeLibrary.SetDllImportResolver` dynamic binding in `PredatorNativeCore.cs` |
 | **Degradation Model** | Graceful fallback to pure-managed implementations on native missing or error |
@@ -124,14 +124,18 @@ flowchart TD
       raw_pl2: u64,
       out_val: *mut u64,
   ) -> i32;
+  // Returns a 40-byte #[repr(C)] plan (mirrored value, both addresses and values,
+  // previous PL1 value, status) that the caller writes in order: first, then second.
   pub unsafe extern "C" fn predator_pawnio_plan_mchbar_write(
-      current_pl1: u32,
-      current_pl2: u32,
-      target_pl1: u32,
-      target_pl2: u32,
-      out_pl1: *mut u32,
-      out_pl2: *mut u32,
-      out_write_pl2_first: *mut i32,
+      current_mmio: u64,
+      read_ok: i32,
+      raw_pl1: u64,
+      raw_pl2: u64,
+      fallback_tau1: u64,
+      fallback_tau2: u64,
+      pl1_address: u64,
+      pl2_address: u64,
+      out_plan: *mut NativeMchbarWritePlan,
   ) -> i32;
   ```
 - **Thread Safety & Locking**:
@@ -405,7 +409,7 @@ Every wrapper in `PredatorNativeCore.cs` returns explicit sentinels on failure:
 Comprehensive validation has been performed across both native Rust test harnesses and managed .NET test suites:
 
 ### 5.1 Native Rust Test Suite (`cargo test`)
-- **Total Tests**: **285 passed, 0 failed, 2 ignored** (100% across 6 test suites)
+- **Total Tests**: **342 passed, 0 failed, 2 ignored** (100% across the crate suites)
 - **Unit Tests (`predator_core` lib)**: **207 passed, 0 failed**
 - **Integration & FFI Fuzz Tests**: **23 passed, 0 failed, 2 ignored**
 - **Doc & Benchmark Tests**: **7 passed, 0 failed**
@@ -418,7 +422,7 @@ Comprehensive validation has been performed across both native Rust test harness
   - `model_catalog::tests`: Exact pattern lookups, heuristic classification, family mappings.
 
 ### 5.2 Managed Test Suite (`dotnet test`)
-- **Total Tests**: **770 passed, 0 failed** across `PredatorControlApp.Tests`
+- **Total Tests**: **2,217 passed, 0 failed, 0 skipped** across `PredatorControlApp.Tests` (migration-time count was 770)
 - **Focused Subsystem Test Breakdown**:
   | Subsystem / Test Area | Filter Pattern | Passed Tests | Failed Tests | Duration |
   |---|---|---|---|---|

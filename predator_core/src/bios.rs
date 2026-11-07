@@ -911,11 +911,13 @@ impl BiosSubsystem {
             _ => "Special Key".to_string(),
         };
 
+        // Only the three documented percentage encodings are charge states.
+        // SMBIOS gaming record 0x15 carries capability flags on many models, not a
+        // percentage, so any other value must read as Disabled instead of inventing 10%.
         let usb_charge_current = match self.backend.read_acpi_register(0x15) {
             Ok(0x0A) => "Enabled (10%)".to_string(),
             Ok(0x14) => "Enabled (20%)".to_string(),
             Ok(0x1E) => "Enabled (30%)".to_string(),
-            Ok(v) if v > 0 => "Enabled (10%)".to_string(),
             _ => "Disabled".to_string(),
         };
 

@@ -11,17 +11,17 @@ description: >-
 
 # Acer Predator Hardware Control & Packaging Workflow
 
-Current local 1.5.5: verify embedded-only native loading, on-demand initialization, one startup update check, manual checks and checksum-required installation and privacy-aware compatibility reporting. The executable is unsigned until signed by a trusted publisher.
+Current local 1.5.8: verify embedded-only native loading, on-demand initialization, one startup update check, manual checks and checksum-required installation and privacy-aware compatibility reporting. The executable is unsigned until signed by a trusted publisher.
 
 This skill provides the comprehensive end-to-end procedure for developing and maintaining hardware utilities for Acer Predator / Nitro laptops, including reverse-engineered WMI methods, native Rust hardware acceleration (`predator_core`), NVAPI thermal monitoring, system power state synchronization, test safety, and deployment.
 
-This copy documents the local 1.5.5 brightness update, not an official upstream release. The previous brightness update passed 243 selected .NET and 126 pure Rust tests; those are historical results. Earlier migration verification: 262 selected .NET tests passed; Release build had zero warnings and errors; 137 Rust tests passed across 15 filtered module runs. The complete inherited hardware/integration suite, UI launch, and physical keyboard brightness require separate verification.
+This copy documents the local 1.5.8 update, not an official upstream release. The previous brightness update passed 243 selected .NET and 126 pure Rust tests; those are historical results. Current migration verification: 2,217 managed tests pass (0 failed, 0 skipped); the Release build has zero warnings and errors; 342 Rust tests pass (2 hardware-only tests ignored). The complete inherited hardware/integration suite, UI launch, and physical keyboard brightness require separate verification.
 
 ---
 
-## Rust migration scope for local 1.5.5
+## Rust migration scope for local 1.5.8
 
-SMBIOS type 170/172 parsing, selected protocol packet rules, lighting tier arbitration, hex parsing, color blending, and service-level quantization are native-first. Preserve C# reference fallbacks. Existing WMI/HID transport and hardware-write paths remain unchanged; EC-HID transport, ACPI PPCC and RGB frame processing were already partly or fully native. Validate native/managed parity with synthetic malformed and boundary inputs and retain the brightness regressions. Do not claim hardware validation without actual device testing. Current verification: 262 selected .NET tests passed; Release build had zero warnings and errors; 137 Rust tests passed across 15 filtered module runs.
+SMBIOS type 170/172 parsing, selected protocol packet rules, lighting tier arbitration, hex parsing, color blending, and service-level quantization are native-first. Preserve C# reference fallbacks. Existing WMI/HID transport and hardware-write paths remain unchanged; EC-HID transport, ACPI PPCC and RGB frame processing were already partly or fully native. Validate native/managed parity with synthetic malformed and boundary inputs and retain the brightness regressions. Do not claim hardware validation without actual device testing. Current verification: 2,217 managed tests pass (0 failed, 0 skipped); the Release build has zero warnings and errors; 342 Rust tests pass (2 hardware-only tests ignored).
 
 ---
 
@@ -140,7 +140,7 @@ Acer EC firmware independently re-enables keyboard backlights upon physical lid 
 
 ## 6. Testing scope and quality gates
 
-The previous brightness update passed 243 selected .NET and 126 pure Rust tests; those are historical results. Earlier migration verification: 262 selected .NET tests passed; Release build had zero warnings and errors; 137 Rust tests passed across 15 filtered module runs. The complete inherited hardware/integration suite, UI launch, and physical keyboard brightness require separate verification.
+The previous brightness update passed 243 selected .NET and 126 pure Rust tests; those are historical results. Current migration verification: 2,217 managed tests pass (0 failed, 0 skipped); the Release build has zero warnings and errors; 342 Rust tests pass (2 hardware-only tests ignored). The complete inherited hardware/integration suite, UI launch, and physical keyboard brightness require separate verification.
 
 Audit tests before execution. Some inherited tests can initialize live hardware or drivers; run the relevant hardware-disabled regressions and pure tests rather than assuming a full-suite command is harmless. Report exact commands, results, and unrun checks. Physical hardware validation remains distinct from mocked packet assertions.
 
@@ -174,7 +174,7 @@ The native source has 19 subsystem modules. The three additional modules export 
 
 Embed `requireAdministrator` in `app.manifest` for required ACPI WMI access and PawnIO driver communication.
 
-The local 1.5.5 build uses `%LocalAppData%\PredatorControlApp\native\v1.5.5\<SHA-256>\predator_core.dll`. Rebuild and copy the native core into the app's embedded-resource location and test outputs before publishing. Only the verified embedded DLL loads; exclude stale sidecars and build caches from the distributable. The local executable is unsigned; package SHA-256 checksums provide file-integrity comparisons, not publisher signatures.
+The local 1.5.8 build uses `%LocalAppData%\PredatorControlApp\native\v1.5.8\<SHA-256>\predator_core.dll`. Rebuild and copy the native core into the app's embedded-resource location and test outputs before publishing. Only the verified embedded DLL loads; exclude stale sidecars and build caches from the distributable. The local executable is unsigned; package SHA-256 checksums provide file-integrity comparisons, not publisher signatures.
 
 Hardware operation works without internet access. The updater checks GitHub once at startup, including hidden launches, and on request through Settings. It does not poll periodically and requires an asset-specific SHA-256 before executable installation.
 

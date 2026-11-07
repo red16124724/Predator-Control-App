@@ -245,7 +245,7 @@ namespace PredatorControlApp.Tests
         [Fact]
         public void UiLifecycle_GameSyncForm_DisposalClean_And_DrawItemStringFormatReused()
         {
-            var controller = new GameSyncController();
+            var controller = new GameSyncController(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "gamesync_" + System.Guid.NewGuid().ToString("N") + ".json"));
             controller.AddProfile(new GameProfile { ExecutableName = "game.exe", DisplayName = "Test Game" });
             var form = new GameSyncForm(controller, 144);
             Assert.NotNull(form);

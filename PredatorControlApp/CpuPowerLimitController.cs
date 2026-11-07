@@ -1,5 +1,6 @@
 using System;
 
+using System.Collections.Generic;
 using System.Runtime.Versioning;
 
 using System.Threading;
@@ -75,6 +76,21 @@ namespace PredatorControlApp
         private CancellationTokenSource? _modeTransitionCts;
 
         private readonly object _modeTransitionLock = new();
+
+        private CancellationTokenSource? _modeSwitchCts;
+        private readonly object _modeSwitchLock = new();
+
+        // Last wattage this controller successfully pushed to MSR 0x610 / MMIO 0xFED159A0-0xFED159A4.
+        // Reset on every mode switch because the Acer EC rewrites stock BIOS limits mid-transition.
+        private int _lastAppliedPl1Watts = -1;
+        private int _lastAppliedPl2Watts = -1;
+
+        /// <summary>
+        /// Staggered settle passes for a mode switch. The Acer EC needs 250ms-1200ms to load the
+        /// new thermal tables and asynchronously restore stock BIOS PL1/PL2, so a single 0ms write
+        /// is always clobbered.
+        /// </summary>
+        private static readonly int[] ModeSwitchSettleDelaysMs = { 0, 250, 600, 1200 };
 
 
 
@@ -1505,7 +1521,11 @@ namespace PredatorControlApp
 
 
 
-                if (Math.Abs(currentPl1 - targetPl1) > 1 || Math.Abs(currentPl2 - targetPl2) > 1)
+                // Verify both the MSR (0x610) and the MMIO mirror: the EC can restore one
+                // without the other during a mode transition.
+                bool mmioDeviates = MmioPowerLimitsDeviate(unitsPerWatt, targetPl1, targetPl2);
+
+                if (mmioDeviates || Math.Abs(currentPl1 - targetPl1) >= 1 || Math.Abs(currentPl2 - targetPl2) >= 1)
 
                 {
 
@@ -1819,6 +1839,205 @@ namespace PredatorControlApp
 
 
 
+        /// <summary>
+        /// Parses an operating-mode name ("Eco", "Quiet", "Balanced", "Performance", "Turbo")
+        /// into the matching <see cref="OperatingMode"/>. Unknown names fall back to Balanced.
+        /// </summary>
+        public static OperatingMode ParseModeName(string? modeName)
+        {
+            if (!string.IsNullOrWhiteSpace(modeName) &&
+                Enum.TryParse(modeName.Trim(), ignoreCase: true, out OperatingMode parsed) &&
+                Enum.IsDefined(typeof(OperatingMode), parsed))
+            {
+                return parsed;
+            }
+
+            return OperatingMode.Balanced;
+        }
+
+        /// <summary>
+        /// Thread-safe applied-wattage cache invalidation. The next enforcement pass performs a
+        /// full unconditional write to both MSR 0x610 and the MMIO package RAPL mirror.
+        /// </summary>
+        public void InvalidateAppliedLimitsCache()
+        {
+            lock (_syncLock)
+            {
+                _lastAppliedPl1Watts = -1;
+                _lastAppliedPl2Watts = -1;
+            }
+        }
+
+        /// <summary>
+        /// Last wattage written by this controller, or (-1, -1) after cache invalidation.
+        /// </summary>
+        public (int Pl1, int Pl2) LastAppliedLimits
+        {
+            get { lock (_syncLock) return (_lastAppliedPl1Watts, _lastAppliedPl2Watts); }
+        }
+
+        /// <summary>
+        /// Re-asserts the custom PL1/PL2 of <paramref name="newModeName"/> across the Acer EC
+        /// settle window (0ms, 250ms, 600ms, 1200ms). Safe to call from every mode-switch path:
+        /// a newer switch cancels the previous in-flight enforcement loop.
+        /// </summary>
+        public Task ApplyForModeSwitchAsync(string newModeName, CancellationToken appShutdownToken = default)
+            => ApplyForModeSwitchAsync(newModeName, ModeSwitchSettleDelaysMs, appShutdownToken);
+
+        internal async Task ApplyForModeSwitchAsync(
+            string newModeName,
+            IReadOnlyList<int> settleDelaysMs,
+            CancellationToken appShutdownToken = default)
+        {
+            if (_disposed || settleDelaysMs == null || settleDelaysMs.Count == 0)
+                return;
+
+            OperatingMode mode = ParseModeName(newModeName);
+
+            CancellationTokenSource linkedCts;
+            lock (_modeSwitchLock)
+            {
+                try { _modeSwitchCts?.Cancel(); _modeSwitchCts?.Dispose(); } catch { }
+                _modeSwitchCts = CancellationTokenSource.CreateLinkedTokenSource(appShutdownToken);
+                linkedCts = _modeSwitchCts;
+            }
+
+            CancellationToken ct = linkedCts.Token;
+
+            // The EC overwrites the registers while it loads the new thermal tables, so any
+            // cached "already applied" verdict is untrustworthy for this transition.
+            InvalidateAppliedLimitsCache();
+
+            var (userPl1, userPl2) = _settings.GetUserPowerLimitsForMode(mode);
+            bool customEnabled = userPl1 > 0 && userPl2 > 0 &&
+                                 (_settings.EnableCustomPowerLimits || _settings.HasCustomPowerLimitsForMode(mode));
+
+            if (!customEnabled)
+            {
+                // Leave the stock limits that the EC/BIOS install for this mode alone.
+                if (_settings.HardwareHasActiveCustomPowerOverride)
+                {
+                    _settings.HardwareHasActiveCustomPowerOverride = false;
+                    _settings.Save();
+                    RegistrySafety.SaveCpuPowerLimits(_settings);
+                }
+
+                return;
+            }
+
+            for (int pass = 0; pass < settleDelaysMs.Count; pass++)
+            {
+                int delayMs = settleDelaysMs[pass];
+                if (delayMs > 0)
+                {
+                    try
+                    {
+                        await Task.Delay(delayMs, ct).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        return;
+                    }
+                }
+
+                if (ct.IsCancellationRequested || _disposed)
+                    return;
+
+                // Re-read on every pass: a slider drag during the settle window must win.
+                var (latestPl1, latestPl2) = _settings.GetUserPowerLimitsForMode(mode);
+                if (latestPl1 <= 0 || latestPl2 <= 0)
+                    return;
+
+                EnforceLimitsForMode(mode, forceWrite: true);
+            }
+        }
+
+        /// <summary>
+        /// Writes the effective (thermal-capped) limits for <paramref name="mode"/> to MSR 0x610
+        /// and MMIO 0xFED159A0/0xFED159A4. <paramref name="forceWrite"/> documents the caller's
+        /// intent: a mode switch always writes, never skips on a cached value.
+        /// </summary>
+        private PowerLimitApplyResult EnforceLimitsForMode(OperatingMode mode, bool forceWrite)
+        {
+            PowerLimitApplyResult res;
+
+            lock (_syncLock)
+            {
+                if (_disposed)
+                    return PowerLimitApplyResult.DriverNotInstalled("Controller disposed");
+
+                var (userPl1, userPl2) = _settings.GetUserPowerLimitsForMode(mode);
+                bool hasCustom = userPl1 > 0 && userPl2 > 0;
+
+                var (rawPl1, rawPl2) = _settings.GetEffectivePowerLimitsForMode(mode);
+                var (effPl1, effPl2) = ApplyThermalSafetyCap(rawPl1, rawPl2);
+
+                if (effPl1 <= 0 || effPl2 <= 0)
+                    return PowerLimitApplyResult.HardwareError("Invalid effective power limits for mode.");
+
+                // Intentionally unconditional: PawnIoController always rewrites both registers.
+                _ = forceWrite;
+                res = _pawnIoController.ApplyPowerLimits(effPl1, effPl2);
+
+                if (res.IsSuccess)
+                {
+                    _lastAppliedPl1Watts = res.AppliedPl1Watts;
+                    _lastAppliedPl2Watts = res.AppliedPl2Watts;
+
+                    if (hasCustom && !_settings.HardwareHasActiveCustomPowerOverride)
+                    {
+                        _settings.HardwareHasActiveCustomPowerOverride = true;
+                        _settings.Save();
+                        RegistrySafety.SaveCpuPowerLimits(_settings);
+                    }
+                }
+            }
+
+            return res;
+        }
+
+        /// <summary>
+        /// Reads the MMIO package RAPL mirror (0xFED159A0 low DWORD = PL1, 0xFED159A4 high DWORD = PL2)
+        /// and reports whether either limit deviates from the target by at least 1W.
+        /// </summary>
+        private bool MmioPowerLimitsDeviate(uint unitsPerWatt, int targetPl1, int targetPl2)
+        {
+            if (unitsPerWatt == 0)
+                return false;
+
+            try
+            {
+                var backend = _pawnIoController.Backend;
+                if (backend == null)
+                    return false;
+
+                ulong pl1Address = _pawnIoController.GetMmioPackageRaplPl1Address();
+                ulong pl2Address = _pawnIoController.GetMmioPackageRaplPl2Address();
+
+                if (!backend.ReadMmio32(pl1Address, out uint low) ||
+                    !backend.ReadMmio32(pl2Address, out uint high))
+                {
+                    return false;
+                }
+
+                // Firmware lock bit lives in bit 31 of the PL2 dword.
+                if ((high & (1U << 31)) != 0)
+                    return false;                bool? nativeDeviates = PredatorNativeMigrations.PowerMmioDeviation(
+                    low, high, unitsPerWatt, targetPl1, targetPl2);
+                if (nativeDeviates.HasValue) return nativeDeviates.Value;
+
+                int mmioPl1 = (int)Math.Round((low & 0x7FFF) / (double)unitsPerWatt);
+
+                int mmioPl2 = (int)Math.Round((high & 0x7FFF) / (double)unitsPerWatt);
+
+                return Math.Abs(mmioPl1 - targetPl1) >= 1 || Math.Abs(mmioPl2 - targetPl2) >= 1;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         public PowerLimitApplyResult ApplyPowerLimitsForMode(OperatingMode mode, bool forceHardwareApply = false)
 
         {
@@ -1879,6 +2098,13 @@ namespace PredatorControlApp
                 {
 
                     res = _pawnIoController.ApplyPowerLimits(effPl1, effPl2);
+
+                    if (res.IsSuccess)
+                    {
+                        // Track what is actually on the wire; any mode switch invalidates it.
+                        _lastAppliedPl1Watts = res.AppliedPl1Watts;
+                        _lastAppliedPl2Watts = res.AppliedPl2Watts;
+                    }
 
                     if (res.IsSuccess && hasUserLimits)
 
@@ -1985,6 +2211,13 @@ namespace PredatorControlApp
 
                     res = _pawnIoController.ApplyPowerLimits(effPl1, effPl2);
 
+                    if (res.IsSuccess)
+                    {
+                        // Track what is actually on the wire; any mode switch invalidates it.
+                        _lastAppliedPl1Watts = res.AppliedPl1Watts;
+                        _lastAppliedPl2Watts = res.AppliedPl2Watts;
+                    }
+
                     if (res.IsSuccess && hasCustom)
 
                     {
@@ -2068,6 +2301,13 @@ namespace PredatorControlApp
                     (effPl1, effPl2) = ApplyThermalSafetyCap(ePl1, ePl2);
 
                     res = _pawnIoController.ApplyPowerLimits(effPl1, effPl2);
+
+                    if (res.IsSuccess)
+                    {
+                        // Track what is actually on the wire; any mode switch invalidates it.
+                        _lastAppliedPl1Watts = res.AppliedPl1Watts;
+                        _lastAppliedPl2Watts = res.AppliedPl2Watts;
+                    }
 
                     if (res.IsSuccess)
 
@@ -2524,6 +2764,8 @@ namespace PredatorControlApp
             {
 
                 try { _modeTransitionCts?.Cancel(); _modeTransitionCts?.Dispose(); _modeTransitionCts = null; } catch { }
+                try { _modeSwitchCts?.Cancel(); _modeSwitchCts?.Dispose(); _modeSwitchCts = null; } catch { }
+                InvalidateAppliedLimitsCache();
 
             }
 

@@ -834,7 +834,7 @@ namespace PredatorControlApp.Tests
 
             try
             {
-                using var ctrl = new GameSyncController();
+                using var ctrl = new GameSyncController(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "gamesync_" + System.Guid.NewGuid().ToString("N") + ".json"));
 
                 // Verified: Corrupted JSON is safely wrapped and thrown as InvalidDataException with inner JsonException
                 var ex = Assert.Throws<InvalidDataException>(() =>

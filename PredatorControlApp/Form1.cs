@@ -1179,6 +1179,7 @@ namespace PredatorControlApp
         private PredatorButton _btnNavRgb => _btnNavLighting;
 
         private ListView? _lvGameProfiles;
+        private Label? _lblGameSyncEmpty;
         private PredatorButton? _btnGameSyncAdd, _btnGameSyncEdit, _btnGameSyncDelete;
 
         private PredatorButton? _activeNavBtn;
@@ -10279,7 +10280,13 @@ namespace PredatorControlApp
 
                 applyHardware: mode => _wmi.TrySetPowerMode(mode, forceRetry: true),
 
-                onApplied: mode => _ = CpuPowerLimitController.Instance?.OnPowerModeChanged(ByteToOperatingMode(mode)),
+                onApplied: mode =>
+                {
+                    _ = CpuPowerLimitController.Instance?.OnPowerModeChanged(ByteToOperatingMode(mode));
+                    // The guard owns the EC/WMI write; immediately re-assert custom PL1/PL2 so the
+                    // stock limits the EC installs during its settle window get overwritten.
+                    ApplyModeSwitchPowerLimits(mode);
+                },
 
                 minIntervalMs: 900,
 
@@ -10465,6 +10472,21 @@ namespace PredatorControlApp
 
             cardProfiles.Controls.Add(_lvGameProfiles);
 
+            _lblGameSyncEmpty = new Label
+            {
+                Text = "No game profiles configured. Use Add Profile to pick a game executable.",
+                ForeColor = SubHeaderColor,
+                Font = FontBody,
+                TextAlign = ContentAlignment.MiddleCenter,
+                AutoSize = false,
+                Size = new Size(listW, S(64)),
+                Location = new Point(cPad, listY + Math.Max(0, (listH - S(64)) / 2)),
+                BackColor = ThemeManager.CardBg,
+                Visible = false
+            };
+            cardProfiles.Controls.Add(_lblGameSyncEmpty);
+            _lblGameSyncEmpty.BringToFront();
+
             PopulateGameSyncProfilesList();
 
             _pnlGameSync.AutoScrollMinSize = new Size(0, cardProfilesTop + cardProfilesH + pad * 2);
@@ -10551,6 +10573,13 @@ namespace PredatorControlApp
             }
 
             _lvGameProfiles.EndUpdate();
+
+            if (_lblGameSyncEmpty != null && !_lblGameSyncEmpty.IsDisposed)
+            {
+                _lblGameSyncEmpty.BackColor = ThemeManager.CardBg;
+                _lblGameSyncEmpty.ForeColor = SubHeaderColor;
+                _lblGameSyncEmpty.Visible = _lvGameProfiles.Items.Count == 0;
+            }
         }
 
         private void OnAddGameSyncProfile()
@@ -11545,6 +11574,37 @@ namespace PredatorControlApp
 
 
 
+        /// <summary>
+        /// Loads the saved per-mode PL1/PL2 values (falling back to the mode's BIOS default only when
+        /// the user has not customized that mode) into the sliders and wattage labels. Slider events
+        /// stay suppressed here, so the hardware apply must be triggered explicitly afterwards.
+        /// </summary>
+        private void SyncPowerLimitSlidersToMode(byte mode)
+        {
+            _appSettings.PowerMode = mode;
+            UpdatePowerLimitsForMode(mode);
+        }
+
+        /// <summary>
+        /// Forces CpuPowerLimitController to re-assert the newly activated mode's custom PL1/PL2
+        /// across the Acer EC settle window. Every mode-switch path (UI button, tray, Mode/Turbo
+        /// hotkey, GameSync, AC/DC transition, custom shortcut) must call this after the slider sync.
+        /// Fire-and-forget: the controller serializes and latest-wins its own settle loops.
+        /// </summary>
+        private void ApplyModeSwitchPowerLimits(byte mode)
+        {
+            try
+            {
+                var controller = CpuPowerLimitController.Instance;
+                if (controller == null) return;
+                _ = controller.ApplyForModeSwitchAsync(GetPowerModeName(mode), _shutdownCts.Token);
+            }
+            catch (Exception ex)
+            {
+                Program.Report(ex, false);
+            }
+        }
+
         private void ApplyPowerMode(byte mode, PredatorButton? btn)
 
         {
@@ -11556,6 +11616,11 @@ namespace PredatorControlApp
             _currentPowerMode = mode;
 
             _pendingTargetPowerMode = mode;
+
+            // Single funnel for every mode-switch path: persist the mode, sync the sliders, then
+            // unconditionally force the custom PL1/PL2 write for the new mode.
+            SyncPowerLimitSlidersToMode(mode);
+            ApplyModeSwitchPowerLimits(mode);
 
             _powerModeTransitionLockUntilUtc = DateTime.UtcNow.AddMilliseconds(PowerModeTransitionLockMs);
 
@@ -17177,6 +17242,9 @@ namespace PredatorControlApp
                     {
 
                         HighlightBtn(PowerByteToBtn(_currentPowerMode), ref _activePowerBtn);
+                        // Mode unchanged by this AC/DC transition, but the EC still reloaded its
+                        // thermal table, so re-assert the active mode's custom limits.
+                        ApplyModeSwitchPowerLimits(_currentPowerMode);
 
                         UpdatePowerModePill(_currentPowerMode);
 
@@ -17255,6 +17323,9 @@ namespace PredatorControlApp
                     {
 
                         HighlightBtn(PowerByteToBtn(_currentPowerMode), ref _activePowerBtn);
+                        // Mode unchanged by this AC/DC transition, but the EC still reloaded its
+                        // thermal table, so re-assert the active mode's custom limits.
+                        ApplyModeSwitchPowerLimits(_currentPowerMode);
 
                         UpdatePowerModePill(_currentPowerMode);
 

@@ -266,7 +266,7 @@ namespace PredatorControlApp.Tests
                 }
 
                 // 3. GameSyncForm
-                using (var ctrl = new GameSyncController())
+                using (var ctrl = new GameSyncController(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "gamesync_" + System.Guid.NewGuid().ToString("N") + ".json")))
                 using (var f3 = new GameSyncForm(ctrl, 165))
                 {
                     var onDpi = typeof(GameSyncForm).GetMethod("OnDpiChanged", BindingFlags.NonPublic | BindingFlags.Instance);

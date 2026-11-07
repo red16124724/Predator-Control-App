@@ -1,7 +1,7 @@
-<!-- Current local 1.5.5 improvements include startup and manual checks with checksum-required installation, embedded native verification, lazy initialization, and compatibility diagnostics. The executable is unsigned; record actual tests. -->
+<!-- Current local 1.5.8 improvements include startup and manual checks with checksum-required installation, embedded native verification, lazy initialization, and compatibility diagnostics. The executable is unsigned; record actual tests. -->
 ## Description
 <!-- Please describe your changes and the problem they solve. -->
-<!-- This source package is the local 1.5.5 brightness update, not an official upstream release. -->
+<!-- This source package is the local 1.5.8 update, not an official upstream release. -->
 
 ## Changes Made
 - 
@@ -14,7 +14,7 @@
 - **Brightness comparison:** static color/effect, AC or battery, and 0% / intermediate / 100% results
 
 ## Validation
-<!-- Record exact commands and results. Current local package: The previous brightness update passed 243 selected .NET and 126 pure Rust tests; those are historical results. Earlier migration verification: 262 selected .NET tests passed; Release build had zero warnings and errors; 137 Rust tests passed across 15 filtered module runs. The complete inherited hardware/integration suite, UI launch, and physical keyboard brightness require separate verification. -->
+<!-- Record exact commands and results. Current local package: The previous brightness update passed 243 selected .NET and 126 pure Rust tests; those are historical results. Current migration verification: 2,217 managed tests pass (0 failed, 0 skipped); the Release build has zero warnings and errors; 342 Rust tests pass (2 hardware-only tests ignored). The complete inherited hardware/integration suite, UI launch, and physical keyboard brightness require separate verification. -->
 <!-- Do not run inherited hardware-accessing tests without auditing and deliberate authorization. -->
 
 ## Checklist
@@ -33,7 +33,7 @@
 - [ ] Existing brightness regression regression tests passed.
 - [ ] Device discovery and hardware writes were only exercised when explicitly authorized on suitable hardware.
 
-Current local migration verification: 262 selected .NET tests passed; Release build had zero warnings and errors; 137 Rust tests passed across 15 filtered module runs.
+Current local migration verification: 2,217 managed tests pass (0 failed, 0 skipped); the Release build has zero warnings and errors; 342 Rust tests pass (2 hardware-only tests ignored).
 
 Migration test scope: targeted tests do not intentionally issue hardware writes. In the earlier migration, loading PredatorNativeCore could open PawnIO and start telemetry/NVAPI polling. The current build initializes those facilities on demand; tests that request hardware operations still require care. Physical hardware effects were not measured.
 

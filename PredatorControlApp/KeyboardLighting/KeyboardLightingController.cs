@@ -193,16 +193,6 @@ namespace PredatorControlApp
             }
         }
 
-        public void SetKeyColors(IReadOnlyList<Color> colors)
-        {
-            if (colors == null) return;
-            lock (_sync)
-            {
-                int count = Math.Min(colors.Count, _keyColors.Length);
-                for (int i = 0; i < count; i++) _keyColors[i] = colors[i];
-            }
-        }
-
         public void SetAllKeys(Color color)
         {
             lock (_sync)

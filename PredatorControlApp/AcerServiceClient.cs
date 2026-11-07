@@ -405,16 +405,6 @@ namespace PredatorControlApp
 
 
 
-        public static void SetExteriorColor(Color color, int brightness = 100, int speed = 1)
-
-        {
-
-            try { SetExteriorColorAsync(color, brightness, speed).Wait(1000); } catch { }
-
-        }
-
-
-
         public const uint LcdOverdrivePacketId = 100;
 
 
@@ -876,6 +866,8 @@ namespace PredatorControlApp
 
         {
 
+            string? canonical = PredatorNativeMigrations.ServiceNormalizeEffect(effect);
+            if (canonical != null) return canonical;
             if (string.IsNullOrWhiteSpace(effect)) return "STATIC";
 
             var sb = new StringBuilder(effect.Length);
@@ -1018,7 +1010,8 @@ namespace PredatorControlApp
 
                 byte[] jsonBytes = Encoding.UTF8.GetBytes(safePayload);
 
-                byte[] packet = new byte[8 + jsonBytes.Length];
+                byte[] packet = PredatorNativeMigrations.ServiceBuildPacket(packetId, jsonBytes)
+                    ?? new byte[8 + jsonBytes.Length];
 
 
 

@@ -387,6 +387,26 @@ namespace PredatorControlApp
             return running.Contains(nameWithoutExe + ".exe") || running.Contains(nameWithoutExe);
         }
 
+        private static bool ContainsProcessName(HashSet<string> running, string? exeName)
+        {
+            if (running == null || running.Count == 0 || string.IsNullOrEmpty(exeName)) return false;
+
+            int capacity = 0;
+            foreach (var name in running) capacity += System.Text.Encoding.UTF8.GetByteCount(name) + 1;
+            if (capacity <= 0) return running.Contains(exeName);
+
+            byte[] blob = new byte[capacity];
+            int offset = 0;
+            foreach (var name in running)
+            {
+                offset += System.Text.Encoding.UTF8.GetBytes(name, 0, name.Length, blob, offset) + 1;
+            }
+
+            int? nativeIndex = PredatorNativeMigrations.SelectProcessIndex(blob, exeName);
+            if (nativeIndex.HasValue) return nativeIndex.Value >= 0;
+            return running.Contains(exeName);
+        }
+
         private void PollProcesses(object? sender, EventArgs e)
         {
             if (Interlocked.CompareExchange(ref _isPolling, 1, 0) != 0) return;
@@ -547,7 +567,7 @@ namespace PredatorControlApp
             if (currentActiveExe != null)
             {
                 string activeName = SafeGetExecutableName(currentActiveExe);
-                bool stillRunning = runningProcs.Contains(activeName);
+                bool stillRunning = ContainsProcessName(runningProcs, activeName);
 
                 if (!stillRunning)
                 {
@@ -563,7 +583,7 @@ namespace PredatorControlApp
                             foreach (var profile in profilesSnapshot)
                             {
                                 string exeName = SafeGetExecutableName(profile.ExecutableName);
-                                if (runningProcs.Contains(exeName))
+                                if (ContainsProcessName(runningProcs, exeName))
                                 {
                                     _activeExe = profile.ExecutableName;
                                     _savedSnapshot = exitedSnapshot; // Preserve original pre-game snapshot!
@@ -581,7 +601,7 @@ namespace PredatorControlApp
                 foreach (var profile in profilesSnapshot)
                 {
                     string exeName = SafeGetExecutableName(profile.ExecutableName);
-                    if (runningProcs.Contains(exeName))
+                    if (ContainsProcessName(runningProcs, exeName))
                     {
                         lock (_lock)
                         {
@@ -676,6 +696,20 @@ namespace PredatorControlApp
             }
         }
 
+        /// <summary>
+        /// Adds a profile read from disk or the registry, dropping entries that fail
+        /// validation or duplicate an executable already loaded in this pass.
+        /// </summary>
+        private void AddLoadedProfile(GameProfile? p)
+        {
+            if (p == null || string.IsNullOrWhiteSpace(p.ExecutableName)) return;
+            if (!p.Validate(out _)) return;
+            p.Sanitize();
+            SanitizeProfileValues(p);
+            if (_profiles.Any(existing => existing.ExecutableName.Equals(p.ExecutableName, StringComparison.OrdinalIgnoreCase))) return;
+            _profiles.Add(p);
+        }
+
         public void Load()
         {
             lock (_lock)
@@ -695,11 +729,7 @@ namespace PredatorControlApp
                             {
                                 foreach (var p in data.Profiles)
                                 {
-                                    if (p != null && !string.IsNullOrWhiteSpace(p.ExecutableName))
-                                    {
-                                        SanitizeProfileValues(p);
-                                        _profiles.Add(p);
-                                    }
+                                    AddLoadedProfile(p);
                                 }
                             }
                             loaded = true;
@@ -725,11 +755,7 @@ namespace PredatorControlApp
                                 {
                                     foreach (var p in data.Profiles)
                                     {
-                                        if (p != null && !string.IsNullOrWhiteSpace(p.ExecutableName))
-                                        {
-                                            SanitizeProfileValues(p);
-                                            _profiles.Add(p);
-                                        }
+                                        AddLoadedProfile(p);
                                     }
                                 }
                             }
@@ -747,11 +773,7 @@ namespace PredatorControlApp
                         {
                             foreach (var p in regProfiles)
                             {
-                                if (p != null && !string.IsNullOrWhiteSpace(p.ExecutableName))
-                                {
-                                    SanitizeProfileValues(p);
-                                    _profiles.Add(p);
-                                }
+                                AddLoadedProfile(p);
                             }
                         }
                     }

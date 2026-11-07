@@ -13,26 +13,6 @@ namespace PredatorControlApp
         private static readonly object _stateLock = new();
         private static readonly TimeSpan CheckCacheDuration = TimeSpan.FromMilliseconds(1000);
 
-        public static bool IsAudioPlaying()
-        {
-            lock (_stateLock)
-            {
-                if (DateTime.UtcNow - _lastCheckTime < CheckCacheDuration)
-                    return _lastResult;
-
-                _lastCheckTime = DateTime.UtcNow;
-                try
-                {
-                    _lastResult = CheckActiveAudioSessions();
-                }
-                catch
-                {
-                    _lastResult = false;
-                }
-                return _lastResult;
-            }
-        }
-
         private static bool CheckActiveAudioSessions()
         {
             var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumerator();
@@ -104,6 +84,38 @@ namespace PredatorControlApp
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// True when any render session is active. The decision of whether to
+        /// re-query is native; the COM walk itself stays managed.
+        /// </summary>
+        public static bool IsAudioPlaying()
+        {
+            lock (_stateLock)
+            {
+                DateTime now = DateTime.UtcNow;
+                long lastMs = _lastCheckTime == DateTime.MinValue
+                    ? 0
+                    : _lastCheckTime.Ticks / TimeSpan.TicksPerMillisecond;
+                long nowMs = now.Ticks / TimeSpan.TicksPerMillisecond;
+
+                bool? shouldQuery = PredatorNativeMigrations.MediaShouldQuery(
+                    lastMs, nowMs, (long)CheckCacheDuration.TotalMilliseconds);
+                if (shouldQuery.HasValue && !shouldQuery.Value) return _lastResult;
+
+                try
+                {
+                    _lastResult = CheckActiveAudioSessions();
+                }
+                catch
+                {
+                    _lastResult = false;
+                }
+
+                _lastCheckTime = now;
+                return _lastResult;
+            }
         }
 
         public enum AudioSessionState

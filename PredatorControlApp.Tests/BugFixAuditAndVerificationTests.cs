@@ -559,7 +559,16 @@ namespace PredatorControlApp.Tests
             // Re-applying the same mode without forceRetry MUST immediately return true
             // to prevent redundant EC writes that trigger the hardware keyboard RGB notification blink/pulse on Helios Neo / AI models
             bool redundantResult = wmi.TrySetPowerMode(0x01, forceRetry: false);
-            Assert.True(redundantResult);
+            // The write above never reached the hardware (no EC/WMI transport in this
+            // environment), so the repeat must retry instead of returning a false success.
+            Assert.False(redundantResult);
+
+            // Once the hardware confirms the mode, redundant writes are still suppressed
+            // (this is the Helios Neo anti-blinking guarantee).
+            typeof(WmiController)
+                .GetField("_lastConfirmedPowerMode", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+                .SetValue(wmi, (byte?)0x01);
+            Assert.True(wmi.TrySetPowerMode(0x01, forceRetry: false));
             Assert.Equal((byte)0x01, wmi.LastAppliedPowerMode);
 
             // Explicit forceRetry: true bypasses the redundant check
@@ -573,7 +582,13 @@ namespace PredatorControlApp.Tests
 
             // Redundant Turbo write without forceRetry also returns true without touching hardware
             bool turboRedundant = wmi.TrySetPowerMode(0x05, forceRetry: false);
-            Assert.True(turboRedundant);
+            // Turbo was unconfirmed as well, so it retries; seed confirmation to prove the
+            // redundant-write suppression still applies once the hardware acknowledged it.
+            Assert.False(turboRedundant);
+            typeof(WmiController)
+                .GetField("_lastConfirmedPowerMode", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+                .SetValue(wmi, (byte?)0x05);
+            Assert.True(wmi.TrySetPowerMode(0x05, forceRetry: false));
             Assert.Equal((byte)0x05, wmi.LastAppliedPowerMode);
         }
 

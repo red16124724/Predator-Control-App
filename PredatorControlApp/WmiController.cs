@@ -1,4 +1,4 @@
-﻿using System.Management;
+using System.Management;
 
 using System.Numerics;
 
@@ -893,17 +893,6 @@ namespace PredatorControlApp
             return SendCommandUnderLock("SetGamingSysInfo", payload);
         }
 
-        public bool SetWinKeyLock(bool enable)
-        {
-            lock (_lock)
-            {
-                var (getOk, currentVal) = GetGamingSysInfoUnderLock(AcerProtocol.GamingSysInfoConfigQuery);
-                ulong payload = AcerProtocol.ApplySystemConfigBitPreservingUpperBytes(getOk ? currentVal : 0, AcerProtocol.GamingSysInfoWinKeyBit, enable);
-                var res = SetGamingSysInfoUnderLock(payload);
-                return res.success;
-            }
-        }
-
         private (bool success, ulong output) SendCommandUnderLock(string method, ulong input)
 
         {
@@ -993,24 +982,6 @@ namespace PredatorControlApp
 
             }
 
-        }
-
-
-
-        private bool SendLedCommand(byte[] payload)
-        {
-            if (Monitor.TryEnter(_lock, TimeSpan.FromSeconds(3)))
-            {
-                try
-                {
-                    return SendLedCommandUnderLock(payload);
-                }
-                finally
-                {
-                    Monitor.Exit(_lock);
-                }
-            }
-            return false;
         }
 
 
@@ -1211,6 +1182,8 @@ namespace PredatorControlApp
 
         {
 
+            int? nativeRpm = PredatorNativeMigrations.DecodeTachometer(raw);
+            if (nativeRpm.HasValue) return nativeRpm.Value;
             if ((raw & 0xFF) == 0) return (int)((raw >> 8) & 0x1FFF);
 
             return 0;
@@ -1231,6 +1204,8 @@ namespace PredatorControlApp
 
             // as an ACPI packet: (rpm << 8) | status_byte
 
+            int? nativeSpeed = PredatorNativeMigrations.DecodeFanSpeed(raw);
+            if (nativeSpeed.HasValue) return nativeSpeed.Value;
             if (raw > 0x1FFF)
 
             {
@@ -1483,7 +1458,18 @@ namespace PredatorControlApp
 
 
 
-        public static (byte R, byte G, byte B) GetModeLedColor(byte mode) => mode switch
+        public static (byte R, byte G, byte B) GetModeLedColor(byte mode)
+        {
+            int? native = PredatorNativeMigrations.ModeLedColor(mode);
+            if (native.HasValue)
+            {
+                int packed = native.Value;
+                return ((byte)((packed >> 16) & 0xFF), (byte)((packed >> 8) & 0xFF), (byte)(packed & 0xFF));
+            }
+            return LegacyModeLedColor(mode);
+        }
+
+        private static (byte R, byte G, byte B) LegacyModeLedColor(byte mode) => mode switch
 
         {
 
@@ -1535,6 +1521,10 @@ namespace PredatorControlApp
         }
 
         private byte? _lastAppliedPowerMode;
+
+        // Mode whose write the hardware actually accepted. Only this may satisfy the
+        // redundant-write short-circuit; a failed write must stay retryable.
+        private byte? _lastConfirmedPowerMode;
 
         public byte? LastAppliedPowerMode { get { lock (_lock) { return _lastAppliedPowerMode; } } }
 
@@ -1599,7 +1589,12 @@ namespace PredatorControlApp
             {
 
                 // Prevent redundant EC/WMI reassertions that cause RGB keyboard blinking on Helios Neo / AI models
-                if (!forceRetry && _lastAppliedPowerMode.HasValue && _lastAppliedPowerMode.Value == mode)
+                bool? nativeSuppress = PredatorNativeMigrations.ShouldSuppressModeWrite(
+                    _lastConfirmedPowerMode.HasValue,
+                    _lastConfirmedPowerMode.GetValueOrDefault(),
+                    mode,
+                    forceRetry);
+                if (nativeSuppress ?? (!forceRetry && _lastConfirmedPowerMode.HasValue && _lastConfirmedPowerMode.Value == mode))
                 {
                     return true;
                 }
@@ -1667,7 +1662,9 @@ namespace PredatorControlApp
                     currentMisc = getRes.output;
                 }
                 ulong payload;
-                if (currentMisc != 0)
+                ulong? nativeModePayload = PredatorNativeMigrations.BuildModePayload(currentMisc, mode);
+                if (nativeModePayload.HasValue) payload = nativeModePayload.Value;
+                else if (currentMisc != 0)
                 {
                     // Non-destructive read-modify-write: preserve bit 0 (Fn/Media key mode) and vendor flags
                     payload = (currentMisc & ~0xFF00UL) | ((ulong)mode << 8);
@@ -1687,7 +1684,15 @@ namespace PredatorControlApp
 
                 }
 
+                // Always track the requested mode so TryGetPowerMode() and the UI keep reporting
+                // the user's selection even on machines without an EC/WMI transport. Only a write
+                // the hardware accepted may satisfy the redundancy short-circuit above, otherwise
+                // a transient failure would suppress every later retry of that same mode.
                 _lastAppliedPowerMode = mode;
+                if (res.success || ecSuccess)
+                {
+                    _lastConfirmedPowerMode = mode;
+                }
 
                 success = res.success || ecSuccess;
 
@@ -1758,6 +1763,7 @@ namespace PredatorControlApp
                         {
 
                             _lastAppliedPowerMode = mappedMode;
+                            _lastConfirmedPowerMode = mappedMode;
 
                             mode = mappedMode;
 
@@ -1795,6 +1801,12 @@ namespace PredatorControlApp
 
 
 
+        /// <summary>Last known power-mode byte, defaulting to Balanced when unknown.</summary>
+        public byte GetPowerMode()
+        {
+            return TryGetPowerMode(out byte mode) ? mode : (byte)0x01;
+        }
+
         public bool TryGetPowerMode(out OperatingMode mode)
 
         {
@@ -1823,18 +1835,6 @@ namespace PredatorControlApp
 
 
 
-        public byte GetPowerMode()
-
-        {
-
-            TryGetPowerMode(out byte mode);
-
-            return mode;
-
-        }
-
-
-
         public static ulong BuildFanBehaviorPayload(byte mode)
 
         {
@@ -1847,6 +1847,8 @@ namespace PredatorControlApp
 
             // Combined mask = 0x01 | 0x02 | 0x08 = 0x0B
 
+            ulong? nativeBehavior = PredatorNativeMigrations.WmiFanBehaviorPayload(mode);
+            if (nativeBehavior.HasValue) return nativeBehavior.Value;
             return (ulong)(0x0B | ((ulong)mode << 16) | ((ulong)mode << 18) | ((ulong)mode << 22));
 
         }
@@ -1859,6 +1861,8 @@ namespace PredatorControlApp
 
             byte clamped = Math.Clamp(percentage, (byte)10, (byte)100);
 
+            var nativeFrames = PredatorNativeMigrations.WmiCpuFanPayloads(clamped);
+            if (nativeFrames.HasValue) return nativeFrames.Value;
             ulong direct = 0x01UL | ((ulong)clamped << 8);
 
             ulong extended = 0x05UL | (1UL << 8) | ((ulong)clamped << 16);
@@ -1875,6 +1879,8 @@ namespace PredatorControlApp
 
             byte clamped = Math.Clamp(percentage, (byte)10, (byte)100);
 
+            var nativeFrames = PredatorNativeMigrations.WmiGpuFanPayloads(clamped);
+            if (nativeFrames.HasValue) return nativeFrames.Value;
             ulong directPrimary = 0x04UL | ((ulong)clamped << 8);
 
             ulong directAlt = 0x04UL | ((ulong)clamped << 8);
@@ -2021,7 +2027,8 @@ namespace PredatorControlApp
 
                     SendCommandUnderLock("SetGamingFanSpeed", direct);
 
-                    SendCommandUnderLock("SetGamingFanSpeed", extended);
+                    bool cpuSpeedSent = SendCommandUnderLock("SetGamingFanSpeed", extended).success;
+                    if (!cpuSpeedSent) _lastAppliedCpuSpeed = null; // force a retry on the next identical request
 
                 }
 
@@ -2039,7 +2046,10 @@ namespace PredatorControlApp
 
                     SendCommandUnderLock("SetGamingFanSpeed", payload);
 
-                    SendCommandUnderLock("SetGamingFanSpeed", 0x05UL | (3UL << 8) | ((ulong)clamped << 16));
+                    ulong sysExtendedPayload = PredatorNativeMigrations.BuildSystemFanPayload(clamped)
+                        ?? (0x05UL | (3UL << 8) | ((ulong)clamped << 16));
+                    bool sysSpeedSent = SendCommandUnderLock("SetGamingFanSpeed", sysExtendedPayload).success;
+                    if (!sysSpeedSent) _lastAppliedSystemSpeed = null; // force a retry on the next identical request
 
                 }
 
@@ -2061,7 +2071,8 @@ namespace PredatorControlApp
 
                     SendCommandUnderLock("SetGamingFanSpeed", extPri);
 
-                    SendCommandUnderLock("SetGamingFanSpeed", extAlt);
+                    bool gpuSpeedSent = SendCommandUnderLock("SetGamingFanSpeed", extAlt).success;
+                    if (!gpuSpeedSent) _lastAppliedGpuSpeed = null; // force a retry on the next identical request
 
                 }
 
@@ -2269,24 +2280,6 @@ namespace PredatorControlApp
             {
 
                 _speed = Math.Clamp(speed, (byte)1, (byte)9);
-
-                ApplyLightingMode(_lastMode);
-
-            }
-
-        }
-
-
-
-        public void SetDirection(byte direction)
-
-        {
-
-            lock (_lock)
-
-            {
-
-                _direction = (byte)(direction != 0 ? 1 : 0);
 
                 ApplyLightingMode(_lastMode);
 

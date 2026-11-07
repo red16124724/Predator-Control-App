@@ -194,7 +194,7 @@ namespace PredatorControlApp.Tests
         [Fact]
         public void GameSyncController_SyncProfilesToNative_RegistersWithoutCrash()
         {
-            using var controller = new GameSyncController();
+            using var controller = new GameSyncController(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "gamesync_" + System.Guid.NewGuid().ToString("N") + ".json"));
             controller.AddProfile(new GameProfile
             {
                 ExecutableName = "DoomEternal.exe",

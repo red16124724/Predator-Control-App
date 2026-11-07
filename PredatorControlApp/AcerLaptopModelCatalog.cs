@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 using System.Collections.Generic;
 
@@ -1844,13 +1844,10 @@ namespace PredatorControlApp
 
             string cleanBoard = board ?? string.Empty;
 
-            string combined = $"{cleanModel} {cleanBoard}".Trim();
-
-
-
-            if (string.IsNullOrWhiteSpace(combined))
-
+            string combined = $"{cleanModel} {cleanBoard}".Trim();            if (string.IsNullOrWhiteSpace(combined))
+            {
                 return CreateGenericFallback(combined);
+            }
 
             // 0. Native laptop model catalog lookup
             if (PredatorNativeCore.IsNativeCoreAvailable &&
@@ -2042,6 +2039,30 @@ namespace PredatorControlApp
 
 
             // Generic fallback -> 4-Zone
+
+            var heuristic = PredatorNativeMigrations.CatalogHeuristic(combined);
+            if (heuristic.HasValue)
+            {
+                var h = heuristic.Value;
+                return new AcerModelProfile
+                {
+                    ModelCodePattern = ".*",
+                    MarketingName = "Acer Gaming Laptop (Native Heuristic)",
+                    Year = DateTime.UtcNow.Year,
+                    DefaultLightingTier = h.tier switch
+                    {
+                        1 => KeyboardLightingTier.SingleZone,
+                        3 => KeyboardLightingTier.ThreeZone,
+                        5 => KeyboardLightingTier.PerKey,
+                        _ => KeyboardLightingTier.FourZone
+                    },
+                    HasRearLightbar = h.lightbar,
+                    FanConfiguration = h.fans == 3 ? FanConfiguration.TripleFan : FanConfiguration.DualFan,
+                    SupportsCpuPlControl = h.pl,
+                    HasFullKeyboardWithNumpad = h.numpad,
+                    IsMatchedFromCatalog = false
+                };
+            }
 
             return CreateGenericFallback(combined);
 

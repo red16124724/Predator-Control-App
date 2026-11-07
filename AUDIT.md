@@ -1,5 +1,55 @@
 # Comprehensive Full-Stack Stress Test, Chaos Engineering & Bug Remediation Audit (6 November 2026)
 
+## 0. Latest Re-Audit — v1.5.8 Power-Mode PL1/PL2 & Transport Caches (6 November 2026)
+
+Re-ran the complete managed suite after the power-mode fixes: **2,211 passed, 0 failed, 0 skipped** (`dotnet build` 0 errors, only pre-existing CS0618 obsolete-API warnings). Nine regression tests were added. The native Rust suite (285 tests) was not re-run because no Rust source changed.
+
+Bugs found and fixed in this pass:
+
+1. **Failed power-mode switch cached as applied** (`WmiController.TrySetPowerMode`): `_lastAppliedPowerMode = mode` ran before the write result was known, so the redundant-write short-circuit returned `true` on the next call and never retried a failed EC/WMI write. Fixed with a separate `_lastConfirmedPowerMode`; requested-mode tracking is preserved for `TryGetPowerMode()` and the UI.
+2. **Failed fan-speed writes cached as applied** (`WmiController.SetFanSpeed`): the CPU/GPU/SYS caches were assigned before the `SetGamingFanSpeed` results were known, so one failed EC command suppressed every retry of that percentage. Fixed by invalidating the per-fan cache when the final command fails.
+3. **Custom PL1/PL2 lost on mode switch**: single 0 ms writes were overwritten by the Acer EC 250–1200 ms later. Fixed with staggered 0/250/600/1200 ms enforcement, cache invalidation on every switch, and MSR + MMIO readback in the watchdog.
+
+Audited and found correct: updater URL allowlist, mandatory asset-specific SHA-256, 250 MB download cap and script-argument quoting; named-pipe ACL plus client/server SID verification and bounded reads; keyboard-hook delegate rooting (`readonly _proc` + `GC.KeepAlive`); `NativeMchbarWritePlan` 40-byte layout parity with the Rust assertion; MMIO PL2-first hazard ordering in both `PawnIoController.cs` and `pawnio.rs`.
+
+Test note: `BugFixAuditAndVerificationTests.WmiController_TrySetPowerMode_HeliosNeoBlinkingPrevention_PreventsRedundantHardwareWrites` encoded bug 1 (it expected a repeat call to return `true` after a write that had failed). It now asserts retry-on-failure and seeds the confirmed mode to keep proving that redundant writes are still suppressed after hardware acknowledgement.
+
+Artifact: `PredatorControlApp.exe` at the repository root was rebuilt from this source with the fixes (self-contained single-file, version 1.5.8, 54,711,344 bytes) together with its `.pdb`.
+
+## 0.1 Follow-up Audit & Native Rust Expansion (7 November 2026)
+
+Migrated four further decision-logic areas into `predator_core` and re-audited the managed paths that still talk to hardware, IPC and the update channel.
+
+New native modules (646 lines, crate now 31 modules / 198 exports): `wmi_codec.rs` (fan/tachometer decode, mode LED palette, mode and system-fan payloads, fan-speed payload, confirmed-mode suppression), `capability.rs` (fan-table detection/clamping/decode, tri-state override merge, mode-default finalisation) and `gameprobe.rs` (RawInput packet classification, debounce, media poll cache, process-name matching). Every call site retains its previous managed implementation as the fallback used when the native core is unavailable.
+
+Bugs found and fixed in this pass:
+
+1. **Capability override misalignment** (`DeviceCapabilitiesManager.CapabilityOverrides.Apply`): the tri-state array omitted `HasEcHid`, so `ModeKey`'s override was applied to the `HasEcHid` slot and `ModeKey` could never be overridden. The array now follows `capability::CAP_*` order; pinned by five new tests in `CapabilityOverrideMergeTests`.
+2. **Fan-speed rounding precedence** (`AcerProtocol.NearestFanSpeed`): the native rounding path ran before `NativeAcerProtocol.TryEncode(3, ...)`, bypassing model-specific protocol encoding. Encoder precedence restored.
+3. **Fabricated USB charge state** (`predator_core/src/bios.rs`): the mode-2/3 fallback mapped any non-zero SMBIOS gaming record `0x15` to "Enabled (10%)". Only `0x0A`, `0x14` and `0x1E` are charge percentages; everything else now reads `Disabled`.
+4. **Guard disposal** (`PowerModeSwitchGuard.Dispose`): in-flight interval/settle delays were left running after disposal; the guard now cancels its token.
+
+Audited and found sound: update staging/verification (host allowlist, redirect re-check, asset SHA-256, 250 MB cap, metacharacter rejection and quoted `cmd /d /s /c` invocation), wake-lock reference counting and timeout release, `FanCommandQueue` coalescing/back-pressure, channel-router primary/fallback failover, and the WMI fan/mode channel adapters.
+
+Verification: `cargo build --release` clean; **306 Rust tests passing** (2 hardware-only tests ignored); full managed suite **2,217 passing, 0 failed, 0 skipped**; app and test projects build with 0 errors (pre-existing CS0618 obsolete-API warnings only). The single-file executable was republished with the native core embedded (no sidecar DLL) and version 1.5.8 retained.
+
+## 0.2 Second Native Wave (7 November 2026)
+
+Six further areas were migrated into `predator_core`, taking the crate to **37 modules / 218 C-ABI exports** and **342 tests** (2 hardware-only tests ignored). Transports were left where they belong:
+
+| Area | Native module | Wired into | Stays managed |
+|---|---|---|---|
+| Power-limit policy | `power_limits.rs` (clamp chain, per-mode estimates with .NET banker's rounding, five factory mode defaults, MMIO RAPL decode and 1 W deviation) | `AppSettings.EstimateProportionalDefaultsForMode`, `CpuPowerLimitController.MmioPowerLimitsDeviate` | MSR/MMIO reads and writes, baselines, persistence |
+| Acer service protocol | `service_proto.rs` (ACER framing, response parse, effect canonicalisation, 1 s→5 s back-off) | `AcerServiceClient.SendCommand`, `NormalizeLightingEffect` | Sockets, connect policy, timeouts, failure-state bookkeeping |
+| Settings policy | `settings_policy.rs` (percent/mode clamps, allowed-limit sanitisation, TDP window) | `AppSettings.PowerMode`, `AppSettings.FanMode` | Registry/file persistence, legacy keys |
+| Theme palette | `theme_policy.rs` (mode palette, `#RRGGBB` rendering) | `ThemeManager.GetPowerModeColor(byte)` | WinForms colours, theme detection, accent |
+| WMI payloads | `wmi_payload.rs` (fan-behaviour mask, CPU/GPU direct and extended frames) | `WmiController.BuildFanBehaviorPayload`, `BuildCpuFanSpeedPayloads`, `BuildGpuFanSpeedPayloads` | COM calls, locking, retries |
+| Catalog heuristics | `catalog_policy.rs` (PTX17/PT15x rules, Nitro V, 14-inch numpad inference, generic fallback) | `AcerLaptopModelCatalog` fallback path | The 92-row product table and its regexes (still the fallback source) |
+
+One defect was caught by the new native tests and fixed before shipping: the first `sanitize_allowed_limits` implementation raised PL2 to satisfy a narrow PL1 ceiling, whereas the managed policy lowers PL1 to PL2. The Rust rule now matches managed behaviour, and the test that pinned the managed expectation was kept unchanged.
+
+Verification: `cargo build --release` clean, **342 Rust tests passing**, full managed suite green, app and tests build with 0 errors, and the executable republished as a self-contained single file with the native core embedded. The native core was rebuilt for this wave and embedded in the single-file executable.
+
 ## 1. Executive Overview & Test Verification
 A complete full-stack stress test, fuzzing audit, GDI resource lifetime scan, and multi-threaded chaos test was conducted across Predator Control App v1.5.5:
 - **Native Rust Core (predator_core.dll)**: **285 passed, 0 failed, 2 ignored** across 6 test suites (lib.rs, dversarial_imported_features_stress_tests.rs, ios_c_abi_tests.rs, fi_fuzz_and_stress_tests.rs, game_profile_tests.rs, migration_7_subsystems_tests.rs).
@@ -165,3 +215,46 @@ eadonly IntPtr _thermalHandle in ThermalSafetyCoordinator.cs.
   - Multi-monitor display refresh rate query corrected via GetDisplayDeviceName querying Screen.AllScreens.
   - File locking retry loops added for GameSync profile saves; isolated unit test paths.
   - Hardware protocol payloads hardened against integer sign extension; backlight timeouts clamped to 0..255.
+
+## 0.3 Game Sync Placeholder Profiles & Test-Store Isolation (7 November 2026)
+
+The Configured Game Profiles table on the Game Sync page displayed 45 profiles nobody had created: `Game_1`, `Game_10`...`Game_11`, `Game_0.exe`...`Game_9.exe`, `FakeGame` (`fake.exe`, `definitely_nonexistent_proc_12345.exe`), `CorruptGame`, `Updated 50`, `DoomEternal.exe`, `GhostStorm`, `stress_game_*`, plus Cyrillic and CJK samples.
+
+Root cause: `GameSyncController` resolves its store from `%LOCALAPPDATA%\PredatorControl\game_sync.json` and mirrors each write into `HKCU\SOFTWARE\PredatorControl\Profiles` whenever no explicit path is supplied. Stress suites constructed `new GameSyncController()` and called `AddProfile`, so their fixtures were persisted as if a user had added them. The JSON also accumulated entries from older suite versions that were later changed to use temporary files.
+
+Fixes:
+
+1. **Store cleaned** - `game_sync.json`, `game_sync.json.bak` and the 45 registry sub-keys were reset to zero profiles (Game Sync remains disabled). The polluted JSON is preserved in the workspace for reference.
+2. **Load-time validation** (`GameSyncController.AddLoadedProfile`) - each stored or registry profile is checked with `GameProfile.Validate`, normalised with `Sanitize`/`SanitizeProfileValues`, and skipped when an executable with the same name (case-insensitive) is already loaded. Junk records can no longer reach the table.
+3. **Test isolation** - `AdversarialStressTestSuite`, `ResourceLeaksAndMemoryStressTests`, `ImportedFeaturesTests`, `EmbeddedShortcutsAndLifecycleTests` and `AdversarialUiLifecycleAndImportedStressTests` now pass a unique temp JSON to the controller, so no test can write to the user's store or registry.
+4. **UI empty state** (`Form1.PopulateGameSyncProfilesList`) - the profiles card shows "No game profiles configured. Use Add Profile to pick a game executable." while the list is empty, and the ListView only ever renders `_gameSync.Profiles`.
+
+Verification: `dotnet build` clean and the managed suite green after the change; the published executable was rebuilt from this source.
+
+## 0.4 Single-File Distribution Audit (7 November 2026)
+
+The user requires the shipped application to be a single executable with every binary integrated. Audit of the packaging configuration and the published output.
+
+Findings:
+
+1. `predator_core.dll` was already embedded twice-safe: as an `EmbeddedResource` (extracted at runtime into a hash-specific cache after SHA-256 verification) and copied to the build output for the P/Invoke tests. The publish folder therefore contained no sidecar DLL.
+2. `IncludeNativeLibrariesForSelfExtract` was enabled, but `IncludeAllContentForSelfExtract` was not, so content items (for example `appicon.ico`) were not guaranteed to be bundled. It is now enabled, closing the last path by which a loose file could accompany the exe.
+3. The root `PredatorControlApp.pdb` (12:59) was older than the shipped exe (13:43) and did not correspond to it. It was removed; symbol packages can be produced on demand and are not part of the deliverable.
+
+Verification performed: a clean publish into an empty directory with `-p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false` produced **exactly one file**, `PredatorControlApp.exe` (no `.dll`, `.deps.json`, `.runtimeconfig.json`, `.ico`, `.bin` or `.pdb`). The binary contains the `predator_core.dll` payload and its version resource reports 1.5.8.0. Byte-identical copies were placed in `publish/` and at the repository root.
+
+The requirement, the rationale and the exact verification command are recorded in `AGENTS.md` (standing project instructions) and in the README "Distribution: a single executable" section, so future changes cannot silently reintroduce sidecars.
+
+## 0.5 Full Stress Sweep & Codebase Scan (7 November 2026)
+
+Ran the complete managed suite as the stress harness and scanned the whole application source (app project, 100+ C# files, excluding build output) for defect classes that tests can miss.
+
+Results:
+
+- **Managed suite**: 2,217 passed, 0 failed, 0 skipped in 6 m 57 s (`FULL_EXIT=0`). This includes the existing stress, chaos, concurrency, fuzz and UI-lifecycle suites for the dashboard, fan control, RGB, display/MUX, Game Sync, thermal safety, IPC, updater and power-limit paths.
+- **Release build**: 0 errors; the only warnings are 30 `CS0618` obsolete-API notices for the intentionally retired BIOS-modification members.
+- **Static scans performed**: inverted `Math.Clamp` bounds (none - 0 literal inversions across 453 call sites); unguarded numeric parsing (`Convert.To*`/`Parse` - all 8 sites sit inside `try` blocks or use `TryParse`); `First()`/`Single()` without `OrDefault` (1 site, guarded by a `Count >= 3` ternary); undisposed WinForms timers (all four dispose paths present); `Process.GetProcesses()` handle release (disposed in a `finally`); `Application.DoEvents` reentrancy (none); `async void` handlers (1, fully wrapped in `try/catch`); blocking waits on async work (bounded 100-1500 ms with timeouts and fallbacks).
+
+No reproducible defect was found in this sweep, so no behavioural code change was made. The executable was republished from the audited source with the single-file, all-binaries-embedded configuration and verified to contain exactly one file.
+
+Limitations stated plainly: hardware behaviour (EC/WMI/PawnIO fan and power writes, MUX switching, real brightness changes), live update installation and interactive UI rendering were not exercised on physical hardware in this pass; the UI evidence is the STA lifecycle/disposal stress tests, not a visual inspection.

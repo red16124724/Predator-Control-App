@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.Versioning;
@@ -147,7 +147,6 @@ namespace PredatorControlApp
 
         public string Diagnostics { get; init; } = "";
 
-        public bool HasSensor(SensorId id) => Sensors.Contains(id);
         public bool HasOperatingModes => OperatingModes.Count > 0;
     }
 
@@ -164,6 +163,9 @@ namespace PredatorControlApp
         public bool? HasEcHid { get; init; }
         public bool? ModeKey { get; init; }
 
+        public static CapabilityOverrides Clear() => new();
+
+        /// <summary>Overrides that force every capability on (diagnostics/testing).</summary>
         public static CapabilityOverrides EnableAll() => new()
         {
             CoolBoost = true,
@@ -176,8 +178,6 @@ namespace PredatorControlApp
             HasEcHid = true,
             ModeKey = true
         };
-
-        public static CapabilityOverrides Clear() => new();
 
         public static CapabilityOverrides LoadFromRegistry()
         {
@@ -246,6 +246,18 @@ namespace PredatorControlApp
             else key.DeleteValue(name, false);
         }
 
+        private static int TriState(bool? value) => value.HasValue ? (value.Value ? 1 : 0) : -1;
+
+        private static uint CapabilityBits(DeviceCapabilities caps) =>
+            (caps.CoolBoost ? 1u : 0u)
+            | (caps.GpuModeSwitch ? 2u : 0u)
+            | (caps.Fans.Any(f => f.Id == FanId.System || f.Id == FanId.Gpu2) ? 4u : 0u)
+            | (caps.FanTable ? 8u : 0u)
+            | (caps.UsbCharging ? 16u : 0u)
+            | (caps.BatteryCalibration ? 32u : 0u)
+            | (caps.HasEcHid == true ? 64u : 0u)
+            | (caps.ModeKey ? 128u : 0u);
+
         public DeviceCapabilities Apply(DeviceCapabilities caps)
         {
             var opModes = OperatingModes.HasValue
@@ -253,6 +265,44 @@ namespace PredatorControlApp
                     ? (caps.FirmwareOperatingModes.Count > 0 ? caps.FirmwareOperatingModes : caps.OperatingModes)
                     : Array.Empty<OperatingMode>())
                 : caps.OperatingModes;
+
+            uint? mergedBits = PredatorNativeMigrations.ApplyCapabilityOverrides(
+                CapabilityBits(caps),
+                new[]
+                {
+                    TriState(CoolBoost), TriState(GpuModeSwitch), TriState(ThirdFan),
+                    TriState(FanTable), TriState(UsbCharging), TriState(BatteryCalibration),
+                    TriState(HasEcHid), TriState(ModeKey)
+                });
+
+            if (mergedBits.HasValue)
+            {
+                var nativeFans = caps.Fans.ToList();
+                bool nativeThirdFan = (mergedBits.Value & 4u) != 0;
+                if (nativeThirdFan)
+                {
+                    if (!nativeFans.Any(f => f.Id == FanId.System || f.Id == FanId.Gpu2))
+                        nativeFans.Add(FanChannel.System);
+                }
+                else
+                {
+                    nativeFans.RemoveAll(f => f.Id == FanId.System || f.Id == FanId.Gpu2);
+                }
+
+                return caps with
+                {
+                    OperatingModes = opModes,
+                    CoolBoost = (mergedBits.Value & 1u) != 0,
+                    GpuModeSwitch = (mergedBits.Value & 2u) != 0,
+                    FanTable = (mergedBits.Value & 8u) != 0,
+                    UsbCharging = (mergedBits.Value & 16u) != 0,
+                    BatteryCalibration = (mergedBits.Value & 32u) != 0,
+                    HasEcHid = HasEcHid ?? caps.HasEcHid,
+                    ModeKey = (mergedBits.Value & 128u) != 0,
+                    Fans = nativeFans,
+                    HasThirdFan = nativeThirdFan
+                };
+            }
 
             var fans = caps.Fans.ToList();
             if (ThirdFan.HasValue)
@@ -512,7 +562,12 @@ namespace PredatorControlApp
                     if (p2 <= 0) p2 = est2;
                 }
 
-                if (p2 < p1) p2 = p1;
+                if (PredatorNativeMigrations.FinalizeModeDefault(p1, p2, cpuTdpWatts, out int finalizedPl1, out int finalizedPl2))
+                {
+                    p1 = finalizedPl1;
+                    p2 = finalizedPl2;
+                }
+                else if (p2 < p1) p2 = p1;
                 modeDefaults[m] = (p1, p2);
             }
 

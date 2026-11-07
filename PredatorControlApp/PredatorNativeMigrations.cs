@@ -953,6 +953,545 @@ namespace PredatorControlApp
 
         #endregion
 
+        #region WMI codec, capability policy and game-probe decisions
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_wmi_decode_tachometer(ulong raw);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_wmi_decode_fan_speed(ulong raw);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern uint predator_wmi_mode_led_color(uint mode);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern ulong predator_wmi_build_mode_payload(ulong currentMisc, uint mode);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern ulong predator_wmi_build_system_fan_payload(uint percent);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern ulong predator_wmi_fan_speed_payload(uint speedId, int percent);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_wmi_should_suppress_mode_write(
+            int hasConfirmed, uint confirmed, uint requested, int force);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_wmi_nearest_fan_speed(int percent);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_capability_uses_fan_table(byte[] bytes, UIntPtr len);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern ulong predator_capability_fan_table_input(ulong value);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_capability_fan_table_value(ulong output);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_capability_finalize_mode_default(
+            int pl1, int pl2, int tdp, out int outPl1, out int outPl2);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern uint predator_capability_apply_overrides(
+            uint baseline, [In] int[] overrides, UIntPtr count);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_gameprobe_classify_rawinput(byte[] bytes, UIntPtr len);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_gameprobe_should_fire(long lastTick, long nowTick, long thresholdMs);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_gameprobe_should_query_media(long lastMs, long nowMs, long cacheMs);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_gameprobe_select_profile(
+            byte[] blob, UIntPtr blobLen, byte[] target, UIntPtr targetLen);
+
+        /// <summary>Tachometer RPM from an ACPI packet, or null when native is unavailable.</summary>
+        public static int? DecodeTachometer(ulong raw)
+        {
+            if (!Available) return null;
+            try { return predator_wmi_decode_tachometer(raw); }
+            catch { return null; }
+        }
+
+        /// <summary>Fan RPM from a direct or packet reading, or null when native is unavailable.</summary>
+        public static int? DecodeFanSpeed(ulong raw)
+        {
+            if (!Available) return null;
+            try { return predator_wmi_decode_fan_speed(raw); }
+            catch { return null; }
+        }
+
+        /// <summary>Packed 0xRRGGBB mode LED colour, or null when native is unavailable.</summary>
+        public static int? ModeLedColor(byte mode)
+        {
+            if (!Available) return null;
+            try { return unchecked((int)predator_wmi_mode_led_color(mode)); }
+            catch { return null; }
+        }
+
+        /// <summary>Non-destructive mode payload, or null when native is unavailable.</summary>
+        public static ulong? BuildModePayload(ulong currentMisc, byte mode)
+        {
+            if (!Available) return null;
+            try { return predator_wmi_build_mode_payload(currentMisc, mode); }
+            catch { return null; }
+        }
+
+        /// <summary>Extended system-fan payload, or null when native is unavailable.</summary>
+        public static ulong? BuildSystemFanPayload(byte percent)
+        {
+            if (!Available) return null;
+            try { return predator_wmi_build_system_fan_payload(percent); }
+            catch { return null; }
+        }
+
+        /// <summary>Fan-speed payload from a channel speed id, or null when native is unavailable.</summary>
+        public static ulong? FanSpeedPayload(byte speedId, int percent)
+        {
+            if (!Available) return null;
+            try { return predator_wmi_fan_speed_payload(speedId, percent); }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// True when a mode write is redundant and must be suppressed, or null
+        /// when native is unavailable.
+        /// </summary>
+        public static bool? ShouldSuppressModeWrite(bool hasConfirmed, byte confirmed, byte requested, bool force)
+        {
+            if (!Available) return null;
+            try
+            {
+                return predator_wmi_should_suppress_mode_write(
+                    hasConfirmed ? 1 : 0, confirmed, requested, force ? 1 : 0) != 0;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>Nearest ten-percent fan step, or null when native is unavailable.</summary>
+        public static int? NearestFanSpeed(int percent)
+        {
+            if (!Available) return null;
+            try { return predator_wmi_nearest_fan_speed(percent); }
+            catch { return null; }
+        }
+
+        /// <summary>Factory fan-table support for a model string, or null when native is unavailable.</summary>
+        public static bool? UsesFanTable(string? model)
+        {
+            if (!Available || string.IsNullOrEmpty(model)) return null;
+            try
+            {
+                byte[] bytes = Encoding.UTF8.GetBytes(model);
+                return predator_capability_uses_fan_table(bytes, (UIntPtr)bytes.Length) != 0;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>Fan-table enum value clamped to 1..3, or null when native is unavailable.</summary>
+        public static ulong? FanTableInput(ulong value)
+        {
+            if (!Available) return null;
+            try { return predator_capability_fan_table_input(value); }
+            catch { return null; }
+        }
+
+        /// <summary>Decoded fan-table mode byte (0 = none), or null when native is unavailable.</summary>
+        public static int? FanTableValue(ulong output)
+        {
+            if (!Available) return null;
+            try { return predator_capability_fan_table_value(output); }
+            catch { return null; }
+        }
+
+        /// <summary>Fills missing mode defaults and enforces PL2 &gt;= PL1.</summary>
+        public static bool FinalizeModeDefault(int pl1, int pl2, int tdp, out int outPl1, out int outPl2)
+        {
+            outPl1 = pl1;
+            outPl2 = pl2;
+            if (!Available) return false;
+            try
+            {
+                return predator_capability_finalize_mode_default(pl1, pl2, tdp, out outPl1, out outPl2) != 0;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>Merges capability overrides, or null when native is unavailable.</summary>
+        public static uint? ApplyCapabilityOverrides(uint baseline, int[] overrides)
+        {
+            if (!Available || overrides == null) return null;
+            try
+            {
+                return predator_capability_apply_overrides(baseline, overrides, (UIntPtr)overrides.Length);
+            }
+            catch { return null; }
+        }
+
+        /// <summary>0 none, 1 NitroSense key, 2 mode key; null when native is unavailable.</summary>
+        public static int? ClassifyRawInput(byte[]? bytes, int count)
+        {
+            if (!Available || bytes == null || count < 2) return null;
+            try
+            {
+                if (count > bytes.Length) count = bytes.Length;
+                byte[] payload = new byte[count];
+                Array.Copy(bytes, payload, count);
+                return predator_gameprobe_classify_rawinput(payload, (UIntPtr)payload.Length);
+            }
+            catch { return null; }
+        }
+
+        /// <summary>True when the debounce window elapsed, or null when native is unavailable.</summary>
+        public static bool? RawInputShouldFire(long lastTick, long nowTick, int thresholdMs)
+        {
+            if (!Available) return null;
+            try { return predator_gameprobe_should_fire(lastTick, nowTick, thresholdMs) != 0; }
+            catch { return null; }
+        }
+
+        /// <summary>True when the cached media state is stale, or null when native is unavailable.</summary>
+        public static bool? MediaShouldQuery(long lastMs, long nowMs, long cacheMs)
+        {
+            if (!Available) return null;
+            try { return predator_gameprobe_should_query_media(lastMs, nowMs, cacheMs) != 0; }
+            catch { return null; }
+        }
+
+        /// <summary>First matching index in a NUL-separated name blob, or null when native is unavailable.</summary>
+        public static int? SelectProcessIndex(byte[]? blob, string? target)
+        {
+            if (!Available || blob == null || blob.Length == 0 || string.IsNullOrEmpty(target)) return null;
+            try
+            {
+                byte[] targetBytes = Encoding.UTF8.GetBytes(target);
+                return predator_gameprobe_select_profile(
+                    blob, (UIntPtr)blob.Length, targetBytes, (UIntPtr)targetBytes.Length);
+            }
+            catch { return null; }
+        }
+
+        #endregion
+
+        #region Power limits, service protocol, settings, theme, WMI payloads, catalog policy
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_power_clamp_limits(
+            int pl1, int pl2, int min, int maxPl1, int maxPl2, out int outPl1, out int outPl2);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_power_estimate_mode(
+            double anchorPl1, double anchorPl2, int mode, int min, int maxPl1, int maxPl2,
+            out int outPl1, out int outPl2);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_power_mode_defaults(
+            int tdp, int min, int maxPl1, int maxPl2, [Out] int[] outPairs);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_power_decode_mmio(
+            uint low, uint high, uint unitsPerWatt, out int outPl1, out int outPl2);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_power_mmio_deviation(
+            int samplePl1, int samplePl2, int targetPl1, int targetPl2);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_service_build_packet(
+            uint packetId, byte[] payload, UIntPtr payloadLen, [Out] byte[] outBuffer, UIntPtr outCap);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_service_response_payload(
+            byte[] frame, UIntPtr frameLen, out int outOffset);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_service_normalize_effect(
+            byte[] name, UIntPtr nameLen, [Out] byte[] outBuffer, UIntPtr outCap);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern uint predator_service_next_backoff_ms(uint currentMs);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_settings_clamp_percent(int value);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_settings_clamp_power_mode(int value);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_settings_clamp_fan_mode(int value);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_settings_sanitize_allowed_limits(
+            int minWatts, int maxPl1, int maxPl2, out int outMin, out int outMax1, out int outMax2);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_settings_sanitize_tdp(int tdp);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_theme_mode_color(int mode);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_theme_packed_to_hex(
+            int color, [Out] byte[] outBuffer, UIntPtr outCap);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern ulong predator_wmi_fan_behavior_payload(int mode);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_wmi_cpu_fan_payloads(
+            int percentage, out ulong outDirect, out ulong outExtended);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_wmi_gpu_fan_payloads(
+            int percentage, out ulong outDirectPrimary, out ulong outDirectAlt,
+            out ulong outExtendedPrimary, out ulong outExtendedAlt);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        private static extern int predator_catalog_heuristic(
+            byte[] model, UIntPtr modelLen, out int outTier, out int outFans,
+            out int outNumpad, out int outLightbar, out int outPl);
+
+        /// <summary>Clamped PL1/PL2 pair, or null when native is unavailable.</summary>
+        public static (int pl1, int pl2)? PowerClampLimits(int pl1, int pl2, int min, int maxPl1, int maxPl2)
+        {
+            if (!Available) return null;
+            try
+            {
+                return predator_power_clamp_limits(pl1, pl2, min, maxPl1, maxPl2, out int o1, out int o2) == 0
+                    ? (o1, o2)
+                    : null;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>Proportional limits for a mode index (0 Eco .. 4 Turbo).</summary>
+        public static (int pl1, int pl2)? PowerEstimateMode(
+            double anchorPl1, double anchorPl2, int modeIndex, int min, int maxPl1, int maxPl2)
+        {
+            if (!Available) return null;
+            try
+            {
+                return predator_power_estimate_mode(anchorPl1, anchorPl2, modeIndex, min, maxPl1, maxPl2, out int o1, out int o2) == 0
+                    ? (o1, o2)
+                    : null;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>Five interleaved mode default pairs (10 values), or null when native is unavailable.</summary>
+        public static int[]? PowerModeDefaults(int tdp, int min, int maxPl1, int maxPl2)
+        {
+            if (!Available) return null;
+            try
+            {
+                var pairs = new int[10];
+                return predator_power_mode_defaults(tdp, min, maxPl1, maxPl2, pairs) == 0 ? pairs : null;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>Decoded MMIO RAPL pair, or null when locked/unavailable.</summary>
+        public static (int pl1, int pl2)? PowerDecodeMmio(uint low, uint high, uint unitsPerWatt)
+        {
+            if (!Available) return null;
+            try
+            {
+                return predator_power_decode_mmio(low, high, unitsPerWatt, out int o1, out int o2) == 0
+                    ? (o1, o2)
+                    : null;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>True when either sampled limit deviates from target by >= 1 W.</summary>
+        public static bool? PowerMmioDeviation(uint low, uint high, uint unitsPerWatt, int targetPl1, int targetPl2)
+        {
+            if (!Available) return null;
+            try
+            {
+                int rc = predator_power_decode_mmio(low, high, unitsPerWatt, out int pl1, out int pl2);
+                if (rc == 1) return false;
+                if (rc != 0) return null;
+                return predator_power_mmio_deviation(pl1, pl2, targetPl1, targetPl2) != 0;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>Full ACER-framed packet, or null when native is unavailable.</summary>
+        public static byte[]? ServiceBuildPacket(uint packetId, byte[] payload)
+        {
+            if (!Available || payload == null) return null;
+            try
+            {
+                var buffer = new byte[8 + payload.Length];
+                int written = predator_service_build_packet(
+                    packetId, payload, (UIntPtr)payload.Length, buffer, (UIntPtr)buffer.Length);
+                if (written <= 0) return null;
+                if (written == buffer.Length) return buffer;
+                var trimmed = new byte[written];
+                Array.Copy(buffer, trimmed, written);
+                return trimmed;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>Payload length of an ACER response frame, or null when not a response.</summary>
+        public static int? ServiceResponsePayload(byte[] frame, int length, out int offset)
+        {
+            offset = 0;
+            if (!Available || frame == null || length < 8) return null;
+            try
+            {
+                int payloadLength = predator_service_response_payload(frame, (UIntPtr)length, out offset);
+                return payloadLength >= 0 ? payloadLength : null;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>Canonical A-Z/0-9/_ effect name, or null when native is unavailable.</summary>
+        public static string? ServiceNormalizeEffect(string? effect)
+        {
+            if (!Available) return null;
+            try
+            {
+                byte[] input = Encoding.UTF8.GetBytes(effect ?? string.Empty);
+                var buffer = new byte[128];
+                int written = predator_service_normalize_effect(
+                    input, (UIntPtr)input.Length, buffer, (UIntPtr)buffer.Length);
+                return written > 0 ? Encoding.UTF8.GetString(buffer, 0, written) : null;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>Doubling reconnect back-off capped at 5 s.</summary>
+        public static uint? ServiceNextBackoff(uint currentMs)
+        {
+            if (!Available) return null;
+            try { return predator_service_next_backoff_ms(currentMs); }
+            catch { return null; }
+        }
+
+        public static int? SettingsClampPercent(int value)
+        {
+            if (!Available) return null;
+            try { return predator_settings_clamp_percent(value); }
+            catch { return null; }
+        }
+
+        /// <summary>Power-mode byte clamped to 0x00..0x06.</summary>
+        public static byte? SettingsClampPowerMode(int value)
+        {
+            if (!Available) return null;
+            try { return (byte)predator_settings_clamp_power_mode(value); }
+            catch { return null; }
+        }
+
+        /// <summary>Fan-mode byte clamped to 0x00..0x03.</summary>
+        public static byte? SettingsClampFanMode(int value)
+        {
+            if (!Available) return null;
+            try { return (byte)predator_settings_clamp_fan_mode(value); }
+            catch { return null; }
+        }
+
+        public static (int min, int maxPl1, int maxPl2)? SettingsSanitizeAllowedLimits(int minWatts, int maxPl1, int maxPl2)
+        {
+            if (!Available) return null;
+            try
+            {
+                return predator_settings_sanitize_allowed_limits(
+                    minWatts, maxPl1, maxPl2, out int oMin, out int oMax1, out int oMax2) == 0
+                    ? (oMin, oMax1, oMax2)
+                    : null;
+            }
+            catch { return null; }
+        }
+
+        public static int? SettingsSanitizeTdp(int tdp)
+        {
+            if (!Available) return null;
+            try { return predator_settings_sanitize_tdp(tdp); }
+            catch { return null; }
+        }
+
+        /// <summary>Packed 0xRRGGBB mode colour, or null when native is unavailable.</summary>
+        public static int? ThemeModeColor(byte mode)
+        {
+            if (!Available) return null;
+            try { return predator_theme_mode_color(mode); }
+            catch { return null; }
+        }
+
+        /// <summary>#RRGGBB rendering of a packed colour, or null when native is unavailable.</summary>
+        public static string? ThemePackedToHex(int color)
+        {
+            if (!Available) return null;
+            try
+            {
+                var buffer = new byte[16];
+                int written = predator_theme_packed_to_hex(color, buffer, (UIntPtr)buffer.Length);
+                return written > 0 ? Encoding.ASCII.GetString(buffer, 0, written) : null;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>Fan-behaviour mask for a fan mode, or null when native is unavailable.</summary>
+        public static ulong? WmiFanBehaviorPayload(byte mode)
+        {
+            if (!Available) return null;
+            try { return predator_wmi_fan_behavior_payload(mode); }
+            catch { return null; }
+        }
+
+        /// <summary>Direct and extended CPU fan frames, or null when native is unavailable.</summary>
+        public static (ulong direct, ulong extended)? WmiCpuFanPayloads(byte percentage)
+        {
+            if (!Available) return null;
+            try
+            {
+                return predator_wmi_cpu_fan_payloads(percentage, out ulong direct, out ulong extended) == 0
+                    ? (direct, extended)
+                    : null;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>All four GPU fan frames, or null when native is unavailable.</summary>
+        public static (ulong directPrimary, ulong directAlt, ulong extendedPrimary, ulong extendedAlt)? WmiGpuFanPayloads(byte percentage)
+        {
+            if (!Available) return null;
+            try
+            {
+                return predator_wmi_gpu_fan_payloads(
+                    percentage, out ulong a, out ulong b, out ulong c, out ulong d) == 0
+                    ? (a, b, c, d)
+                    : null;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>Heuristic catalog class, or null when unknown/unavailable.</summary>
+        public static (int tier, int fans, bool numpad, bool lightbar, bool pl)? CatalogHeuristic(string? model)
+        {
+            if (!Available || string.IsNullOrWhiteSpace(model)) return null;
+            try
+            {
+                byte[] bytes = Encoding.UTF8.GetBytes(model);
+                int rc = predator_catalog_heuristic(
+                    bytes, (UIntPtr)bytes.Length, out int tier, out int fans,
+                    out int numpad, out int lightbar, out int pl);
+                return rc == 1 ? (tier, fans, numpad != 0, lightbar != 0, pl != 0) : null;
+            }
+            catch { return null; }
+        }
+
+        #endregion
+
         #region Tier 2: UEFI Firmware Scanner
 
         public static bool TryScanUefiPowerAndLocks(byte[] aml, out NativeUefiPowerConfig cfg)

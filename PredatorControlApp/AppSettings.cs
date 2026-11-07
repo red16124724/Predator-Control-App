@@ -347,7 +347,7 @@ namespace PredatorControlApp
         public int TurboPl2Watts { get => CustomTurboPl2Watts; set => CustomTurboPl2Watts = value; }
 
         private byte _powerMode = 0x01;
-        public byte PowerMode { get => _powerMode; set => _powerMode = Math.Clamp(value, (byte)0x00, (byte)0x06); }
+        public byte PowerMode { get => _powerMode; set => _powerMode = PredatorNativeMigrations.SettingsClampPowerMode(value) ?? Math.Clamp(value, (byte)0x00, (byte)0x06); }
         public byte? PowerModeAC { get; set; }
         public byte? PowerModeBattery { get; set; }
         public int AutoPowerAC { get; set; } = 0;
@@ -357,7 +357,7 @@ namespace PredatorControlApp
 
 
         private byte _fanMode = 0x01;
-        public byte FanMode { get => _fanMode; set => _fanMode = Math.Clamp(value, (byte)0x00, (byte)0x03); }
+        public byte FanMode { get => _fanMode; set => _fanMode = PredatorNativeMigrations.SettingsClampFanMode(value) ?? Math.Clamp(value, (byte)0x00, (byte)0x03); }
         public byte? FanModeAC { get; set; }
         public byte? FanModeBattery { get; set; }
         public int AutoFanAC { get; set; } = 0;
@@ -1019,6 +1019,9 @@ namespace PredatorControlApp
 
             if (max1 < min) max1 = min;
             if (max2 < max1) max2 = max1;
+
+            var native = PredatorNativeMigrations.PowerClampLimits(estPl1, estPl2, min, max1, max2);
+            if (native.HasValue) return native.Value;
 
             estPl1 = Math.Clamp(estPl1, min, max1);
             estPl2 = Math.Clamp(estPl2, estPl1, Math.Max(estPl1, max2));

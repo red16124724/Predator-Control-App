@@ -340,18 +340,20 @@ namespace PredatorControlApp
                 throw new ArgumentException($"Fan channel '{fan.Name}' has no hardware SpeedId.", nameof(fan));
             byte speedId = fan.SpeedId.Value;
             if (NativeAcerProtocol.TryEncode(2, speedId, NativeAcerProtocol.Signed(percent), 0, 0, out ulong native)) return native;
-            return (ulong)(speedId | ((long)Math.Clamp(percent, 0, 100) << 8));
+            return PredatorNativeMigrations.FanSpeedPayload(speedId, percent) ?? (ulong)(speedId | ((long)Math.Clamp(percent, 0, 100) << 8));
         }
 
         public static int NearestFanSpeed(int percent)
         {
             if (NativeAcerProtocol.TryEncode(3, NativeAcerProtocol.Signed(percent), 0, 0, 0, out ulong native)) return (int)native;
+            int? nativeNearest = PredatorNativeMigrations.NearestFanSpeed(percent);
+            if (nativeNearest.HasValue) return nativeNearest.Value;
             return (int)Math.Round(Math.Clamp(percent, 0, 100) / 10.0, MidpointRounding.AwayFromZero) * 10;
         }
 
         public static ulong FanTableInput(FanTable table)
         {
-            byte val = (byte)table;
+            byte val = (byte)(PredatorNativeMigrations.FanTableInput((ulong)(byte)table) ?? (ulong)(byte)table);
             if (val < 1 || val > 3) val = (byte)FanTable.Standard;
             return NativeAcerProtocol.TryEncode(27, val, 0, 0, 0, out ulong native) ? native : (ulong)val;
         }
@@ -359,6 +361,8 @@ namespace PredatorControlApp
         public static FanTable? FanTableValue(ulong output)
         {
             if (NativeAcerProtocol.TryEncode(19, output, 0, 0, 0, out ulong native)) return native == 0 ? null : (FanTable)native;
+            int? nativeValue = PredatorNativeMigrations.FanTableValue(output);
+            if (nativeValue.HasValue) return nativeValue.Value == 0 ? null : (FanTable)nativeValue.Value;
             byte val = (byte)(output >> 8);
             return Enum.IsDefined(typeof(FanTable), val) ? (FanTable)val : null;
         }
@@ -366,6 +370,8 @@ namespace PredatorControlApp
         public static bool UsesFanTable(string? model)
         {
             if (string.IsNullOrEmpty(model)) return false;
+            bool? native = PredatorNativeMigrations.UsesFanTable(model);
+            if (native.HasValue) return native.Value;
             return FanTableModels.Any(m => model.Contains(m, StringComparison.OrdinalIgnoreCase));
         }
 

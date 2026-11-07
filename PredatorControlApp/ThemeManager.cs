@@ -286,15 +286,25 @@ namespace PredatorControlApp
         public static Color GetPowerModePillColor(int mode) => GetPowerModePillColor((byte)mode);
         public static string GetPowerModePillColorHex(int mode) => GetPowerModePillColorHex((byte)mode);
 
-        public static Color GetPowerModeColor(byte mode) => mode switch
+        public static Color GetPowerModeColor(byte mode)
         {
-            0x00 => Color.FromArgb(255, 255, 255),
-            0x01 => Color.FromArgb(0, 150, 255),
-            0x04 => Color.FromArgb(168, 85, 247),
-            0x05 => Color.FromArgb(255, 45, 135),
-            0x06 => Color.FromArgb(0, 255, 120),
-            _ => Accent
-        };
+            int? packed = PredatorNativeMigrations.ThemeModeColor(mode);
+            if (packed.HasValue && packed.Value >= 0)
+            {
+                int rgb = packed.Value;
+                return Color.FromArgb((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+            }
+
+            return mode switch
+            {
+                0x00 => Color.FromArgb(255, 255, 255),
+                0x01 => Color.FromArgb(0, 150, 255),
+                0x04 => Color.FromArgb(168, 85, 247),
+                0x05 => Color.FromArgb(255, 45, 135),
+                0x06 => Color.FromArgb(0, 255, 120),
+                _ => Accent
+            };
+        }
 
         /// <summary>
         /// Explicit power mode pill color helper mapping:

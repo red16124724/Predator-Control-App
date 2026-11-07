@@ -135,7 +135,9 @@ namespace PredatorControlApp
         {
             if (_isDisposed) return;
             long now = Environment.TickCount64;
-            if (now - _lastNitroSenseTick >= DebounceThresholdMs)
+            bool elapsed = PredatorNativeMigrations.RawInputShouldFire(_lastNitroSenseTick, now, DebounceThresholdMs)
+                ?? (now - _lastNitroSenseTick >= DebounceThresholdMs);
+            if (elapsed)
             {
                 _lastNitroSenseTick = now;
                 var handler = NitroSenseKeyPressed;
@@ -153,7 +155,9 @@ namespace PredatorControlApp
         {
             if (_isDisposed) return;
             long now = Environment.TickCount64;
-            if (now - _lastModeKeyTick >= DebounceThresholdMs)
+            bool elapsed = PredatorNativeMigrations.RawInputShouldFire(_lastModeKeyTick, now, DebounceThresholdMs)
+                ?? (now - _lastModeKeyTick >= DebounceThresholdMs);
+            if (elapsed)
             {
                 _lastModeKeyTick = now;
                 var handler = ModeKeyPressed;
@@ -195,6 +199,14 @@ namespace PredatorControlApp
                         {
                             byte[] rawBytes = new byte[totalBytes];
                             Marshal.Copy((IntPtr)((long)pRaw + hidDataOffset), rawBytes, 0, totalBytes);
+
+                            int? nativeClass = PredatorNativeMigrations.ClassifyRawInput(rawBytes, totalBytes);
+                            if (nativeClass.HasValue)
+                            {
+                                if (nativeClass.Value == 1) FireNitroSenseKey();
+                                else if (nativeClass.Value == 2) FireModeKey();
+                                return;
+                            }
 
                             // Strict Acer vendor packet signature: byte == 129 (0x81)
                             // Handles both 0-indexed (no report ID) and 1-indexed (report ID prefix) payloads

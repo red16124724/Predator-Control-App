@@ -498,94 +498,9 @@ namespace PredatorControlApp
         /// <summary>
         /// Validates a collection of shortcuts, ensuring each individual shortcut is valid and no duplicates exist.
         /// </summary>
-        public static bool ValidateShortcutSet(IEnumerable<CustomModeShortcut>? shortcuts, out string failureReason)
-        {
-            if (shortcuts is null)
-            {
-                failureReason = "Shortcut set cannot be null.";
-                return false;
-            }
-
-            var list = shortcuts.ToList();
-            if (list.Count == 0)
-            {
-                failureReason = "Shortcut set cannot be empty.";
-                return false;
-            }
-
-            for (int i = 0; i < list.Count; i++)
-            {
-                var s = list[i];
-                if (s == null)
-                {
-                    failureReason = "Shortcut set cannot contain null items.";
-                    return false;
-                }
-                if (!s.Enabled) continue;
-                if (!IsValid(s, out var err))
-                {
-                    failureReason = $"Invalid shortcut for mode '{s.ModeName}': {err}";
-                    return false;
-                }
-            }
-
-            for (int i = 0; i < list.Count; i++)
-            {
-                var s1 = list[i];
-                if (s1 == null || !s1.Enabled || s1.Key == Keys.None) continue;
-                for (int j = i + 1; j < list.Count; j++)
-                {
-                    var s2 = list[j];
-                    if (s2 == null || !s2.Enabled || s2.Key == Keys.None) continue;
-                    if (s1.HasSameCombination(s2))
-                    {
-                        failureReason = $"Shortcut '{s1}' is assigned to multiple modes: '{s1.ModeName}' and '{s2.ModeName}'. Each mode must have a unique shortcut.";
-                        return false;
-                    }
-                }
-            }
-
-            failureReason = string.Empty;
-            return true;
-        }
-
         /// <summary>
         /// Finds the matching mode shortcut from the configured collection, if any matches the pressed key and modifiers.
         /// </summary>
-        public static bool TryFindMatchingMode(
-            IEnumerable<CustomModeShortcut> shortcuts,
-            Keys key,
-            bool ctrl,
-            bool alt,
-            bool shift,
-            bool win,
-            out CustomModeShortcut? matchedShortcut)
-        {
-            matchedShortcut = null;
-            if (shortcuts is null) return false;
-
-            Keys baseKey = key & Keys.KeyCode;
-            if (baseKey == Keys.None) return false;
-
-            foreach (var s in shortcuts)
-            {
-                if (s != null &&
-                    s.Enabled &&
-                    s.Key != Keys.None &&
-                    (s.Key & Keys.KeyCode) == baseKey &&
-                    s.Ctrl == ctrl &&
-                    s.Alt == alt &&
-                    s.Shift == shift &&
-                    s.Win == win)
-                {
-                    matchedShortcut = s;
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
         /// <summary>
         /// Factory method to create default shortcuts for Acer operating modes.
         /// </summary>
@@ -619,43 +534,9 @@ namespace PredatorControlApp
         /// - Turbo: Ctrl+Alt+4 (0x05)
         /// - Eco: Ctrl+Alt+5 (0x06)
         /// </summary>
-        public static List<CustomModeShortcut> GetNumericDefaultShortcuts()
-        {
-            return new List<CustomModeShortcut>
-            {
-                new CustomModeShortcut("Quiet", CodeQuiet, Keys.D1, ctrl: true, alt: true, shift: false, win: false),
-                new CustomModeShortcut("Balanced", CodeBalanced, Keys.D2, ctrl: true, alt: true, shift: false, win: false),
-                new CustomModeShortcut("Performance", CodePerformance, Keys.D3, ctrl: true, alt: true, shift: false, win: false),
-                new CustomModeShortcut("Turbo", CodeTurbo, Keys.D4, ctrl: true, alt: true, shift: false, win: false),
-                new CustomModeShortcut("Eco", CodeEco, Keys.D5, ctrl: true, alt: true, shift: false, win: false)
-            };
-        }
-
-        /// <summary>
-        /// Returns the default shortcut for a specific mode code.
-        /// </summary>
-        public static CustomModeShortcut GetDefaultShortcutForMode(byte modeCode)
-        {
-            return modeCode switch
-            {
-                CodeQuiet => new CustomModeShortcut("Quiet", CodeQuiet, Keys.Q, ctrl: true, alt: true, shift: false, win: false),
-                CodeBalanced => new CustomModeShortcut("Balanced", CodeBalanced, Keys.B, ctrl: true, alt: true, shift: false, win: false),
-                CodePerformance => new CustomModeShortcut("Performance", CodePerformance, Keys.P, ctrl: true, alt: true, shift: false, win: false),
-                CodeTurbo => new CustomModeShortcut("Turbo", CodeTurbo, Keys.T, ctrl: true, alt: true, shift: false, win: false),
-                CodeEco => new CustomModeShortcut("Eco", CodeEco, Keys.E, ctrl: true, alt: true, shift: false, win: false),
-                _ => new CustomModeShortcut("Balanced", CodeBalanced, Keys.B, ctrl: true, alt: true, shift: false, win: false)
-            };
-        }
-
-        /// <summary>
+/// <summary>
         /// Deep clones a list of shortcuts.
         /// </summary>
-        public static List<CustomModeShortcut> CloneShortcuts(IEnumerable<CustomModeShortcut>? shortcuts)
-        {
-            if (shortcuts is null) return new List<CustomModeShortcut>();
-            return shortcuts.Where(s => s != null).Select(s => s.Clone()).ToList();
-        }
-
         /// <summary>
         /// Formats a key and modifier combination into a readable string (e.g. "Ctrl+Alt+E").
         /// </summary>
@@ -719,36 +600,7 @@ namespace PredatorControlApp
             };
         }
 
-        /// <summary>
-        /// Resolves standard mode names to their firmware mode code byte.
-        /// </summary>
-        public static byte GetModeCode(string modeName)
-        {
-            if (string.Equals(modeName, "Eco", StringComparison.OrdinalIgnoreCase)) return CodeEco;
-            if (string.Equals(modeName, "Quiet", StringComparison.OrdinalIgnoreCase)) return CodeQuiet;
-            if (string.Equals(modeName, "Balanced", StringComparison.OrdinalIgnoreCase)) return CodeBalanced;
-            if (string.Equals(modeName, "Performance", StringComparison.OrdinalIgnoreCase)) return CodePerformance;
-            if (string.Equals(modeName, "Turbo", StringComparison.OrdinalIgnoreCase)) return CodeTurbo;
-            return CodeBalanced;
-        }
-
-        /// <summary>
-        /// Resolves mode code bytes to their canonical mode name string.
-        /// </summary>
-        public static string GetModeName(byte modeCode)
-        {
-            return modeCode switch
-            {
-                CodeEco => "Eco",
-                CodeQuiet => "Quiet",
-                CodeBalanced => "Balanced",
-                CodePerformance => "Performance",
-                CodeTurbo => "Turbo",
-                _ => "Balanced"
-            };
-        }
-
-        /// <summary>
+/// <summary>
         /// Determines whether a key is a standalone modifier key.
         /// </summary>
         /// <summary>
@@ -808,6 +660,112 @@ namespace PredatorControlApp
                     failureReason = string.Empty;
                     return true;
             }
+        }
+
+        /// <summary>
+        /// Validates a collection of shortcuts, ensuring each individual shortcut is valid and no duplicates exist.
+        /// </summary>
+        public static bool ValidateShortcutSet(IEnumerable<CustomModeShortcut?>? shortcuts, out string failureReason)
+        {
+            if (shortcuts == null)
+            {
+                failureReason = "Shortcut set cannot be null.";
+                return false;
+            }
+
+            var entries = new List<CustomModeShortcut?>(shortcuts);
+            if (entries.Count == 0)
+            {
+                failureReason = "Shortcut set cannot be empty.";
+                return false;
+            }
+
+            var active = new List<CustomModeShortcut>(entries.Count);
+            foreach (var shortcut in entries)
+            {
+                if (shortcut == null)
+                {
+                    failureReason = "Shortcut set contains a null entry.";
+                    return false;
+                }
+
+                if (!shortcut.Enabled) continue;
+
+                if (!IsValid(shortcut.Key, shortcut.Ctrl, shortcut.Alt, shortcut.Shift, shortcut.Win, out failureReason))
+                {
+                    failureReason = $"{shortcut.ModeName}: {failureReason}";
+                    return false;
+                }
+
+                if (active.Exists(existing => existing.HasSameCombination(shortcut)))
+                {
+                    failureReason = $"Shortcut {shortcut} is bound to multiple modes.";
+                    return false;
+                }
+
+                active.Add(shortcut);
+            }
+
+            failureReason = string.Empty;
+            return true;
+        }
+
+        /// <summary>
+        /// Finds the matching mode shortcut from the configured collection, if any matches the pressed key and modifiers.
+        /// </summary>
+        public static bool TryFindMatchingMode(IReadOnlyList<CustomModeShortcut?>? shortcuts, Keys key, bool ctrl, bool alt, bool shift, bool win, out CustomModeShortcut? match)
+        {
+            match = null;
+            if (shortcuts == null || shortcuts.Count == 0) return false;
+
+            Keys baseKey = key & Keys.KeyCode;
+            foreach (var shortcut in shortcuts)
+            {
+                if (shortcut == null || !shortcut.Enabled) continue;
+                if ((shortcut.Key & Keys.KeyCode) != baseKey) continue;
+                if (shortcut.Ctrl != ctrl || shortcut.Alt != alt || shortcut.Shift != shift || shortcut.Win != win) continue;
+
+                match = shortcut;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Returns the alternative numeric default shortcuts:
+        /// - Quiet: Ctrl+Alt+1 (0x00)
+        /// - Balanced: Ctrl+Alt+2 (0x01)
+        /// - Performance: Ctrl+Alt+3 (0x04)
+        /// - Turbo: Ctrl+Alt+4 (0x05)
+        /// - Eco: Ctrl+Alt+5 (0x06)
+        /// </summary>
+        public static List<CustomModeShortcut> GetNumericDefaultShortcuts()
+        {
+            return new List<CustomModeShortcut>
+            {
+                new CustomModeShortcut("Quiet", CodeQuiet, Keys.D1, ctrl: true, alt: true, shift: false, win: false),
+                new CustomModeShortcut("Balanced", CodeBalanced, Keys.D2, ctrl: true, alt: true, shift: false, win: false),
+                new CustomModeShortcut("Performance", CodePerformance, Keys.D3, ctrl: true, alt: true, shift: false, win: false),
+                new CustomModeShortcut("Turbo", CodeTurbo, Keys.D4, ctrl: true, alt: true, shift: false, win: false),
+                new CustomModeShortcut("Eco", CodeEco, Keys.D5, ctrl: true, alt: true, shift: false, win: false)
+            };
+        }
+
+        /// <summary>
+        /// Deep clones a list of shortcuts.
+        /// </summary>
+        public static List<CustomModeShortcut> CloneShortcuts(IEnumerable<CustomModeShortcut?>? shortcuts)
+        {
+            var clone = new List<CustomModeShortcut>();
+            if (shortcuts == null) return clone;
+
+            foreach (var shortcut in shortcuts)
+            {
+                if (shortcut != null) clone.Add(shortcut.Clone());
+            }
+
+            return clone;
         }
 
         public static bool IsModifierKey(Keys key)

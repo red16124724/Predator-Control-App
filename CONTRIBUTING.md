@@ -1,10 +1,10 @@
 # Contributing to Predator Control App
 
-For the current 1.5.5 improvements, rebuild the Rust DLL before the managed app. The focused suite passed 101 tests. Audit hardware tests before running them. Test the update flow, native loading and diagnostics on suitable hardware.
+For the current 1.5.8 improvements, rebuild the Rust DLL before the managed app. The full managed suite passes 2,217 tests (0 failed, 0 skipped) and the native suite passes 342 tests (2 hardware-only tests ignored). Audit hardware tests before running them. Test the update flow, native loading and diagnostics on suitable hardware.
 
 Thank you for your interest in making Predator Control App better! We welcome bug reports, hardware testing results, and pull requests from everyone.
 
-This source package is the local 1.5.5 brightness update, not an official upstream release. The previous brightness update passed 243 selected .NET and 126 pure Rust tests; those are historical results. Earlier migration verification: 262 selected .NET tests passed; Release build had zero warnings and errors; 137 Rust tests passed across 15 filtered module runs. The complete inherited hardware/integration suite, UI launch, and physical keyboard brightness require separate verification.
+This source package is the local 1.5.8 update, not an official upstream release. The previous brightness update passed 243 selected .NET and 126 pure Rust tests; those are historical results. Current migration verification: 2,217 managed tests pass (0 failed, 0 skipped); the Release build has zero warnings and errors; 342 Rust tests pass (2 hardware-only tests ignored). The complete inherited hardware/integration suite, UI launch, and physical keyboard brightness require separate verification.
 
 ---
 
@@ -32,6 +32,11 @@ dotnet restore PredatorControlApp.slnx
 
 # Build the solution
 dotnet build PredatorControlApp.slnx
+
+# If `cargo` under %USERPROFILE%\.cargo\bin reports a missing toolchain
+# (dangling rustup shim), use the toolchain binary directly:
+#   %USERPROFILE%\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe
+# with that directory on PATH and RUSTC pointing at its rustc.exe.
 
 # Verify output copies before running tests. A stale native DLL can silently
 # exercise the previous implementation. Adjust paths for Release builds.
@@ -73,7 +78,7 @@ The output file will be generated in `publish/PredatorControlApp.exe`. Embed the
 
 4. **Testing**:
    - Run the relevant audited test selection before submitting a PR, and report the exact command and results.
-   - Add new tests in `PredatorControlApp.Tests` whenever introducing new logic or hardware parsing.
+   - Add new tests in `PredatorControlApp.Tests` whenever introducing new logic or hardware parsing. Mode-switch power-limit regressions live in `ModeSwitchPowerLimitEnforcementTests.cs` and EC/WMI cache-retry regressions in `WmiModeCacheRetryTests.cs`; extend them when touching those paths.
    - Keep one brightness owner: acknowledged firmware brightness plus raw RGB, or supported software scaling when firmware control is unavailable. Never multiply a frame by slider brightness and then send the same brightness to firmware.
    - Cover 0%, an intermediate value, and 100%; color alpha; static, managed/native, and audio-reactive frames; service ordering; and two/four-zone mappings. Distinguish packet assertions from physical keyboard measurements.
 
@@ -88,7 +93,7 @@ The output file will be generated in `publish/PredatorControlApp.exe`. Embed the
 
 ## Rust migration regression checks
 
-For changes to firmware parsing, packet encoding, or lighting rules, compare native output with independent managed reference behavior using synthetic inputs. Run the `FirmwareParsingMigrationTests`, protocol migration parity tests, and `LightingRulesRustParityTests`, along with the existing brightness regression suite. Run only audited Rust module tests on a live machine; inherited hardware integration tests can access real devices. Do not mistake packet parity for a physical hardware test. Current verification: 262 selected .NET tests passed; Release build had zero warnings and errors; 137 Rust tests passed across 15 filtered module runs.
+For changes to firmware parsing, packet encoding, or lighting rules, compare native output with independent managed reference behavior using synthetic inputs. Run the `FirmwareParsingMigrationTests`, protocol migration parity tests, and `LightingRulesRustParityTests`, along with the existing brightness regression suite. Run only audited Rust module tests on a live machine; inherited hardware integration tests can access real devices. Do not mistake packet parity for a physical hardware test. Current verification: 2,217 managed tests pass (0 failed, 0 skipped); the Release build has zero warnings and errors; 342 Rust tests pass (2 hardware-only tests ignored).
 
 Migration test scope: targeted tests do not intentionally issue hardware writes. In the earlier migration, loading PredatorNativeCore could open PawnIO and start telemetry/NVAPI polling. The current build initializes those facilities on demand; tests that request hardware operations still require care. Physical hardware effects were not measured.
 
