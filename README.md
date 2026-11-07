@@ -25,7 +25,7 @@ Stock OEM utilities (**PredatorSense** & **NitroSense**) consume up to **500 MB+
 **Predator Control App** replaces OEM bloat with a standalone single binary:
 - **Instant Response (< 1ms)**: Zero Electron, zero webviews — pure native WinForms on .NET 10 with a high-throughput Rust kernel interop core (`predator_core.dll`).
 - **Zero Background Drain**: Minimal memory footprint (~18-28 MB private working set) and near-zero idle CPU usage (< 0.1%).
-- **Dedicated Embedded Display & Game Sync Menus**: Dedicated full-sized pages for Display Settings (Hardware BIOS MUX Switch, 60Hz/MaxHz modes, LCD Overdrive) and Game Sync (event-driven foreground game profiles).
+- **Dedicated Embedded Display & Game Sync Menus**: Dedicated full-sized pages for Display Settings (Hardware BIOS MUX Switch, 60Hz/MaxHz modes, LCD Overdrive) and Game Sync
 - **Deep Ring-0 Hardware Access**: Direct Embedded Controller (EC) fan registers, ACPI PPCC table parsing, and Intel MCHBAR MMIO / MSR `0x610` power limit management via signed PawnIO driver.
 
 ---
